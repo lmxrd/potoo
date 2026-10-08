@@ -12,8 +12,8 @@
     "dev": "deno run -A --watch backend/main.ts",
     "start": "deno run --allow-net --allow-read --allow-write --allow-env backend/main.ts",
     "build": "cd frontend && pnpm install && pnpm build && cd .. && deno compile --allow-net --allow-read --allow-write --allow-env --include backend/db/migrations --include frontend/dist --output potoo backend/main.ts",
-    "fix": "deno fmt && deno lint --fix && cd frontend && pnpm fmt && pnpm lint --fix",
-    "check": "deno fmt --check && deno lint && deno check backend/main.ts && cd frontend && pnpm fmt:check && pnpm lint && pnpm typecheck",
+    "fix": "deno fmt && deno lint --fix && cd frontend && pnpm fix",
+    "check": "deno fmt --check && deno lint && deno check backend/main.ts && cd frontend && pnpm check",
     "test": "deno test --allow-net --allow-read --allow-write --allow-env backend/"
   },
   "exclude": ["frontend", "data"]

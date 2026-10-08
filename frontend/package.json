@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "lint": "oxlint",
     "fmt": "oxfmt",
-    "fmt:check": "oxfmt --check"
+    "fmt:check": "oxfmt --check",
+    "fix": "oxfmt && oxlint --fix",
+    "check": "oxfmt --check && oxlint && tsc --noEmit"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

@@ -4,6 +4,10 @@ A small, privacy-friendly web analytics tool inspired by
 [GoatCounter](https://www.goatcounter.com/). One Deno backend serves a JSON API
 and the built React frontend.
 
+> Why "Potoo"? The potoo is a bird that sits perfectly still on a branch and
+> quietly watches everything that passes by — which is pretty much what an
+> analytics server does, minus the camouflage.
+
 ## Requirements
 
 ### Product
@@ -101,7 +105,8 @@ embedded migration files; `DATABASE_PATH` and the other env vars work as above.
 Development: `deno task dev` (backend, watch) and `pnpm dev` in `frontend/`
 (Vite proxies `/api` to :8000). Checks: `deno task check` (format, lint and
 types for backend and frontend) and `deno task test`. `deno task fix` applies
-the format and lint fixes.
+the format and lint fixes. In `frontend/`, `pnpm check` and `pnpm fix` do the
+same for the frontend alone.
 
 ## Status
 
