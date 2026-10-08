@@ -3,7 +3,8 @@
   "imports": {
     "@hono/hono": "jsr:@hono/hono@^4.13.13",
     "@stdx/database": "jsr:@stdx/database@^0.1.1",
-    "@zod/zod": "jsr:@zod/zod@^4.6.5"
+    "@zod/zod": "jsr:@zod/zod@^4.6.5",
+    "maxmind": "npm:maxmind@^5.0.0"
   },
   "tasks": {
     "dev": "deno run -A --watch backend/main.ts",

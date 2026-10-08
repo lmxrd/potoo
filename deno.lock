@@ -12,7 +12,8 @@
     "jsr:@stdx/json@~0.1.2": "0.1.2",
     "jsr:@stdx/validation@~0.1.3": "0.1.3",
     "jsr:@zod/zod@^4.6.5": "4.6.5",
-    "npm:@jsr/standard-schema__spec@1.0.0-beta.4": "1.0.0-beta.4"
+    "npm:@jsr/standard-schema__spec@1.0.0-beta.4": "1.0.0-beta.4",
+    "npm:maxmind@5": "5.0.7"
   },
   "jsr": {
     "@hono/hono@4.13.13": {
@@ -70,13 +71,27 @@
     "@jsr/standard-schema__spec@1.0.0-beta.4": {
       "integrity": "sha512-AsZnKHK8JC2KvCx2wfzY9upnxmH2mL2Yg8y4rex50HqC6gBmZqdVI/hJ23A6MgbIOZz+DQhqMxPDBppfgszHtg==",
       "tarball": "https://npm.jsr.io/~/11/@jsr/standard-schema__spec/1.0.0-beta.4.tgz"
+    },
+    "maxmind@5.0.7": {
+      "integrity": "sha512-+w637dwfv01MKjkrp4sKDBTEKHLPvWLYb647QTjiz3wG/teSemqudIKNShaS6eqZ7ffxC9oZlQQgIqY0rGojog==",
+      "dependencies": [
+        "mmdb-lib",
+        "tiny-lru"
+      ]
+    },
+    "mmdb-lib@3.0.3": {
+      "integrity": "sha512-xQPoBXcNjjHiOvOraFBKtA++uNWF6aCVHL9dRKFXEov8eI3QJwtgiw3qApsonFT5SpoqsEVISUTg3HIDs2DiXw=="
+    },
+    "tiny-lru@13.0.0": {
+      "integrity": "sha512-xDHxKKS1FdF0Tv2P+QT7IeSEg74K/8cEDzbv3Tv6UyHHUgBOjOiQiBp818MGj66dhurQus/IBcoAbwIKtSGc6Q=="
     }
   },
   "workspace": {
     "dependencies": [
       "jsr:@hono/hono@^4.13.13",
       "jsr:@stdx/database@~0.1.1",
-      "jsr:@zod/zod@^4.6.5"
+      "jsr:@zod/zod@^4.6.5",
+      "npm:maxmind@5"
     ]
   }
 }

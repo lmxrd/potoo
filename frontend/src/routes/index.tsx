@@ -1,43 +1,66 @@
-import { useEffect, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { api, useApi } from "../api";
+import { Button, Card, ErrorText, Input } from "../components";
 
-type Stats = {
-  total: number;
-  byName: { name: string; count: number }[];
-  byDay: { day: string; count: number }[];
-};
+type Site = { id: number; hostname: string; honor_dnt: number };
 
-export const Route = createFileRoute("/")({ component: Dashboard });
+export const Route = createFileRoute("/")({ component: Sites });
 
-function Dashboard() {
-  const [stats, setStats] = useState<Stats | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    fetch("/api/stats?days=7")
-      .then((r) => (r.ok ? (r.json() as Promise<Stats>) : Promise.reject(new Error(r.statusText))))
-      .then(setStats)
-      .catch((e: Error) => setError(e.message));
-  }, []);
-
-  if (error) return <p className="text-red-600">Failed to load stats: {error}</p>;
-  if (!stats) return <p className="text-slate-500">Loading…</p>;
+function Sites() {
+  const { session } = Route.useRouteContext();
+  const { data: sites, error, reload } = useApi<Site[]>("/sites");
+  const [hostname, setHostname] = useState("");
+  const [formError, setFormError] = useState<string>();
 
   return (
     <div className="space-y-6">
-      <div className="rounded-lg border border-slate-200 bg-white p-4">
-        <div className="text-sm text-slate-500">Events, last 7 days</div>
-        <div className="text-3xl font-semibold">{stats.total}</div>
-      </div>
-      <ul className="divide-y divide-slate-200 rounded-lg border border-slate-200 bg-white">
-        {stats.byName.length === 0 && <li className="p-4 text-slate-500">No events yet.</li>}
-        {stats.byName.map((e) => (
-          <li key={e.name} className="flex justify-between p-4">
-            <span>{e.name}</span>
-            <span className="tabular-nums text-slate-600">{e.count}</span>
-          </li>
-        ))}
-      </ul>
+      <h1 className="text-xl font-semibold">Sites</h1>
+      <ErrorText>{error}</ErrorText>
+      <Card>
+        <ul className="divide-y divide-slate-200">
+          {sites?.length === 0 && <li className="py-2 text-slate-500">No sites yet.</li>}
+          {sites?.map((s) => (
+            <li key={s.id} className="py-2">
+              <Link
+                to="/sites/$siteId"
+                params={{ siteId: String(s.id) }}
+                className="font-medium hover:underline"
+              >
+                {s.hostname}
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </Card>
+      {session.user?.is_admin === 1 && (
+        <Card title="Add a site (each subdomain is its own site)">
+          <form
+            className="flex gap-2"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setFormError(undefined);
+              try {
+                await api("/sites", { body: { hostname } });
+                setHostname("");
+                reload();
+              } catch (err) {
+                setFormError(err instanceof Error ? err.message : "Failed");
+              }
+            }}
+          >
+            <Input
+              className="flex-1"
+              placeholder="blog.example.com"
+              required
+              value={hostname}
+              onChange={(e) => setHostname(e.target.value)}
+            />
+            <Button type="submit">Add</Button>
+          </form>
+          <ErrorText>{formError}</ErrorText>
+        </Card>
+      )}
     </div>
   );
 }
