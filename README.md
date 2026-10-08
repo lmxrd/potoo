@@ -32,7 +32,7 @@ A small, privacy-friendly web analytics tool inspired by [GoatCounter](https://w
 - Auth: email + password (PBKDF2-SHA256), opaque server-side session in an HttpOnly `SameSite=Strict` cookie.
 
 ## Stack
-- **Backend:** Deno, `jsr:@hono/hono`, `jsr:@stdx/database` (SQLite driver, pinned to `^0.1.1` because 0.2.0 was newer than Deno's minimum dependency age at the time), `jsr:@zod/zod`, `npm:maxmind` for GeoIP.
+- **Backend:** Deno, `jsr:@hono/hono`, `jsr:@stdx/database` (SQLite driver, pinned to `^0.1.1` because 0.2.0 was newer than Deno's minimum dependency age at the time), `jsr:@zod/zod`, `npm:maxmind` for GeoIP, `jsr:@halvardm/nessie` for migrations (runs automatically on startup).
 - **Frontend:** Vite, React, TanStack Router (file-based), Tailwind v4, oxlint, oxfmt. Client-side rendered and served statically by the backend, with an `index.html` fallback for client routes.
 
 ## Layout
@@ -40,7 +40,8 @@ A small, privacy-friendly web analytics tool inspired by [GoatCounter](https://w
 deno.json                 imports + tasks
 backend/main.ts           entrypoint, env config, retention job
 backend/app.ts            Hono app, routes, static serving
-backend/db.ts             SQLite schema + query helpers
+backend/db.ts             query helpers + migration runner (nessie)
+backend/db/migrations/    nessie migrations, applied on startup
 backend/lib/              auth (passwords, sessions), visitor (device, daily hash), geo, tracker.js source
 backend/routes/           auth (session/setup/login/users/password), sites (CRUD + stats), collect (tracker, pixel)
 backend/app.test.ts       end-to-end tests: setup → users → sites → collection → stats, login rate limiting, password change/reset

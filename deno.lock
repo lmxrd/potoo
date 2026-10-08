@@ -1,10 +1,12 @@
 {
   "version": "5",
   "specifiers": {
+    "jsr:@halvardm/nessie@3.0.0-rc.3": "3.0.0-rc.3",
     "jsr:@hono/hono@^4.13.13": "4.13.13",
     "jsr:@standard-schema/spec@1": "1.1.0",
     "jsr:@standard-schema/utils@0": "0.3.0",
     "jsr:@std/assert@1": "1.0.19",
+    "jsr:@std/fmt@1": "1.0.10",
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@stdx/collections@~0.1.1": "0.1.1",
     "jsr:@stdx/database@~0.1.1": "0.1.1",
@@ -16,6 +18,13 @@
     "npm:maxmind@5": "5.0.7"
   },
   "jsr": {
+    "@halvardm/nessie@3.0.0-rc.3": {
+      "integrity": "a12b8aa5920fe977346c1d9662c0b0dc98bb41c04996e6b6649d1f20e0e1e807",
+      "dependencies": [
+        "jsr:@std/fmt",
+        "jsr:@stdx/database"
+      ]
+    },
     "@hono/hono@4.13.13": {
       "integrity": "dec817b8600fc2835c259d875a69e849a706f6d25e8d0643d75c97f7d0afcdf8"
     },
@@ -33,6 +42,9 @@
       "dependencies": [
         "jsr:@std/internal"
       ]
+    },
+    "@std/fmt@1.0.10": {
+      "integrity": "90dfba288802ac6de82fb31d0917eb9e4450b9925b954d5e51fc29ac07419db5"
     },
     "@std/internal@1.0.14": {
       "integrity": "291516b3d4c35024d6ffbc0a9df5bf4c64116e05b50012cf846710152d2ffdf7"
@@ -88,6 +100,7 @@
   },
   "workspace": {
     "dependencies": [
+      "jsr:@halvardm/nessie@3.0.0-rc.3",
       "jsr:@hono/hono@^4.13.13",
       "jsr:@stdx/database@~0.1.1",
       "jsr:@zod/zod@^4.6.5",

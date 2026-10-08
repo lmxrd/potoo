@@ -1,6 +1,7 @@
 import { assertEquals } from "jsr:@std/assert@^1";
+import { SqliteClient } from "@halvardm/nessie/clients/sqlite";
 import { createApp } from "./app.ts";
-import { openDb } from "./db.ts";
+import { all, openDb } from "./db.ts";
 
 const json = (body: unknown, headers: HeadersInit = {}) => ({
   method: "POST",
@@ -203,4 +204,41 @@ Deno.test("password change and admin reset", async () => {
     )).status,
     204,
   );
+});
+
+Deno.test("openDb applies and records migrations", async () => {
+  const dir = await Deno.makeTempDir();
+  const file = `${dir}/potoo.db`;
+
+  // A fresh database: the migration runs once and is recorded.
+  {
+    await using db = await openDb(file);
+    const applied = await all<{ name: string }>(
+      db,
+      "SELECT file_name AS name FROM nessie_migrations",
+    );
+    assertEquals(applied.map((m) => m.name), ["20261008090000_init_schema.ts"]);
+  }
+
+  // A user created between the two runs, as a database that predates
+  // migrations would have: it must survive the migration on reopen.
+  {
+    await using legacy = new SqliteClient(file);
+    await legacy.execute(
+      "INSERT INTO users (email, password_hash, is_admin) VALUES ('old@example.com', 'x', 0)",
+    );
+  }
+
+  {
+    await using reopened = await openDb(file);
+    const applied = await all<{ name: string }>(
+      reopened,
+      "SELECT file_name AS name FROM nessie_migrations",
+    );
+    assertEquals(applied.map((m) => m.name), ["20261008090000_init_schema.ts"]);
+    const users = await all<{ email: string }>(reopened, "SELECT email FROM users");
+    assertEquals(users, [{ email: "old@example.com" }]);
+  }
+
+  await Deno.remove(dir, { recursive: true });
 });
