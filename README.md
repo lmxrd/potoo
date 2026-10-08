@@ -41,7 +41,9 @@ and the built React frontend.
   sum of daily uniques.
 - Query strings and fragments are stripped from paths and click labels, since
   they can contain personal data. Only the referrer's hostname is kept.
-- Country comes from a local GeoIP database file, with no third-party calls.
+- Country comes from a local GeoIP database file, so lookups make no third-party
+  calls. The file itself is auto-updated weekly from DB-IP (country lite, CC BY
+  4.0: "This site or product includes IP data from db-ip.com").
 - Optional retention: set `RETENTION_DAYS` to delete older hits.
 
 ### Users and access
@@ -82,14 +84,15 @@ frontend/src/routes/      __root (redirect guard), setup, login, index (sites), 
 
 ## Configuration (env)
 
-| Variable         | Default             | Purpose                                                                          |
-| ---------------- | ------------------- | -------------------------------------------------------------------------------- |
-| `PORT`           | `8000`              | HTTP port                                                                        |
-| `DATABASE_PATH`  | `data/potoo.db`     | SQLite file                                                                      |
-| `GEOIP_DB_PATH`  | `data/country.mmdb` | MaxMind-format country DB (GeoLite2 or DB-IP Lite). Without it, country is empty |
-| `STATIC_DIR`     | `frontend/dist`     | Built frontend                                                                   |
-| `TRUST_PROXY`    | unset               | Set to `1` to read the client IP from `X-Forwarded-For` (behind a reverse proxy) |
-| `RETENTION_DAYS` | unset               | Delete hits older than this                                                      |
+| Variable         | Default             | Purpose                                                                                                                       |
+| ---------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`           | `8000`              | HTTP port                                                                                                                     |
+| `DATABASE_PATH`  | `data/potoo.db`     | SQLite file                                                                                                                   |
+| `GEOIP_DB_PATH`  | `data/country.mmdb` | MaxMind-format country DB. Downloaded from DB-IP on boot when missing or older than a week, and refreshed weekly              |
+| `GEOIP_URL`      | unset               | Override the download URL (e.g. your own mirror). Empty string disables downloading; a missing file then leaves country empty |
+| `STATIC_DIR`     | `frontend/dist`     | Built frontend                                                                                                                |
+| `TRUST_PROXY`    | unset               | Set to `1` to read the client IP from `X-Forwarded-For` (behind a reverse proxy)                                              |
+| `RETENTION_DAYS` | unset               | Delete hits older than this                                                                                                   |
 
 ## Running
 
@@ -118,8 +121,6 @@ stats, static serving). Known limitations:
 
 - Login rate limiting is in memory (5 failures per IP + email within 15 minutes)
   and resets when the server restarts.
-- No automatic GeoIP database download or update; drop a MaxMind-format file at
-  `GEOIP_DB_PATH` (GeoLite2 requires a MaxMind account, DB-IP Lite works too).
 - The tracker only accepts hits whose host matches a registered site, and
   `Origin` is not verified, so hits can be spoofed. This is acceptable for
   analytics but worth knowing.

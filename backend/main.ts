@@ -1,11 +1,14 @@
 import { createApp } from "./app.ts";
 import { openDb } from "./db.ts";
-import { openGeo } from "./lib/geo.ts";
+import { GEO_REFRESH_MS, openGeo } from "./lib/geo.ts";
 
 const db = await openDb(Deno.env.get("DATABASE_PATH") ?? "data/potoo.db");
 const geo = await openGeo(
   Deno.env.get("GEOIP_DB_PATH") ?? "data/country.mmdb",
 );
+// The boot check inside openGeo downloads a missing or week-old database;
+// while running, refresh once a week.
+setInterval(() => geo.refresh(), GEO_REFRESH_MS);
 const app = createApp(
   db,
   geo,

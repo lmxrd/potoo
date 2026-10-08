@@ -10,7 +10,7 @@
   },
   "tasks": {
     "dev": "deno run -A --watch backend/main.ts",
-    "start": "deno run --allow-net --allow-read --allow-write --allow-env backend/main.ts",
+    "start": "deno run -A backend/main.ts",
     "build": {
       "dependencies": [
         "build:backend:darwin:aarch",
