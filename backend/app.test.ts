@@ -103,3 +103,91 @@ Deno.test("login rate limiting", async () => {
     204,
   );
 });
+
+Deno.test("password change and admin reset", async () => {
+  await using db = await openDb(":memory:");
+  const app = createApp(db, () => "NO", "frontend/dist");
+  const setup = await app.request(
+    "/api/setup",
+    json({ email: "a@example.com", password: "correct horse battery" }),
+  );
+  const auth = { cookie: setup.headers.get("set-cookie")!.split(";")[0] };
+  await app.request(
+    "/api/users",
+    json({ email: "u@example.com", password: "another long pass" }, auth),
+  );
+
+  // Requires signing in.
+  assertEquals(
+    (await app.request("/api/password", json({}))).status,
+    401,
+  );
+  // Wrong current password.
+  assertEquals(
+    (await app.request(
+      "/api/password",
+      json({ current_password: "nope", new_password: "new long pass!" }, auth),
+    )).status,
+    401,
+  );
+  // New password must pass the same rules as everywhere else.
+  assertEquals(
+    (await app.request(
+      "/api/password",
+      json({ current_password: "correct horse battery", new_password: "x" }, auth),
+    )).status,
+    400,
+  );
+  const change = await app.request(
+    "/api/password",
+    json({ current_password: "correct horse battery", new_password: "new long pass!" }, auth),
+  );
+  assertEquals(change.status, 204);
+  // The existing session survives the change; the old password does not.
+  assertEquals(
+    (await app.request("/api/session", { headers: auth })).status,
+    200,
+  );
+  assertEquals(
+    (await app.request(
+      "/api/login",
+      json({ email: "a@example.com", password: "correct horse battery" }),
+    )).status,
+    401,
+  );
+  assertEquals(
+    (await app.request(
+      "/api/login",
+      json({ email: "a@example.com", password: "new long pass!" }),
+    )).status,
+    204,
+  );
+
+  // Admin resets a regular user's password; the admin cannot be reset here.
+  const users = await (await app.request("/api/users", { headers: auth })).json();
+  const regular = users.find((u: { email: string }) =>
+    u.email === "u@example.com"
+  );
+  const admin = users.find((u: { email: string }) => u.email === "a@example.com");
+  assertEquals(
+    (await app.request(
+      `/api/users/${regular.id}/password`,
+      json({ new_password: "reset pass 123" }, auth),
+    )).status,
+    204,
+  );
+  assertEquals(
+    (await app.request(
+      `/api/users/${admin.id}/password`,
+      json({ new_password: "reset pass 123" }, auth),
+    )).status,
+    404,
+  );
+  assertEquals(
+    (await app.request(
+      "/api/login",
+      json({ email: "u@example.com", password: "reset pass 123" }),
+    )).status,
+    204,
+  );
+});

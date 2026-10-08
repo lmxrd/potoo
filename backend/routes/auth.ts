@@ -13,9 +13,10 @@ import {
 } from "../lib/auth.ts";
 import { clientIp } from "../lib/visitor.ts";
 
+const Password = z.string().min(10).max(200);
 const Credentials = z.object({
   email: z.email().max(254).transform((e) => e.toLowerCase()),
-  password: z.string().min(10).max(200),
+  password: Password,
 });
 
 const hasUsers = async (db: Db) =>
@@ -105,6 +106,33 @@ export function authRoutes(db: Db) {
     return c.body(null, 204);
   });
 
+  // Change the signed-in user's own password.
+  app.post("/password", requireUser(db), async (c) => {
+    const parsed = z.object({
+      current_password: z.string().max(200),
+      new_password: Password,
+    }).safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) {
+      return c.json({ error: z.treeifyError(parsed.error) }, 400);
+    }
+    const row = await one<{ password_hash: string }>(
+      db,
+      "SELECT password_hash FROM users WHERE id = ?",
+      [c.get("user").id],
+    );
+    if (
+      !row ||
+      !(await verifyPassword(parsed.data.current_password, row.password_hash))
+    ) {
+      return c.json({ error: "Invalid password" }, 401);
+    }
+    await db.execute("UPDATE users SET password_hash = ? WHERE id = ?", [
+      await hashPassword(parsed.data.new_password),
+      c.get("user").id,
+    ]);
+    return c.body(null, 204);
+  });
+
   // Users: admin only. Everyone created here is a regular (non-admin) user.
   const users = new Hono<AuthEnv>();
   users.use(requireUser(db), requireAdmin);
@@ -134,6 +162,23 @@ export function authRoutes(db: Db) {
     const id = Number(c.req.param("id"));
     await db.execute("DELETE FROM users WHERE id = ? AND is_admin = 0", [id]);
     return c.body(null, 204);
+  });
+  // Admin sets a new password for a regular user. The admin account is
+  // excluded here, like deletion: admins change their own via /password.
+  users.post("/:id/password", async (c) => {
+    const parsed = z.object({ new_password: Password }).safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return c.json({ error: z.treeifyError(parsed.error) }, 400);
+    }
+    const res = await db.execute(
+      "UPDATE users SET password_hash = ? WHERE id = ? AND is_admin = 0",
+      [await hashPassword(parsed.data.new_password), Number(c.req.param("id"))],
+    );
+    return res.affectedRows
+      ? c.body(null, 204)
+      : c.json({ error: "Not found" }, 404);
   });
   app.route("/users", users);
 
