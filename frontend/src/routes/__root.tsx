@@ -39,6 +39,12 @@ function Root() {
                   Users
                 </Link>
               )}
+              <Link
+                to="/password"
+                className="text-slate-600 [&.active]:font-medium [&.active]:text-slate-900"
+              >
+                Password
+              </Link>
               <span className="ml-auto text-sm text-slate-500">{user.email}</span>
               <button
                 className="text-sm text-slate-600 hover:text-slate-900"

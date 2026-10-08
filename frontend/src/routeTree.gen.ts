@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as PasswordRouteImport } from './routes/password'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as UsersRouteImport } from './routes/users'
 import { Route as SitesSiteIdRouteImport } from './routes/sites.$siteId'
@@ -23,6 +24,11 @@ const IndexRoute = IndexRouteImport.update({
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PasswordRoute = PasswordRouteImport.update({
+  id: '/password',
+  path: '/password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SetupRoute = SetupRouteImport.update({
@@ -44,6 +50,7 @@ const SitesSiteIdRoute = SitesSiteIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/password': typeof PasswordRoute
   '/setup': typeof SetupRoute
   '/users': typeof UsersRoute
   '/sites/$siteId': typeof SitesSiteIdRoute
@@ -51,6 +58,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/password': typeof PasswordRoute
   '/setup': typeof SetupRoute
   '/users': typeof UsersRoute
   '/sites/$siteId': typeof SitesSiteIdRoute
@@ -59,21 +67,31 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/password': typeof PasswordRoute
   '/setup': typeof SetupRoute
   '/users': typeof UsersRoute
   '/sites/$siteId': typeof SitesSiteIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/setup' | '/users' | '/sites/$siteId'
+  fullPaths:
+    '/' | '/login' | '/password' | '/setup' | '/users' | '/sites/$siteId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/setup' | '/users' | '/sites/$siteId'
-  id: '__root__' | '/' | '/login' | '/setup' | '/users' | '/sites/$siteId'
+  to: '/' | '/login' | '/password' | '/setup' | '/users' | '/sites/$siteId'
+  id:
+    | '__root__'
+    | '/'
+    | '/login'
+    | '/password'
+    | '/setup'
+    | '/users'
+    | '/sites/$siteId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
+  PasswordRoute: typeof PasswordRoute
   SetupRoute: typeof SetupRoute
   UsersRoute: typeof UsersRoute
   SitesSiteIdRoute: typeof SitesSiteIdRoute
@@ -93,6 +111,13 @@ declare module '@tanstack/react-router' {
       path: '/login'
       fullPath: '/login'
       preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/password': {
+      id: '/password'
+      path: '/password'
+      fullPath: '/password'
+      preLoaderRoute: typeof PasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/setup': {
@@ -122,6 +147,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
+  PasswordRoute: PasswordRoute,
   SetupRoute: SetupRoute,
   UsersRoute: UsersRoute,
   SitesSiteIdRoute: SitesSiteIdRoute,

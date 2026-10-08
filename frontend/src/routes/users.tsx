@@ -17,6 +17,7 @@ function Users() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [formError, setFormError] = useState<string>();
+  const [reset, setReset] = useState<{ id: number; password: string; error?: string } | null>(null);
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Users</h1>
@@ -24,24 +25,66 @@ function Users() {
       <Card>
         <ul className="divide-y divide-slate-200">
           {users?.map((u) => (
-            <li key={u.id} className="flex items-center justify-between py-2">
-              <span>
-                {u.email}{" "}
-                {u.is_admin === 1 && <span className="ml-2 text-xs text-slate-500">admin</span>}
-              </span>
-              {u.is_admin !== 1 && (
-                <Button
-                  variant="danger"
-                  onClick={async () => {
-                    if (confirm(`Delete ${u.email}?`)) {
-                      await api(`/users/${u.id}`, { method: "DELETE" });
-                      reload();
+            <li key={u.id} className="py-2">
+              <div className="flex items-center justify-between">
+                <span>
+                  {u.email}{" "}
+                  {u.is_admin === 1 && <span className="ml-2 text-xs text-slate-500">admin</span>}
+                </span>
+                {u.is_admin !== 1 && (
+                  <span className="flex gap-2">
+                    <Button
+                      onClick={() =>
+                        setReset(reset?.id === u.id ? null : { id: u.id, password: "" })
+                      }
+                    >
+                      Reset password
+                    </Button>
+                    <Button
+                      variant="danger"
+                      onClick={async () => {
+                        if (confirm(`Delete ${u.email}?`)) {
+                          await api(`/users/${u.id}`, { method: "DELETE" });
+                          reload();
+                        }
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  </span>
+                )}
+              </div>
+              {reset?.id === u.id && (
+                <form
+                  className="mt-2 flex flex-wrap gap-2"
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    try {
+                      await api(`/users/${u.id}/password`, {
+                        body: { new_password: reset.password },
+                      });
+                      setReset(null);
+                    } catch (err) {
+                      setReset({
+                        ...reset,
+                        error: err instanceof Error ? err.message : "Failed",
+                      });
                     }
                   }}
                 >
-                  Delete
-                </Button>
+                  <Input
+                    type="password"
+                    placeholder="New password (min. 10)"
+                    required
+                    minLength={10}
+                    value={reset.password}
+                    onChange={(e) => setReset({ ...reset, password: e.target.value })}
+                  />
+                  <Button type="submit">Save</Button>
+                  <Button onClick={() => setReset(null)}>Cancel</Button>
+                </form>
               )}
+              {reset?.id === u.id && <ErrorText>{reset.error}</ErrorText>}
             </li>
           ))}
         </ul>
