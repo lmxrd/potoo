@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { api, useApi } from "../api";
-import { Button, Card, ErrorText, Input } from "../components";
+import { useApi } from "../api";
+import { Card, ErrorText } from "../components";
 import { StatsDashboard, type SiteStats } from "../dashboard";
 
 type Site = { id: number; hostname: string; honor_dnt: number };
@@ -9,8 +9,7 @@ type Site = { id: number; hostname: string; honor_dnt: number };
 export const Route = createFileRoute("/")({ component: Overview });
 
 function Overview() {
-  const { session } = Route.useRouteContext();
-  const { data: sites, error: sitesError, reload } = useApi<Site[]>("/sites");
+  const { data: sites, error: sitesError } = useApi<Site[]>("/sites");
   const [days, setDays] = useState(7);
   // The selected site ids; empty means every site.
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -77,7 +76,8 @@ function Overview() {
         <ul className="divide-y divide-slate-200">
           {sites?.length === 0 && (
             <li className="py-2 text-slate-500">
-              No sites yet. Add one below, then embed the snippet from its page.
+              No sites yet. Add one with "Add site" in the top bar, then embed the snippet from its
+              page.
             </li>
           )}
           {sites?.map((s) => (
@@ -92,39 +92,7 @@ function Overview() {
             </li>
           ))}
         </ul>
-        {session.user?.is_admin === 1 && <AddSite onAdded={reload} />}
       </Card>
     </div>
-  );
-}
-
-function AddSite({ onAdded }: { onAdded: () => void }) {
-  const [hostname, setHostname] = useState("");
-  const [formError, setFormError] = useState<string>();
-  return (
-    <form
-      className="mt-4 flex gap-2"
-      onSubmit={async (e) => {
-        e.preventDefault();
-        setFormError(undefined);
-        try {
-          await api("/sites", { body: { hostname } });
-          setHostname("");
-          onAdded();
-        } catch (err) {
-          setFormError(err instanceof Error ? err.message : "Failed");
-        }
-      }}
-    >
-      <Input
-        className="flex-1"
-        placeholder="blog.example.com"
-        required
-        value={hostname}
-        onChange={(e) => setHostname(e.target.value)}
-      />
-      <Button type="submit">Add</Button>
-      <ErrorText>{formError}</ErrorText>
-    </form>
   );
 }

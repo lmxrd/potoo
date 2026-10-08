@@ -26,7 +26,9 @@ export async function api<T = void>(
     const message = typeof data?.error === "string" ? data.error : "Request failed";
     throw new ApiError(res.status, message);
   }
-  return res.status === 204 || res.status === 201 ? (undefined as T) : res.json();
+  // 204 has no body; a 201 may (e.g. the created site) or may not (setup).
+  if (res.status === 204) return undefined as T;
+  return (await res.json().catch(() => null)) as T;
 }
 
 export function useApi<T>(path: string) {
