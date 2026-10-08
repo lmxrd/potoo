@@ -4,7 +4,7 @@ import { api, useApi } from "../api";
 import { BarList, Button, Card, ErrorText } from "../components";
 
 type Stats = {
-  site: { id: number; hostname: string };
+  site: { id: number; hostname: string; honor_dnt: number };
   days: number;
   pageviews: number;
   visitors: number;
@@ -23,7 +23,7 @@ function SitePage() {
   const { session } = Route.useRouteContext();
   const navigate = useNavigate();
   const [days, setDays] = useState(7);
-  const { data, error } = useApi<Stats>(`/sites/${siteId}/stats?days=${days}`);
+  const { data, error, reload } = useApi<Stats>(`/sites/${siteId}/stats?days=${days}`);
   const isAdmin = session.user?.is_admin === 1;
 
   if (error) return <ErrorText>{error}</ErrorText>;
@@ -91,6 +91,33 @@ function SitePage() {
       </div>
 
       <Snippet hostname={data.site.hostname} />
+
+      {isAdmin && (
+        <Card title="Site settings">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={data.site.honor_dnt === 1}
+              onChange={async (e) => {
+                const honorDnt = e.target.checked;
+                try {
+                  await api(`/sites/${siteId}`, {
+                    method: "PATCH",
+                    body: { honor_dnt: honorDnt },
+                  });
+                  reload();
+                } catch {
+                  reload();
+                }
+              }}
+            />
+            Honor Do Not Track / Global Privacy Control
+          </label>
+          <p className="mt-2 text-xs text-slate-500">
+            When enabled, visitors who ask not to be tracked are ignored.
+          </p>
+        </Card>
+      )}
 
       {isAdmin && (
         <Button

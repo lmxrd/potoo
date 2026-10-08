@@ -69,9 +69,11 @@ export function sitesRoutes(db: Db) {
     if (!days.success) {
       return c.json({ error: z.treeifyError(days.error) }, 400);
     }
-    const site = await one<{ id: number; hostname: string }>(
+    const site = await one<
+      { id: number; hostname: string; honor_dnt: number }
+    >(
       db,
-      "SELECT id, hostname FROM sites WHERE id = ?",
+      "SELECT id, hostname, honor_dnt FROM sites WHERE id = ?",
       [id],
     );
     if (!site) return c.json({ error: "Not found" }, 404);

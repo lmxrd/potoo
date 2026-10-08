@@ -70,6 +70,19 @@ Deno.test("setup, users, sites, collection and stats", async () => {
   assertEquals(stats.countries[0].country, "NO");
   assertEquals(stats.devices[0].device, "mobile");
   assertEquals(stats.clicks[0], { name: "signup", clicks: 1 });
+  assertEquals(stats.site.honor_dnt, 1);
+
+  // The admin can toggle DNT honoring for a site.
+  const patch = await app.request(`/api/sites/${site.id}`, {
+    method: "PATCH",
+    headers: { ...auth, "content-type": "application/json" },
+    body: JSON.stringify({ honor_dnt: false }),
+  });
+  assertEquals(patch.status, 204);
+  const patched = await (await app.request(`/api/sites/${site.id}/stats`, {
+    headers: auth,
+  })).json();
+  assertEquals(patched.site.honor_dnt, 0);
 });
 
 Deno.test("login rate limiting", async () => {
