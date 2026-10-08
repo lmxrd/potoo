@@ -42,9 +42,9 @@ backend/main.ts           entrypoint, env config, retention job
 backend/app.ts            Hono app, routes, static serving
 backend/db.ts             SQLite schema + query helpers
 backend/lib/              auth (passwords, sessions), visitor (device, daily hash), geo, tracker.js source
-backend/routes/           auth (session/setup/login/users), sites (CRUD + stats), collect (tracker, pixel)
-backend/app.test.ts       end-to-end test of setup → users → sites → collection → stats
-frontend/src/routes/      __root (redirect guard), setup, login, index (sites), sites.$siteId (stats), users
+backend/routes/           auth (session/setup/login/users/password), sites (CRUD + stats), collect (tracker, pixel)
+backend/app.test.ts       end-to-end tests: setup → users → sites → collection → stats, login rate limiting, password change/reset
+frontend/src/routes/      __root (redirect guard), setup, login, index (sites), sites.$siteId (stats), users, password
 ```
 
 ## Configuration (env)
@@ -66,11 +66,10 @@ Development: `deno task dev` (backend, watch) and `pnpm dev` in `frontend/` (Vit
 Checks: `deno task check`, `deno task test`, `pnpm typecheck`, `pnpm lint`, `pnpm fmt:check`.
 
 ## Status
-Implemented and passing: backend type check and test, frontend build, typecheck, lint and format. Not yet done:
-- Manual end-to-end run in a browser (the last smoke test of the running server was skipped).
-- No login rate limiting or lockout.
-- No password change or reset, and no editing of site settings in the UI (`PATCH /api/sites/:id` exists for `honor_dnt`).
-- No automatic GeoIP database download or update.
+Implemented and passing: backend type check and tests, frontend build, typecheck, lint and format, and a scripted end-to-end smoke run against the running server (setup, users, login rate limiting, password change and admin reset, sites with `honor_dnt` toggle, tracker, pixel, DNT/GPC and bot handling, stats, static serving). Known limitations:
+- Login rate limiting is in memory (5 failures per IP + email within 15 minutes) and resets when the server restarts.
+- No automatic GeoIP database download or update; drop a MaxMind-format file at `GEOIP_DB_PATH` (GeoLite2 requires a MaxMind account, DB-IP Lite works too).
 - The tracker only accepts hits whose host matches a registered site, and `Origin` is not verified, so hits can be spoofed. This is acceptable for analytics but worth knowing.
 - Stats show counts only, with a simple bar chart.
-- Possible additions: per-site "view as public" dashboards, CSV export, filtering by path or country, Dockerfile.
+- No manual click-through of the UI in a real browser has been done yet; the smoke run drives the HTTP API directly.
+Possible additions: per-site "view as public" dashboards, CSV export, filtering by path or country, Dockerfile.
