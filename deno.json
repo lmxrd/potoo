@@ -1,0 +1,15 @@
+{
+  "nodeModulesDir": "none",
+  "imports": {
+    "@hono/hono": "jsr:@hono/hono@^4.13.13",
+    "@stdx/database": "jsr:@stdx/database@^0.1.1",
+    "@zod/zod": "jsr:@zod/zod@^4.6.5"
+  },
+  "tasks": {
+    "dev": "deno run -A --watch backend/main.ts",
+    "start": "deno run --allow-net --allow-read --allow-write --allow-env backend/main.ts",
+    "check": "deno check backend/main.ts",
+    "test": "deno test --allow-net --allow-read --allow-write --allow-env backend/"
+  },
+  "exclude": ["frontend", "data"]
+}
