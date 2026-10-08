@@ -6,7 +6,14 @@ const db = await openDb(Deno.env.get("DATABASE_PATH") ?? "data/potoo.db");
 const geo = await openGeo(
   Deno.env.get("GEOIP_DB_PATH") ?? "data/country.mmdb",
 );
-const app = createApp(db, geo, Deno.env.get("STATIC_DIR") ?? "frontend/dist");
+const app = createApp(
+  db,
+  geo,
+  // Module-relative so it works both from the repo (deno task start) and
+  // inside a deno compile binary, where included files live in a virtual
+  // filesystem keyed to the module's location.
+  Deno.env.get("STATIC_DIR") ?? `${import.meta.dirname}/../frontend/dist`,
+);
 
 // Optional data retention: delete hits older than RETENTION_DAYS.
 const retention = Number(Deno.env.get("RETENTION_DAYS") ?? 0);

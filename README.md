@@ -63,6 +63,7 @@ frontend/src/routes/      __root (redirect guard), setup, login, index (sites), 
 cd frontend && pnpm install && pnpm build && cd ..
 deno task start            # serves API + frontend on :8000
 ```
+`deno task build` builds the frontend and compiles the backend, frontend assets and migrations into a single executable, `./potoo`. The binary serves the frontend from its embedded virtual filesystem and applies migrations from the embedded migration files; `DATABASE_PATH` and the other env vars work as above.
 Development: `deno task dev` (backend, watch) and `pnpm dev` in `frontend/` (Vite proxies `/api` to :8000).
 Checks: `deno task check`, `deno task test`, `pnpm typecheck`, `pnpm lint`, `pnpm fmt:check`.
 
