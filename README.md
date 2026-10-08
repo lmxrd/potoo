@@ -68,7 +68,6 @@ Checks: `deno task check`, `deno task test`, `pnpm typecheck`, `pnpm lint`, `pnp
 ## Status
 Implemented and passing: backend type check and test, frontend build, typecheck, lint and format. Not yet done:
 - Manual end-to-end run in a browser (the last smoke test of the running server was skipped).
-- No git commit yet.
 - No login rate limiting or lockout.
 - No password change or reset, and no editing of site settings in the UI (`PATCH /api/sites/:id` exists for `honor_dnt`).
 - No automatic GeoIP database download or update.
