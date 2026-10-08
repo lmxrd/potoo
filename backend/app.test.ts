@@ -254,3 +254,71 @@ Deno.test("openDb applies and records migrations", async () => {
 
   await Deno.remove(dir, { recursive: true });
 });
+
+Deno.test("global stats across sites", async () => {
+  Deno.env.set("TRUST_PROXY", "1");
+  await using db = await openDb(":memory:");
+  const app = createApp(db, () => "NO", "frontend/dist");
+  const setup = await app.request(
+    "/api/setup",
+    json({ email: "a@example.com", password: "correct horse battery" }),
+  );
+  const auth = { cookie: setup.headers.get("set-cookie")!.split(";")[0] };
+  const a = await (await app.request(
+    "/api/sites",
+    json({ hostname: "a.example.com" }, auth),
+  )).json();
+  const b = await (await app.request(
+    "/api/sites",
+    json({ hostname: "b.example.com" }, auth),
+  )).json();
+
+  const ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile";
+  const hit = (host: string, path: string, ip: string) =>
+    app.request("/api/collect", {
+      method: "POST",
+      body: JSON.stringify({ type: "pageview", host, path }),
+      headers: { "user-agent": ua, "x-forwarded-for": ip },
+    });
+  await hit("a.example.com", "/a1", "203.0.113.1");
+  await hit("a.example.com", "/a2", "203.0.113.2");
+  await hit("b.example.com", "/b1", "203.0.113.1");
+
+  assertEquals((await app.request("/api/stats")).status, 401);
+
+  // Every site, without a `sites` param.
+  const all = await (await app.request("/api/stats", { headers: auth })).json();
+  assertEquals(all.pageviews, 3);
+  // The same IP on two sites is two visitors: the hash includes the site,
+  // so visitors cannot be linked across sites.
+  assertEquals(all.visitors, 3);
+  assertEquals(all.paths.length, 3);
+  assertEquals(all.byDay.length, 1);
+
+  // One site selected.
+  const onlyA = await (await app.request(`/api/stats?sites=${a.id}`, {
+    headers: auth,
+  })).json();
+  assertEquals(onlyA.pageviews, 2);
+  assertEquals(onlyA.visitors, 2);
+  assertEquals(
+    onlyA.paths.map((p: { path: string }) => p.path).sort(),
+    ["/a1", "/a2"],
+  );
+
+  // Multiple sites selected.
+  const both = await (await app.request(`/api/stats?sites=${a.id},${b.id}`, {
+    headers: auth,
+  })).json();
+  assertEquals(both.pageviews, 3);
+
+  // Invalid input.
+  assertEquals(
+    (await app.request("/api/stats?sites=x", { headers: auth })).status,
+    400,
+  );
+  assertEquals(
+    (await app.request("/api/stats?days=999", { headers: auth })).status,
+    400,
+  );
+});

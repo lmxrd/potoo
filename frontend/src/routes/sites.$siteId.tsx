@@ -1,19 +1,11 @@
 import { useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { api, useApi } from "../api";
-import { BarList, Button, Card, ErrorText } from "../components";
+import { Button, Card, ErrorText } from "../components";
+import { StatsDashboard, type SiteStats } from "../dashboard";
 
-type Stats = {
+type Stats = SiteStats & {
   site: { id: number; hostname: string; honor_dnt: number };
-  days: number;
-  pageviews: number;
-  visitors: number;
-  byDay: { day: string; pageviews: number; visitors: number }[];
-  paths: { path: string; pageviews: number; visitors: number }[];
-  countries: { country: string; visitors: number }[];
-  devices: { device: string; visitors: number }[];
-  referrers: { referrer: string; pageviews: number }[];
-  clicks: { name: string; clicks: number }[];
 };
 
 export const Route = createFileRoute("/sites/$siteId")({ component: SitePage });
@@ -28,7 +20,6 @@ function SitePage() {
 
   if (error) return <ErrorText>{error}</ErrorText>;
   if (!data) return <p className="text-slate-500">Loading…</p>;
-  const maxDay = Math.max(1, ...data.byDay.map((d) => d.pageviews));
 
   return (
     <div className="space-y-6">
@@ -47,48 +38,7 @@ function SitePage() {
         </select>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <Card title="Page views">
-          <div className="text-3xl font-semibold tabular-nums">{data.pageviews}</div>
-        </Card>
-        <Card title="Visitors (unique per day)">
-          <div className="text-3xl font-semibold tabular-nums">{data.visitors}</div>
-        </Card>
-      </div>
-
-      <Card title="Page views per day">
-        <div className="flex h-24 items-end gap-1">
-          {data.byDay.map((d) => (
-            <div
-              key={d.day}
-              title={`${d.day}: ${d.pageviews}`}
-              className="flex-1 rounded-t bg-slate-800"
-              style={{ height: `${(d.pageviews / maxDay) * 100}%` }}
-            />
-          ))}
-        </div>
-      </Card>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card title="Paths">
-          <BarList rows={data.paths.map((p) => ({ label: p.path, value: p.pageviews }))} />
-        </Card>
-        <Card title="Referrers">
-          <BarList rows={data.referrers.map((r) => ({ label: r.referrer, value: r.pageviews }))} />
-        </Card>
-        <Card title="Countries">
-          <BarList rows={data.countries.map((c) => ({ label: c.country, value: c.visitors }))} />
-        </Card>
-        <Card title="Devices">
-          <BarList rows={data.devices.map((d) => ({ label: d.device, value: d.visitors }))} />
-        </Card>
-        <Card title="Clicks">
-          <BarList
-            rows={data.clicks.map((c) => ({ label: c.name, value: c.clicks }))}
-            empty="No clicks tracked. Enable click tracking in the snippet below."
-          />
-        </Card>
-      </div>
+      <StatsDashboard stats={data} />
 
       <Snippet hostname={data.site.hostname} />
 

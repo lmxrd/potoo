@@ -6,6 +6,7 @@ import type { GeoLookup } from "./lib/geo.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { collectRoutes } from "./routes/collect.ts";
 import { sitesRoutes } from "./routes/sites.ts";
+import { statsRoutes } from "./routes/stats.ts";
 
 export function createApp(db: Db, geo: GeoLookup, staticDir: string) {
   const app = new Hono();
@@ -13,6 +14,7 @@ export function createApp(db: Db, geo: GeoLookup, staticDir: string) {
   app.route("/api", collectRoutes(db, geo));
   app.route("/api", authRoutes(db));
   app.route("/api/sites", sitesRoutes(db));
+  app.route("/api/stats", statsRoutes(db));
   app.all("/api/*", (c) => c.json({ error: "Not found" }, 404));
 
   // Embedded CSR frontend: static files, falling back to index.html for client routes.
