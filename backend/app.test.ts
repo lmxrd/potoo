@@ -71,3 +71,35 @@ Deno.test("setup, users, sites, collection and stats", async () => {
   assertEquals(stats.devices[0].device, "mobile");
   assertEquals(stats.clicks[0], { name: "signup", clicks: 1 });
 });
+
+Deno.test("login rate limiting", async () => {
+  Deno.env.set("TRUST_PROXY", "1");
+  await using db = await openDb(":memory:");
+  const app = createApp(db, () => "NO", "frontend/dist");
+  await app.request(
+    "/api/setup",
+    json({ email: "a@example.com", password: "correct horse battery" }),
+  );
+
+  const attempt = (ip: string, password: string) =>
+    app.request(
+      "/api/login",
+      json(
+        { email: "a@example.com", password },
+        { "x-forwarded-for": ip },
+      ),
+    );
+
+  for (let i = 0; i < 5; i++) {
+    assertEquals((await attempt("203.0.113.9", "wrong password!")).status, 401);
+  }
+  // Locked out even with the correct password, and tells the client when to retry.
+  const locked = await attempt("203.0.113.9", "correct horse battery");
+  assertEquals(locked.status, 429);
+  assertEquals(Number(locked.headers.get("retry-after")) > 0, true);
+  // A different IP is not locked out.
+  assertEquals(
+    (await attempt("203.0.113.10", "correct horse battery")).status,
+    204,
+  );
+});

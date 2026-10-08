@@ -11,6 +11,7 @@ import {
   requireUser,
   verifyPassword,
 } from "../lib/auth.ts";
+import { clientIp } from "../lib/visitor.ts";
 
 const Credentials = z.object({
   email: z.email().max(254).transform((e) => e.toLowerCase()),
@@ -20,8 +21,23 @@ const Credentials = z.object({
 const hasUsers = async (db: Db) =>
   (await one<{ n: number }>(db, "SELECT COUNT(*) AS n FROM users"))!.n > 0;
 
+// In-memory throttle for failed logins: after MAX_FAILURES within WINDOW_MS
+// the IP + email pair is locked out until the oldest failure expires.
+// It resets when the server restarts, which keeps the no-storage promise.
+const WINDOW_MS = 15 * 60_000;
+const MAX_FAILURES = 5;
+
 export function authRoutes(db: Db) {
   const app = new Hono<AuthEnv>();
+  const failures = new Map<string, number[]>();
+
+  const recent = (key: string) => {
+    const now = Date.now();
+    const left = (failures.get(key) ?? []).filter((t) => now - t < WINDOW_MS);
+    if (left.length) failures.set(key, left);
+    else failures.delete(key);
+    return left;
+  };
 
   // Session + first-run state. The frontend uses this to route every page.
   app.get("/session", async (c) => {
@@ -55,13 +71,31 @@ export function authRoutes(db: Db) {
         [parsed.data.email],
       )
       : undefined;
+    const key = parsed.success ? `${clientIp(c)}|${parsed.data.email}` : null;
+    if (key && recent(key).length >= MAX_FAILURES) {
+      const retryAfter = Math.ceil(
+        (recent(key)[0] + WINDOW_MS - Date.now()) / 1000,
+      );
+      return c.json({ error: "Too many attempts, try again later" }, 429, {
+        "retry-after": String(retryAfter),
+      });
+    }
     // Same work and same response whether or not the user exists.
     const ok = parsed.success &&
       await verifyPassword(
         parsed.data.password,
         row?.password_hash ?? "pbkdf2$310000$00$00",
       ) && row;
-    if (!ok) return c.json({ error: "Invalid email or password" }, 401);
+    if (!ok) {
+      if (key) {
+        const left = recent(key);
+        left.push(Date.now());
+        failures.set(key, left);
+        if (failures.size > 10_000) failures.clear();
+      }
+      return c.json({ error: "Invalid email or password" }, 401);
+    }
+    if (key) failures.delete(key);
     await createSession(db, c, row!.id);
     return c.body(null, 204);
   });
