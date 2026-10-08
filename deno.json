@@ -11,9 +11,38 @@
   "tasks": {
     "dev": "deno run -A --watch backend/main.ts",
     "start": "deno run --allow-net --allow-read --allow-write --allow-env backend/main.ts",
-    "build": "cd frontend && pnpm install && pnpm build && cd .. && deno compile --allow-net --allow-read --allow-write --allow-env --include backend/db/migrations --include frontend/dist --output potoo backend/main.ts",
-    "fix": "deno fmt && deno lint --fix && cd frontend && pnpm fix",
-    "check": "deno fmt --check && deno lint && deno check backend/main.ts && cd frontend && pnpm check",
+    "build": {
+      "dependencies": [
+        "build:backend:darwin:aarch",
+        "build:backend:darwin:x86",
+        "build:backend:linux:aarch",
+        "build:backend:linux:x86"
+      ]
+    },
+    "build:frontend": "pnpm install -C frontend && pnpm run -C frontend build",
+    "build:backend:darwin:aarch": {
+      "command": "deno task compile:base --target aarch64-apple-darwin --output dist/potoo-macos-arm backend/main.ts",
+      "dependencies": ["build:frontend"]
+    },
+    "build:backend:darwin:x86": {
+      "command": "deno task compile:base --target x86_64-apple-darwin --output dist/potoo-macos-x86 backend/main.ts",
+      "dependencies": ["build:frontend"]
+    },
+    "build:backend:linux:aarch": {
+      "command": "deno task compile:base --target aarch64-unknown-linux-gnu --output dist/potoo-linux-arm backend/main.ts",
+      "dependencies": ["build:frontend"]
+    },
+    "build:backend:linux:x86": {
+      "command": "deno task compile:base --target x86_64-unknown-linux-gnu --output dist/potoo-linux-x86 backend/main.ts",
+      "dependencies": ["build:frontend"]
+    },
+    "compile:base": "deno compile -A --include backend/db/migrations --include frontend/dist --bundle",
+    "fix": { "dependencies": ["fix:frontend", "fix:backend"] },
+    "fix:frontend": "pnpm run -C frontend fix",
+    "fix:backend": "deno fmt && deno lint --fix",
+    "check": { "dependencies": ["check:frontend", "check:backend"] },
+    "check:frontend": "pnpm run -C frontend check",
+    "check:backend": "deno fmt --check && deno lint && deno check backend/main.ts",
     "test": "deno test --allow-net --allow-read --allow-write --allow-env backend/"
   },
   "exclude": ["frontend", "data"]
