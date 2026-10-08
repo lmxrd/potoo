@@ -9,7 +9,9 @@
     "maxmind": "npm:maxmind@^5.0.0"
   },
   "tasks": {
-    "dev": "deno run -A --watch backend/main.ts",
+    "dev": { "dependencies": ["dev:backend", "dev:frontend"] },
+    "dev:backend": "deno run -A --watch backend/main.ts",
+    "dev:frontend": "pnpm run -C frontend dev",
     "start": "deno run -A backend/main.ts",
     "build": {
       "dependencies": [

@@ -105,11 +105,12 @@ deno task start            # serves API + frontend on :8000
 and migrations into a single executable, `./potoo`. The binary serves the
 frontend from its embedded virtual filesystem and applies migrations from the
 embedded migration files; `DATABASE_PATH` and the other env vars work as above.
-Development: `deno task dev` (backend, watch) and `pnpm dev` in `frontend/`
-(Vite proxies `/api` to :8000). Checks: `deno task check` (format, lint and
-types for backend and frontend) and `deno task test`. `deno task fix` applies
-the format and lint fixes. In `frontend/`, `pnpm check` and `pnpm fix` do the
-same for the frontend alone.
+Development: `deno task dev` runs the backend (`--watch`, :8000) and the
+frontend (Vite, :5173, proxies `/api` to :8000) together, with hot reload on
+both. Checks: `deno task check` (format, lint and types for backend and
+frontend) and `deno task test`. `deno task fix` applies the format and lint
+fixes. In `frontend/`, `pnpm check` and `pnpm fix` do the same for the frontend
+alone.
 
 ## Status
 
