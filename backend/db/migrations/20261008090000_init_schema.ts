@@ -7,13 +7,15 @@ export default {
     for (const statement of STATEMENTS) await client.execute(statement);
   },
   async down({ client }) {
-    for (const table of [
-      "salts",
-      "hits",
-      "sites",
-      "sessions",
-      "users",
-    ]) {
+    for (
+      const table of [
+        "salts",
+        "hits",
+        "sites",
+        "sessions",
+        "users",
+      ]
+    ) {
       await client.execute(`DROP TABLE IF EXISTS ${table}`);
     }
     await client.execute("DROP INDEX IF EXISTS hits_site_time");

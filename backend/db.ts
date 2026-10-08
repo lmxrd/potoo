@@ -1,4 +1,8 @@
-import { type FileEntry, isMigrationFile, MigrationClient } from "@halvardm/nessie";
+import {
+  type FileEntry,
+  isMigrationFile,
+  MigrationClient,
+} from "@halvardm/nessie";
 import { SqliteClient } from "@halvardm/nessie/clients/sqlite";
 
 export type Db = SqliteClient;
@@ -24,7 +28,10 @@ async function listMigrations(): Promise<FileEntry[]> {
   try {
     for await (const entry of Deno.readDir(MIGRATIONS_DIR)) {
       if (entry.isFile && isMigrationFile(entry.name)) {
-        files.push({ name: entry.name, path: new URL(entry.name, MIGRATIONS_DIR).href });
+        files.push({
+          name: entry.name,
+          path: new URL(entry.name, MIGRATIONS_DIR).href,
+        });
       }
     }
   } catch {

@@ -1,4 +1,4 @@
-import { assertEquals } from "jsr:@std/assert@^1";
+import { assertEquals } from "@std/assert";
 import { SqliteClient } from "@halvardm/nessie/clients/sqlite";
 import { createApp } from "./app.ts";
 import { all, openDb } from "./db.ts";
@@ -148,13 +148,19 @@ Deno.test("password change and admin reset", async () => {
   assertEquals(
     (await app.request(
       "/api/password",
-      json({ current_password: "correct horse battery", new_password: "x" }, auth),
+      json(
+        { current_password: "correct horse battery", new_password: "x" },
+        auth,
+      ),
     )).status,
     400,
   );
   const change = await app.request(
     "/api/password",
-    json({ current_password: "correct horse battery", new_password: "new long pass!" }, auth),
+    json({
+      current_password: "correct horse battery",
+      new_password: "new long pass!",
+    }, auth),
   );
   assertEquals(change.status, 204);
   // The existing session survives the change; the old password does not.
@@ -178,11 +184,14 @@ Deno.test("password change and admin reset", async () => {
   );
 
   // Admin resets a regular user's password; the admin cannot be reset here.
-  const users = await (await app.request("/api/users", { headers: auth })).json();
+  const users = await (await app.request("/api/users", { headers: auth }))
+    .json();
   const regular = users.find((u: { email: string }) =>
     u.email === "u@example.com"
   );
-  const admin = users.find((u: { email: string }) => u.email === "a@example.com");
+  const admin = users.find((u: { email: string }) =>
+    u.email === "a@example.com"
+  );
   assertEquals(
     (await app.request(
       `/api/users/${regular.id}/password`,
@@ -236,7 +245,10 @@ Deno.test("openDb applies and records migrations", async () => {
       "SELECT file_name AS name FROM nessie_migrations",
     );
     assertEquals(applied.map((m) => m.name), ["20261008090000_init_schema.ts"]);
-    const users = await all<{ email: string }>(reopened, "SELECT email FROM users");
+    const users = await all<{ email: string }>(
+      reopened,
+      "SELECT email FROM users",
+    );
     assertEquals(users, [{ email: "old@example.com" }]);
   }
 

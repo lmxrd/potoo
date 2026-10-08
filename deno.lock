@@ -102,6 +102,7 @@
     "dependencies": [
       "jsr:@halvardm/nessie@3.0.0-rc.3",
       "jsr:@hono/hono@^4.13.13",
+      "jsr:@std/assert@1",
       "jsr:@stdx/database@~0.1.1",
       "jsr:@zod/zod@^4.6.5",
       "npm:maxmind@5"
