@@ -5,6 +5,7 @@ import type { Db } from "./db.ts";
 import type { GeoLookup } from "./lib/geo.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { collectRoutes } from "./routes/collect.ts";
+import { exportRoutes } from "./routes/export.ts";
 import { sitesRoutes } from "./routes/sites.ts";
 import { statsRoutes } from "./routes/stats.ts";
 
@@ -26,6 +27,7 @@ export function createApp(db: Db, geo: GeoLookup, staticDir: string) {
     }
   });
   app.route("/api", collectRoutes(db, geo));
+  app.route("/api", exportRoutes(db));
   app.route("/api", authRoutes(db));
   app.route("/api/sites", sitesRoutes(db));
   app.route("/api/stats", statsRoutes(db));

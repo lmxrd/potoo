@@ -33,6 +33,12 @@ function Root() {
               >
                 Sites
               </Link>
+              <Link
+                to="/export"
+                className="text-slate-600 [&.active]:font-medium [&.active]:text-slate-900"
+              >
+                Export
+              </Link>
               <UserMenu user={user} />
             </>
           )}

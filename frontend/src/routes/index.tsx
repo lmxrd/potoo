@@ -3,6 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useApi } from "../api";
 import { ErrorText } from "../components";
 import { StatsDashboard, type SiteStats } from "../dashboard";
+import { SiteSelect } from "../site-select";
 
 type Site = { id: number; hostname: string; honor_dnt: number };
 
@@ -45,25 +46,12 @@ function Overview() {
       </div>
 
       <ErrorText>{sitesError}</ErrorText>
-      <div className="flex flex-wrap gap-2 text-sm">
-        <label className="flex items-center gap-2 rounded border border-slate-300 bg-white px-3 py-1.5">
-          <input
-            type="checkbox"
-            checked={selected.size === 0}
-            onChange={() => setSelected(new Set())}
-          />
-          All sites
-        </label>
-        {sites?.map((s) => (
-          <label
-            key={s.id}
-            className="flex items-center gap-2 rounded border border-slate-300 bg-white px-3 py-1.5"
-          >
-            <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggle(s.id)} />
-            {s.hostname}
-          </label>
-        ))}
-      </div>
+      <SiteSelect
+        sites={sites}
+        selected={selected}
+        onToggle={toggle}
+        onClear={() => setSelected(new Set())}
+      />
 
       <ErrorText>{statsError}</ErrorText>
       {stats ? (

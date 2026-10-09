@@ -26,13 +26,6 @@ function SitePage() {
       <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-xl font-semibold">{data.site.hostname}</h1>
         <div className="flex items-center gap-4">
-          <a
-            href={`/api/sites/${siteId}/export.csv`}
-            download
-            className="text-sm text-slate-600 hover:underline"
-          >
-            Export CSV
-          </a>
           <select
             className="rounded border border-slate-300 px-2 py-1 text-sm"
             value={days}

@@ -348,7 +348,7 @@ Deno.test("multiple admins, roles and email change", async () => {
   );
 });
 
-Deno.test("CSV export of a site's hits", async () => {
+Deno.test("CSV export with site and date selection", async () => {
   Deno.env.set("TRUST_PROXY", "1");
   await using db = await openDb(":memory:");
   const app = createApp(db, () => "NO", "frontend/dist");
@@ -357,9 +357,13 @@ Deno.test("CSV export of a site's hits", async () => {
     json({ email: "a@example.com", password: "correct horse battery" }),
   );
   const auth = { cookie: setup.headers.get("set-cookie")!.split(";")[0] };
-  const site = await (await app.request(
+  const a = await (await app.request(
     "/api/sites",
-    json({ hostname: "example.com" }, auth),
+    json({ hostname: "a.example.com" }, auth),
+  )).json();
+  const b = await (await app.request(
+    "/api/sites",
+    json({ hostname: "b.example.com" }, auth),
   )).json();
 
   const ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile";
@@ -371,48 +375,63 @@ Deno.test("CSV export of a site's hits", async () => {
     });
   await hit({
     type: "pageview",
-    host: "example.com",
+    host: "a.example.com",
     path: "/a?x=1",
     referrer: "https://ref.example.com/x",
   });
-  await hit({
-    type: "click",
-    host: "example.com",
-    path: "/",
-    name: 'signup"btn',
-  }, "203.0.113.6");
-
-  assertEquals(
-    (await app.request(`/api/sites/${site.id}/export.csv`)).status,
-    401,
+  await hit(
+    { type: "click", host: "b.example.com", path: "/", name: 'signup"btn' },
+    "203.0.113.6",
+  );
+  // A hit from the past: the API only records "now", so it goes in directly.
+  await db.execute(
+    `INSERT INTO hits (site_id, kind, path, name, referrer, country, device, visitor, created_at)
+     VALUES (?, 'pageview', '/old', NULL, NULL, NULL, 'desktop', 'x', '2026-01-01T12:00:00.000Z')`,
+    [a.id],
   );
 
-  const res = await app.request(`/api/sites/${site.id}/export.csv`, {
-    headers: auth,
-  });
-  assertEquals(res.status, 200);
-  assertEquals(res.headers.get("content-type"), "text/csv; charset=utf-8");
+  assertEquals((await app.request("/api/export.csv")).status, 401);
+
+  const get = (query = "") =>
+    app.request(`/api/export.csv${query}`, { headers: auth });
+
+  // Every site, no dates: three rows with their site.
+  const allRes = await get();
+  assertEquals(allRes.status, 200);
+  assertEquals(allRes.headers.get("content-type"), "text/csv; charset=utf-8");
   assertEquals(
-    res.headers.get("content-disposition"),
-    `attachment; filename="potoo-example.com.csv"`,
+    allRes.headers.get("content-disposition"),
+    'attachment; filename="potoo-export.csv"',
   );
-  const csv = await res.text();
-  const lines = csv.split("\n");
+  const csv = await allRes.text();
   assertEquals(
-    lines[0],
-    "created_at,kind,path,name,referrer,country,device",
+    csv.split("\n")[0],
+    "site,created_at,kind,path,name,referrer,country,device",
   );
-  assertEquals(lines.length, 4); // header + 2 rows + trailing empty
-  // Values are quoted and inner quotes doubled; query strings never stored.
+  assertEquals(csv.split("\n").length - 1, 4); // header + 3 hits
+  assertEquals(csv.includes('"a.example.com"'), true);
+  assertEquals(csv.includes('"b.example.com"'), true);
   assertEquals(csv.includes('"signup""btn"'), true);
-  assertEquals(csv.includes('"/a",'), true);
-  assertEquals(csv.includes('"ref.example.com"'), true);
-  assertEquals(csv.includes('"NO","mobile"'), true);
 
+  // One site selected.
+  const onlyB = await (await get(`?sites=${b.id}`)).text();
+  assertEquals(onlyB.includes('"b.example.com"'), true);
+  assertEquals(onlyB.includes('"a.example.com"'), false);
+
+  // The date range: from and to are inclusive days.
+  const oldOnly = await (await get("?from=2026-01-01&to=2026-01-02")).text();
+  assertEquals(oldOnly.split("\n").length - 1, 2);
+  assertEquals(oldOnly.includes("/old"), true);
+  const today = new Date().toISOString().slice(0, 10);
+  const todayOnly = await (await get(`?from=${today}`)).text();
+  assertEquals(todayOnly.includes("/old"), false);
+  assertEquals(todayOnly.split("\n").length - 1, 3);
+
+  // No sites, an unknown site, and a bad date.
+  assertEquals((await get("?from=banana")).status, 400);
   assertEquals(
-    (await app.request(`/api/sites/9999/export.csv`, { headers: auth }))
-      .status,
-    404,
+    (await (await get("?sites=999")).text()).split("\n").length - 1,
+    1,
   );
 });
 

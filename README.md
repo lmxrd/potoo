@@ -80,7 +80,8 @@ backend/db/migrations/    nessie migrations, applied on startup
 backend/lib/              auth (passwords, sessions), visitor (device, daily hash), geo, tracker.js source
 backend/routes/           auth (session/setup/login/users/password), sites (CRUD + stats), collect (tracker, pixel)
 backend/app.test.ts       end-to-end tests: setup → users → sites → collection → stats, login rate limiting, password change/reset
-frontend/src/routes/      __root (redirect guard), setup, login, index (sites), sites.$siteId (stats), users, password
+frontend/src/routes/      __root (redirect guard), setup, login, index (dashboard), sites (table),
+                          sites_.$siteId (stats + snippet), users, settings, export
 ```
 
 ## Configuration (env)
