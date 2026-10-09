@@ -13,6 +13,7 @@ const SiteInput = z.object({
   honor_dnt: z.boolean().default(true),
 });
 const Days = z.coerce.number().int().min(1).max(365).default(7);
+const Granularity = z.enum(["day", "hour"]);
 
 export function sitesRoutes(db: Db) {
   const app = new Hono<AuthEnv>();
@@ -67,8 +68,18 @@ export function sitesRoutes(db: Db) {
   app.get("/:id/stats", async (c) => {
     const id = Number(c.req.param("id"));
     const days = Days.safeParse(c.req.query("days"));
+    const granularity = Granularity.safeParse(
+      c.req.query("granularity") ?? "day",
+    );
     if (!days.success) {
       return c.json({ error: z.treeifyError(days.error) }, 400);
+    }
+    if (!granularity.success) {
+      return c.json({ error: z.treeifyError(granularity.error) }, 400);
+    }
+    // The per-hour view only makes sense for short ranges.
+    if (granularity.data === "hour" && days.data > 3) {
+      return c.json({ error: "Hourly is only available up to 3 days" }, 400);
     }
     const site = await one<{
       id: number;
@@ -80,7 +91,10 @@ export function sitesRoutes(db: Db) {
       [id],
     );
     if (!site) return c.json({ error: "Not found" }, 404);
-    return c.json({ site, ...await statsFor(db, [id], days.data) });
+    return c.json({
+      site,
+      ...await statsFor(db, [id], days.data, granularity.data),
+    });
   });
 
   return app;

@@ -39,6 +39,7 @@ export async function statsFor(
   db: Db,
   siteIds: number[],
   days: number,
+  granularity: "day" | "hour" = "day",
 ): Promise<SiteStats> {
   if (!siteIds.length) return { days, ...EMPTY };
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
@@ -59,7 +60,10 @@ export async function statsFor(
         `AND ${pv}`,
       ),
       q<{ day: string; pageviews: number; visitors: number }>(
-        "date(created_at) AS day, COUNT(*) AS pageviews, COUNT(DISTINCT visitor) AS visitors",
+        // The hour is a more granular period for short ranges.
+        granularity === "hour"
+          ? `substr(created_at, 1, 13) || ':00' AS day, COUNT(*) AS pageviews, COUNT(DISTINCT visitor) AS visitors`
+          : "date(created_at) AS day, COUNT(*) AS pageviews, COUNT(DISTINCT visitor) AS visitors",
         `AND ${pv} GROUP BY day ORDER BY day`,
       ),
       q<{ path: string; pageviews: number; visitors: number }>(

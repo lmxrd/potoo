@@ -15,7 +15,10 @@ function SitePage() {
   const { session } = Route.useRouteContext();
   const navigate = useNavigate();
   const [days, setDays] = useState(7);
-  const { data, error, reload } = useApi<Stats>(`/sites/${siteId}/stats?days=${days}`);
+  const [granularity, setGranularity] = useState<"day" | "hour">("day");
+  const { data, error, reload } = useApi<Stats>(
+    `/sites/${siteId}/stats?days=${days}&granularity=${granularity}`,
+  );
   const isAdmin = session.user?.is_admin === 1;
 
   if (error) return <ErrorText>{error}</ErrorText>;
@@ -29,7 +32,12 @@ function SitePage() {
           <select
             className="rounded border border-slate-300 px-2 py-1 text-sm"
             value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              setDays(next);
+              // The per-hour view only exists for short ranges.
+              if (next > 3) setGranularity("day");
+            }}
           >
             {[1, 7, 30, 90, 365].map((d) => (
               <option key={d} value={d}>
@@ -40,7 +48,13 @@ function SitePage() {
         </div>
       </div>
 
-      <StatsDashboard stats={data} dateFormat={session.user?.date_format} />
+      <StatsDashboard
+        stats={data}
+        dateFormat={session.user?.date_format}
+        granularity={granularity}
+        onGranularity={setGranularity}
+        hourAvailable={days <= 3}
+      />
 
       <Snippet hostname={data.site.hostname} />
 

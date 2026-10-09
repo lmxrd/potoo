@@ -435,6 +435,64 @@ Deno.test("CSV export with site and date selection", async () => {
   );
 });
 
+Deno.test("hourly granularity", async () => {
+  await using db = await openDb(":memory:");
+  const app = createApp(db, () => "NO", "frontend/dist");
+  const setup = await app.request(
+    "/api/setup",
+    json({ email: "a@example.com", password: "correct horse battery" }),
+  );
+  const auth = { cookie: setup.headers.get("set-cookie")!.split(";")[0] };
+  const site = await (await app.request(
+    "/api/sites",
+    json({ hostname: "example.com" }, auth),
+  )).json();
+
+  // Three hits today, in three different hours.
+  for (const hour of [2, 10, 22]) {
+    await db.execute(
+      `INSERT INTO hits (site_id, kind, path, name, referrer, country, device, visitor, created_at)
+       VALUES (?, 'pageview', '/x', NULL, NULL, NULL, 'desktop', ?, ?)`,
+      [
+        site.id,
+        crypto.randomUUID().replaceAll("-", ""),
+        `2026-10-09T${String(hour).padStart(2, "0")}:15:00.000Z`,
+      ],
+    );
+  }
+
+  const hourly = await (await app.request(
+    `/api/sites/${site.id}/stats?days=1&granularity=hour`,
+    { headers: auth },
+  )).json();
+  assertEquals(hourly.byDay.length, 3);
+  assertEquals(
+    hourly.byDay.map((d: { day: string }) => d.day),
+    ["2026-10-09T02:00", "2026-10-09T10:00", "2026-10-09T22:00"],
+  );
+  assertEquals(hourly.byDay[0].pageviews, 1);
+
+  // The global endpoint supports it too, and long ranges refuse it.
+  const globalHourly = await (await app.request(
+    "/api/stats?days=1&granularity=hour",
+    { headers: auth },
+  )).json();
+  assertEquals(globalHourly.byDay.length, 3);
+  assertEquals(
+    (await app.request(`/api/sites/${site.id}/stats?days=7&granularity=hour`, {
+      headers: auth,
+    })).status,
+    400,
+  );
+  assertEquals(
+    (await app.request("/api/stats?days=30&granularity=hour", {
+      headers: auth,
+    }))
+      .status,
+    400,
+  );
+});
+
 Deno.test("date format setting", async () => {
   await using db = await openDb(":memory:");
   const app = createApp(db, () => "NO", "frontend/dist");
