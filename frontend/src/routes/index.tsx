@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useApi } from "../api";
-import { ErrorText } from "../components";
-import { StatsDashboard, type SiteStats } from "../dashboard";
-import { SiteSelect } from "../site-select";
+import { ErrorText } from "../components/error-text";
+import { SiteSelect } from "../components/site-select";
+import { StatsDashboard, type SiteStats } from "../components/stats-dashboard";
+import { useApi } from "../lib/api";
 
 type Site = { id: number; hostname: string; honor_dnt: number };
 

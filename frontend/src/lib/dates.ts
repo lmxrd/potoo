@@ -7,6 +7,8 @@ export const DATE_FORMATS = [
   { value: "D MMM YYYY", label: "D MMM YYYY (9 Oct 2026)" },
 ];
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 /**
  * The short axis label of one chart bucket, for the range it belongs to:
  * the hour for hourly buckets, the month for a year, and "9 Oct" style
@@ -21,8 +23,6 @@ export function chartLabel(day: string, range: number | "today"): string {
   const [, month, date] = day.split("-");
   return `${Number(date)} ${MONTHS[Number(month) - 1]}`;
 }
-
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /**
  * Show a date (a `YYYY-MM-DD` day, or a full timestamp) in one of the formats

@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { api } from "../api";
-import { Button, Card, ErrorText, Input } from "../components";
-import { DATE_FORMATS, formatDate } from "../dates";
+import { Button } from "../components/button";
+import { Card } from "../components/card";
+import { ErrorText } from "../components/error-text";
+import { Input } from "../components/input";
+import { api } from "../lib/api";
+import { DATE_FORMATS, formatDate } from "../lib/dates";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
 

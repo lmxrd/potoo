@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { createFileRoute, redirect } from "@tanstack/react-router";
-import { api, useApi } from "../api";
-import { Button, Card, ErrorText, Input } from "../components";
+import { Button } from "../components/button";
+import { Card } from "../components/card";
+import { ErrorText } from "../components/error-text";
+import { Input } from "../components/input";
+import { api, useApi } from "../lib/api";
 
 type Row = { id: number; email: string; is_admin: number; created_at: string };
 

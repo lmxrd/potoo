@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useApi } from "../api";
-import { Button, Card, ErrorText, Input } from "../components";
-import { SiteSelect } from "../site-select";
+import { Button } from "../components/button";
+import { Card } from "../components/card";
+import { ErrorText } from "../components/error-text";
+import { Input } from "../components/input";
+import { SiteSelect } from "../components/site-select";
+import { useApi } from "../lib/api";
 
 type Site = { id: number; hostname: string };
 

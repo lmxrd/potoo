@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { api } from "../api";
-import { Button, ErrorText, Input } from "../components";
+import { Button } from "./button";
+import { ErrorText } from "./error-text";
+import { Input } from "./input";
+import { api } from "../lib/api";
 
 export function CredentialsForm({
   endpoint,

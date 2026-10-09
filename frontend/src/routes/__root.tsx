@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { createRootRoute, Link, Outlet, redirect, useNavigate } from "@tanstack/react-router";
-import { api, type Session, type User } from "../api";
+import { api, type Session, type User } from "../lib/api";
 
 export const Route = createRootRoute({
   // Every page goes through here: first-run → /setup, signed-out → /login.

@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { api, useApi } from "../api";
-import { Button, Card, ErrorText } from "../components";
-import { StatsDashboard, type SiteStats } from "../dashboard";
+import { Button } from "../components/button";
+import { Card } from "../components/card";
+import { ErrorText } from "../components/error-text";
+import { StatsDashboard, type SiteStats } from "../components/stats-dashboard";
+import { api, useApi } from "../lib/api";
 
 type Stats = SiteStats & {
   site: { id: number; hostname: string; honor_dnt: number };

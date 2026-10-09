@@ -1,5 +1,6 @@
-import { BarList, Card } from "./components";
-import { chartLabel, formatDate } from "./dates";
+import { Card } from "./card";
+import { BarList } from "./bar-list";
+import { chartLabel, formatDate } from "../lib/dates";
 
 /**
  * The stats of one dashboard: the same shape the backend returns for one
