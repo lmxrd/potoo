@@ -1,8 +1,13 @@
-import { useCallback, useState } from "react";
+import { useCallback } from "react";
+import { useNavigate, useSearch } from "@tanstack/react-router";
 import { formatDate, formatTime } from "./dates";
 
-/** The preset ranges, the same ones the backend's `days` param accepts. */
-export type RangePreset = "today" | 1 | 7 | 30 | 90 | 365;
+/**
+ * The preset ranges, as HTML duration strings: PT24H is the rolling last
+ * 24 hours, P7D and friends the last N days, P1Y a year. `today` is a named
+ * calendar range instead: since UTC midnight, not a rolling duration.
+ */
+export type RangePreset = "today" | "PT24H" | "P7D" | "P30D" | "P90D" | "P1Y";
 
 /**
  * The range a dashboard shows: a preset, or an exact custom window as
@@ -12,15 +17,25 @@ export type DateRange = { preset: RangePreset } | { preset: "custom"; from: stri
 
 export const RANGE_PRESETS: { value: RangePreset; label: string }[] = [
   { value: "today", label: "Today" },
-  { value: 1, label: "24h" },
-  { value: 7, label: "7d" },
-  { value: 30, label: "30d" },
-  { value: 90, label: "90d" },
-  { value: 365, label: "12mo" },
+  { value: "PT24H", label: "24h" },
+  { value: "P7D", label: "7d" },
+  { value: "P30D", label: "30d" },
+  { value: "P90D", label: "90d" },
+  { value: "P1Y", label: "12mo" },
 ];
+
+/** Each preset as the backend's `days` value: 24h is one rolling day. */
+const PRESET_DAYS: Record<Exclude<RangePreset, "today">, number> = {
+  PT24H: 1,
+  P7D: 7,
+  P30D: 30,
+  P90D: 90,
+  P1Y: 365,
+};
 
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
+const MINUTE_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 
 /** A local `datetime-local` value as UTC with minute precision, or null. */
 function utcMinute(value: string): string | null {
@@ -28,9 +43,17 @@ function utcMinute(value: string): string | null {
   return Number.isNaN(time) ? null : new Date(time).toISOString().slice(0, 16);
 }
 
+/** A UTC minute value as a local `datetime-local` value, or null. */
+function localMinute(utc: string): string | null {
+  const time = Date.parse(`${utc}:00Z`);
+  return Number.isNaN(time) ? null : localInput(new Date(time));
+}
+
 /** The stats query params of a range, or null when a custom range is invalid. */
 export function rangeQuery(range: DateRange): string | null {
-  if (range.preset !== "custom") return `days=${range.preset}`;
+  if (range.preset !== "custom") {
+    return `days=${range.preset === "today" ? "today" : PRESET_DAYS[range.preset]}`;
+  }
   const from = utcMinute(range.from);
   const to = utcMinute(range.to);
   return from && to && from < to ? `from=${from}&to=${to}` : null;
@@ -52,16 +75,16 @@ export function rangeWindow(range: DateRange): { from: Date; to: Date } | null {
   switch (range.preset) {
     case "today":
       return { from: new Date(midnight), to: now };
-    case 1:
+    case "PT24H":
       return {
         from: new Date(Math.floor(+now / HOUR) * HOUR - 23 * HOUR),
         to: now,
       };
-    case 7:
+    case "P7D":
       return { from: new Date(midnight - 6 * DAY), to: now };
-    case 30:
+    case "P30D":
       return { from: new Date(midnight - 29 * DAY), to: now };
-    case 90: {
+    case "P90D": {
       const monday = midnight - ((now.getUTCDay() + 6) % 7) * DAY;
       return { from: new Date(monday - 12 * 7 * DAY), to: now };
     }
@@ -93,16 +116,91 @@ export function rangeSummary(range: DateRange, format = "YYYY-MM-DD", timeFormat
 }
 
 /**
- * Range state for a dashboard. The query is the last valid one, so typing a
- * custom range keeps the previous stats until it becomes valid again.
+ * The dashboard settings kept in the URL, so a view can be shared and the
+ * back button steps through changes: `?range=P7D` or `?from=..&to=..` for
+ * the range (from/to in UTC, so a shared link is the same absolute window
+ * in any timezone), `?sites=1,3` for the overview's site selection.
+ */
+export type DashboardSearch = {
+  range?: string;
+  from?: string;
+  to?: string;
+  sites?: string;
+};
+
+/** The routes' validateSearch: keep only well-formed dashboard params. */
+export function validateDashboardSearch(search: Record<string, unknown>): DashboardSearch {
+  const out: DashboardSearch = {};
+  if (
+    typeof search.range === "string" &&
+    RANGE_PRESETS.some((preset) => preset.value === search.range)
+  ) {
+    out.range = search.range;
+  }
+  if (typeof search.from === "string" && MINUTE_ISO.test(search.from)) {
+    out.from = search.from;
+  }
+  if (typeof search.to === "string" && MINUTE_ISO.test(search.to)) {
+    out.to = search.to;
+  }
+  if (typeof search.sites === "string" && /^\d+(,\d+)*$/.test(search.sites)) {
+    out.sites = search.sites;
+  }
+  return out;
+}
+
+/** The range the URL encodes: custom as UTC from/to, presets as durations. */
+export function searchRange(search: DashboardSearch): DateRange {
+  const from = search.from && localMinute(search.from);
+  const to = search.to && localMinute(search.to);
+  if (from && to && from < to) return { preset: "custom", from, to };
+  const preset = RANGE_PRESETS.find((option) => option.value === search.range)?.value;
+  if (preset !== undefined) return { preset };
+  return { preset: "P7D" };
+}
+
+/** The selected site ids of `?sites=1,3`; an empty set means every site. */
+export function parseSites(sites: string | undefined): Set<number> {
+  return new Set((sites ?? "").split(",").filter(Boolean).map(Number));
+}
+
+/** The search params a range writes; presets as durations, custom as UTC. */
+function rangeParams(range: DateRange): DashboardSearch {
+  if (range.preset !== "custom") return { range: range.preset };
+  const from = utcMinute(range.from);
+  const to = utcMinute(range.to);
+  return from && to && from < to ? { from, to } : {};
+}
+
+/**
+ * The dashboard range, read from and written to the page's URL. Works on
+ * any route that validates its search with {@linkcode
+ * validateDashboardSearch}. Every change is a history entry, so the back
+ * button steps through ranges.
  */
 export function useDateRange() {
-  const [range, setRange] = useState<DateRange>({ preset: 7 });
-  const [query, setQuery] = useState("days=7");
-  const update = useCallback((next: DateRange) => {
-    setRange(next);
-    const q = rangeQuery(next);
-    if (q) setQuery(q);
-  }, []);
-  return { range, setRange: update, query };
+  const search = useSearch({ strict: false }) as DashboardSearch;
+  const navigate = useNavigate();
+  const range = searchRange(search);
+  const setRange = useCallback(
+    (next: DateRange) => {
+      const params = rangeParams(next);
+      navigate({
+        to: ".",
+        search: (prev) => {
+          const merged: DashboardSearch = { ...(prev as DashboardSearch), ...params };
+          // Presets and custom ranges replace each other, never stack.
+          if (merged.range) {
+            delete merged.from;
+            delete merged.to;
+          } else {
+            delete merged.range;
+          }
+          return merged;
+        },
+      });
+    },
+    [navigate],
+  );
+  return { range, setRange, query: rangeQuery(range) };
 }

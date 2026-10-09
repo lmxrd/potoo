@@ -6,13 +6,16 @@ import { DateRangeBar } from "../components/date-range-bar";
 import { ErrorText } from "../components/error-text";
 import { StatsDashboard } from "../components/stats-dashboard";
 import { api, useApi, type SiteStats } from "../lib/api";
-import { useDateRange } from "../lib/date-range";
+import { useDateRange, validateDashboardSearch } from "../lib/date-range";
 
 type Stats = SiteStats & {
   site: { id: number; hostname: string; honor_dnt: number };
 };
 
-export const Route = createFileRoute("/sites_/$siteId")({ component: SitePage });
+export const Route = createFileRoute("/sites_/$siteId")({
+  validateSearch: validateDashboardSearch,
+  component: SitePage,
+});
 
 function SitePage() {
   const { siteId } = Route.useParams();
