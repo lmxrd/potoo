@@ -1,4 +1,5 @@
 import { BarList, Card } from "./components";
+import { formatDate } from "./dates";
 
 /**
  * The stats of one dashboard: the same shape the backend returns for one
@@ -17,7 +18,13 @@ export type SiteStats = {
 };
 
 /** The dashboard content: totals, views per day and the breakdowns. */
-export function StatsDashboard({ stats }: { stats: SiteStats }) {
+export function StatsDashboard({
+  stats,
+  dateFormat = "YYYY-MM-DD",
+}: {
+  stats: SiteStats;
+  dateFormat?: string;
+}) {
   const maxDay = Math.max(1, ...stats.byDay.map((d) => d.pageviews));
   return (
     <>
@@ -35,7 +42,7 @@ export function StatsDashboard({ stats }: { stats: SiteStats }) {
           {stats.byDay.map((d) => (
             <div
               key={d.day}
-              title={`${d.day}: ${d.pageviews}`}
+              title={`${formatDate(d.day, dateFormat)}: ${d.pageviews}`}
               className="flex-1 rounded-t bg-slate-800"
               style={{ height: `${(d.pageviews / maxDay) * 100}%` }}
             />

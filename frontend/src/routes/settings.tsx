@@ -2,6 +2,7 @@ import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { api } from "../api";
 import { Button, Card, ErrorText, Input } from "../components";
+import { DATE_FORMATS, formatDate } from "../dates";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
 
@@ -23,12 +24,52 @@ function Settings() {
           </div>
         </dl>
       </Card>
+      <Card title="Date format">
+        <DateFormat current={user.date_format} />
+      </Card>
       <Card title="Change email">
         <ChangeEmail current={user.email} />
       </Card>
       <Card title="Change password">
         <ChangePassword />
       </Card>
+    </div>
+  );
+}
+
+function DateFormat({ current }: { current: string }) {
+  const [value, setValue] = useState(current);
+  const [error, setError] = useState<string>();
+  const router = useRouter();
+  return (
+    <div className="space-y-2">
+      <select
+        className="rounded border border-slate-300 px-2 py-2 text-sm"
+        value={value}
+        onChange={async (e) => {
+          const next = e.target.value;
+          setValue(next);
+          setError(undefined);
+          try {
+            await api("/settings", { body: { date_format: next } });
+            // The format comes from the session; refresh it so the whole
+            // app picks the new format up.
+            await router.invalidate();
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed");
+          }
+        }}
+      >
+        {DATE_FORMATS.map((f) => (
+          <option key={f.value} value={f.value}>
+            {f.label}
+          </option>
+        ))}
+      </select>
+      <p className="text-xs text-slate-500">
+        Dates across the app, for example {formatDate(new Date().toISOString(), value)}.
+      </p>
+      <ErrorText>{error}</ErrorText>
     </div>
   );
 }

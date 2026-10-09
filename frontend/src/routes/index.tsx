@@ -10,6 +10,7 @@ type Site = { id: number; hostname: string; honor_dnt: number };
 export const Route = createFileRoute("/")({ component: Overview });
 
 function Overview() {
+  const { session } = Route.useRouteContext();
   const { data: sites, error: sitesError } = useApi<Site[]>("/sites");
   const [days, setDays] = useState(7);
   // The selected site ids; empty means every site.
@@ -55,7 +56,7 @@ function Overview() {
 
       <ErrorText>{statsError}</ErrorText>
       {stats ? (
-        <StatsDashboard stats={stats} />
+        <StatsDashboard stats={stats} dateFormat={session.user?.date_format} />
       ) : (
         !statsError && <p className="text-slate-500">Loading…</p>
       )}

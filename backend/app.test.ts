@@ -435,6 +435,46 @@ Deno.test("CSV export with site and date selection", async () => {
   );
 });
 
+Deno.test("date format setting", async () => {
+  await using db = await openDb(":memory:");
+  const app = createApp(db, () => "NO", "frontend/dist");
+  const setup = await app.request(
+    "/api/setup",
+    json({ email: "a@example.com", password: "correct horse battery" }),
+  );
+  const auth = { cookie: setup.headers.get("set-cookie")!.split(";")[0] };
+
+  // The default.
+  const before = await (await app.request("/api/session", { headers: auth }))
+    .json();
+  assertEquals(before.user.date_format, "YYYY-MM-DD");
+
+  assertEquals(
+    (await app.request(
+      "/api/settings",
+      json({ date_format: "DD/MM/YYYY" }, auth),
+    )).status,
+    204,
+  );
+  const after = await (await app.request("/api/session", { headers: auth }))
+    .json();
+  assertEquals(after.user.date_format, "DD/MM/YYYY");
+
+  // Only the known formats are accepted.
+  assertEquals(
+    (await app.request(
+      "/api/settings",
+      json({ date_format: "DD-MM-YYYY" }, auth),
+    )).status,
+    400,
+  );
+  assertEquals(
+    (await app.request("/api/settings", json({ date_format: "DD/MM/YYYY" })))
+      .status,
+    401,
+  );
+});
+
 Deno.test("openDb applies and records migrations", async () => {
   const dir = await Deno.makeTempDir();
   const file = `${dir}/potoo.db`;
@@ -451,6 +491,7 @@ Deno.test("openDb applies and records migrations", async () => {
       [
         "20261008090000_init_schema.ts",
         "20261009000000_allow_multiple_admins.ts",
+        "20261009010000_user_date_format.ts",
       ],
     );
   }
@@ -475,6 +516,7 @@ Deno.test("openDb applies and records migrations", async () => {
       [
         "20261008090000_init_schema.ts",
         "20261009000000_allow_multiple_admins.ts",
+        "20261009010000_user_date_format.ts",
       ],
     );
     const users = await all<{ email: string }>(

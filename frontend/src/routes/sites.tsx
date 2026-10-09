@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { api, useApi } from "../api";
+import { formatDate } from "../dates";
 import { Button, Card, ErrorText, Input } from "../components";
 
 type Site = {
@@ -78,7 +79,9 @@ function SitesPage() {
                 }
               >
                 <td className="py-2 font-medium">{s.hostname}</td>
-                <td className="py-2 text-slate-500">{s.created_at.slice(0, 10)}</td>
+                <td className="py-2 text-slate-500">
+                  {formatDate(s.created_at, session.user?.date_format ?? "YYYY-MM-DD")}
+                </td>
               </tr>
             ))}
           </tbody>

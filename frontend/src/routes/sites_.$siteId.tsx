@@ -40,7 +40,7 @@ function SitePage() {
         </div>
       </div>
 
-      <StatsDashboard stats={data} />
+      <StatsDashboard stats={data} dateFormat={session.user?.date_format} />
 
       <Snippet hostname={data.site.hostname} />
 

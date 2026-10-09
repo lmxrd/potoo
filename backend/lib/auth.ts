@@ -2,8 +2,22 @@ import type { Context, MiddlewareHandler } from "@hono/hono";
 import { deleteCookie, getCookie, setCookie } from "@hono/hono/cookie";
 import { type Db, one } from "../db.ts";
 
-export type User = { id: number; email: string; is_admin: number };
+export type User = {
+  id: number;
+  email: string;
+  is_admin: number;
+  date_format: string;
+};
 export type AuthEnv = { Variables: { user: User } };
+
+/** The date formats a user can pick from, for displaying dates. */
+export const DATE_FORMATS = [
+  "YYYY-MM-DD",
+  "DD/MM/YYYY",
+  "MM/DD/YYYY",
+  "DD.MM.YYYY",
+  "D MMM YYYY",
+] as const;
 
 const COOKIE = "potoo_session";
 const SESSION_DAYS = 30;
@@ -89,7 +103,7 @@ export async function currentUser(db: Db, c: Context) {
   if (!token) return undefined;
   return one<User>(
     db,
-    `SELECT u.id, u.email, u.is_admin FROM sessions s
+    `SELECT u.id, u.email, u.is_admin, u.date_format FROM sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > ?`,
     [await sha256(token), new Date().toISOString()],

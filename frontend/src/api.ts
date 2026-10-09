@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 
-export type User = { id: number; email: string; is_admin: number };
+export type User = {
+  id: number;
+  email: string;
+  is_admin: number;
+  date_format: string;
+};
 export type Session = { needsSetup: boolean; user: User | null };
 
 export class ApiError extends Error {

@@ -5,6 +5,7 @@ import {
   type AuthEnv,
   createSession,
   currentUser,
+  DATE_FORMATS,
   destroySession,
   hashPassword,
   requireAdmin,
@@ -130,6 +131,21 @@ export function authRoutes(db: Db) {
     if (taken) return c.json({ error: "Email already in use" }, 409);
     await db.execute("UPDATE users SET email = ? WHERE id = ?", [
       parsed.data.email,
+      c.get("user").id,
+    ]);
+    return c.body(null, 204);
+  });
+
+  // Change the signed-in user's own preferences.
+  app.post("/settings", requireUser(db), async (c) => {
+    const parsed = z.object({ date_format: z.enum(DATE_FORMATS) }).safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return c.json({ error: z.treeifyError(parsed.error) }, 400);
+    }
+    await db.execute("UPDATE users SET date_format = ? WHERE id = ?", [
+      parsed.data.date_format,
       c.get("user").id,
     ]);
     return c.body(null, 204);
