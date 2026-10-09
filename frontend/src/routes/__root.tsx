@@ -45,12 +45,17 @@ function Root() {
                 </>
               )}
               <Link
-                to="/password"
+                to="/settings"
                 className="text-slate-600 [&.active]:font-medium [&.active]:text-slate-900"
               >
-                Password
+                Settings
               </Link>
-              <span className="ml-auto text-sm text-slate-500">{user.email}</span>
+              <Link
+                to="/settings"
+                className="ml-auto text-sm text-slate-500 hover:text-slate-900 [&.active]:font-medium [&.active]:text-slate-900"
+              >
+                {user.email}
+              </Link>
               <button
                 className="text-sm text-slate-600 hover:text-slate-900"
                 onClick={async () => {
