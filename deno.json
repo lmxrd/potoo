@@ -1,8 +1,10 @@
 {
   "nodeModulesDir": "none",
+  "minimumDependencyAge": 0,
   "imports": {
+    "@faker-js/faker": "npm:@faker-js/faker@^9",
     "@hono/hono": "jsr:@hono/hono@^4.13.13",
-    "@halvardm/nessie": "jsr:@halvardm/nessie@3.0.0-rc.3",
+    "@halvardm/nessie": "jsr:@halvardm/nessie@3.0.0-rc.4",
     "@std/assert": "jsr:@std/assert@^1",
     "@stdx/database": "jsr:@stdx/database@^0.1.1",
     "@zod/zod": "jsr:@zod/zod@^4.6.5",
@@ -13,6 +15,13 @@
     "dev:backend": "deno run -A --watch backend/main.ts",
     "dev:frontend": "pnpm run -C frontend dev",
     "start": "deno run -A backend/main.ts",
+    "seed": {
+      "dependencies": ["migrate"],
+      "command": "deno run -A jsr:@halvardm/nessie@3.0.0-rc.4/cli seed -c backend/nessie.config.ts"
+    },
+    "migrate": "deno run -A jsr:@halvardm/nessie@3.0.0-rc.4/cli migrate -c backend/nessie.config.ts",
+    "make:migration": "deno run -A jsr:@halvardm/nessie@3.0.0-rc.4/cli make:migration -c backend/nessie.config.ts",
+    "make:seed": "deno run -A jsr:@halvardm/nessie@3.0.0-rc.4/cli make:seed -c backend/nessie.config.ts",
     "build": {
       "dependencies": [
         "build:backend:darwin:aarch",
@@ -45,7 +54,7 @@
     "fix:backend": "deno fmt && deno lint --fix",
     "check": { "dependencies": ["check:frontend", "check:backend"] },
     "check:frontend": "pnpm run -C frontend check",
-    "check:backend": "deno fmt --check && deno lint && deno check backend/main.ts",
+    "check:backend": "deno fmt --check && deno lint && deno check backend",
     "test": "deno test --allow-net --allow-read --allow-write --allow-env backend/"
   },
   "exclude": ["frontend", "data"]
