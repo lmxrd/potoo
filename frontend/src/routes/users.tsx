@@ -27,6 +27,12 @@ function Users() {
       message: err instanceof Error ? err.message : "Failed",
     });
 
+  const admins = users?.filter((u) => u.is_admin === 1) ?? [];
+  // With a single admin, demoting or deleting them is disabled: the app
+  // must always keep at least one admin.
+  const lastAdminId = admins.length === 1 ? admins[0].id : undefined;
+  const guarded = { title: "At least one admin is required" };
+
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Users</h1>
@@ -47,6 +53,8 @@ function Users() {
                     Reset password
                   </Button>
                   <Button
+                    disabled={u.id === lastAdminId}
+                    {...(u.id === lastAdminId ? guarded : {})}
                     onClick={async () => {
                       try {
                         await api(`/users/${u.id}`, {
@@ -64,6 +72,8 @@ function Users() {
                   </Button>
                   <Button
                     variant="danger"
+                    disabled={u.id === lastAdminId}
+                    {...(u.id === lastAdminId ? guarded : {})}
                     onClick={async () => {
                       if (confirm(`Delete ${u.email}?`)) {
                         try {
