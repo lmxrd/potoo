@@ -11,6 +11,20 @@ import { statsRoutes } from "./routes/stats.ts";
 export function createApp(db: Db, geo: GeoLookup, staticDir: string) {
   const app = new Hono();
   app.use(logger());
+  // Static caching: the hashed files under /assets are immutable, but the
+  // shell (and anything else) must always be revalidated, so a stale
+  // index.html can never reference an asset hash that a rebuild removed.
+  app.use("*", async (c, next) => {
+    await next();
+    if (c.res.headers.get("cache-control") === null) {
+      c.header(
+        "cache-control",
+        c.req.path.startsWith("/assets/")
+          ? "public, max-age=31536000, immutable"
+          : "no-cache",
+      );
+    }
+  });
   app.route("/api", collectRoutes(db, geo));
   app.route("/api", authRoutes(db));
   app.route("/api/sites", sitesRoutes(db));
