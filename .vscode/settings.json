@@ -1,0 +1,5 @@
+{
+  // Deno owns only the backend; the built-in TS server serves frontend/
+  "deno.enable": true,
+  "deno.disablePaths": ["frontend"]
+}
