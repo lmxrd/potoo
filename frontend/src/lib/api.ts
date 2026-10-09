@@ -8,6 +8,30 @@ export type User = {
 };
 export type Session = { needsSetup: boolean; user: User | null };
 
+/** The bucket the chart of an explicit from/to range is aggregated over. */
+export type Bucket = "hour" | "day" | "week" | "month";
+
+/**
+ * The stats of one dashboard: the totals, and the breakdowns the dashboard
+ * shows, over a selected day range. The shape is the same for one site and
+ * for several sites combined.
+ */
+export type SiteStats = {
+  days: number | "today";
+  // Set only for explicit from/to ranges: the bucket the chart shows.
+  bucket?: Bucket;
+  pageviews: number;
+  visitors: number;
+  byDay: { day: string; pageviews: number; visitors: number }[];
+  paths: { path: string; pageviews: number; visitors: number }[];
+  countries: { country: string; visitors: number }[];
+  devices: { device: string; visitors: number }[];
+  browsers: { browser: string; visitors: number }[];
+  os: { os: string; visitors: number }[];
+  referrers: { referrer: string; pageviews: number }[];
+  clicks: { name: string; clicks: number }[];
+};
+
 export class ApiError extends Error {
   constructor(
     public status: number,

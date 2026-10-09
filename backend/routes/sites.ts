@@ -2,7 +2,7 @@ import { Hono } from "@hono/hono";
 import { z } from "@zod/zod";
 import { all, type Db, one } from "../db.ts";
 import { type AuthEnv, requireAdmin, requireUser } from "../lib/auth.ts";
-import { statsFor } from "../lib/stats.ts";
+import { parseRange, statsFor } from "../lib/stats.ts";
 
 const Hostname = z.string().trim().toLowerCase().max(253).regex(
   /^(?=.{1,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(:\d{1,5})?$/,
@@ -12,10 +12,6 @@ const SiteInput = z.object({
   hostname: Hostname,
   honor_dnt: z.boolean().default(true),
 });
-const Days = z.union([
-  z.coerce.number().int().min(1).max(365),
-  z.literal("today"),
-]).default(7);
 
 export function sitesRoutes(db: Db) {
   const app = new Hono<AuthEnv>();
@@ -69,9 +65,13 @@ export function sitesRoutes(db: Db) {
 
   app.get("/:id/stats", async (c) => {
     const id = Number(c.req.param("id"));
-    const days = Days.safeParse(c.req.query("days"));
-    if (!days.success) {
-      return c.json({ error: z.treeifyError(days.error) }, 400);
+    const range = parseRange(
+      c.req.query("days"),
+      c.req.query("from"),
+      c.req.query("to"),
+    );
+    if (!range.ok) {
+      return c.json({ error: range.error }, 400);
     }
     const site = await one<{
       id: number;
@@ -83,7 +83,7 @@ export function sitesRoutes(db: Db) {
       [id],
     );
     if (!site) return c.json({ error: "Not found" }, 404);
-    return c.json({ site, ...await statsFor(db, [id], days.data) });
+    return c.json({ site, ...await statsFor(db, [id], range.range) });
   });
 
   return app;

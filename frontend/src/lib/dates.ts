@@ -25,6 +25,21 @@ export function chartLabel(day: string, range: number | "today"): string {
 }
 
 /**
+ * The short axis label of one chart bucket, for the bucket kind an explicit
+ * range is aggregated over: the hour for hourly buckets, the month for
+ * monthly ones, and "9 Oct" style days and weeks otherwise.
+ */
+export function bucketLabel(day: string, bucket: "hour" | "day" | "week" | "month"): string {
+  if (bucket === "hour") return day.slice(11, 16);
+  if (bucket === "month") {
+    const [, month] = day.split("-");
+    return MONTHS[Number(month) - 1];
+  }
+  const [, month, date] = day.split("-");
+  return `${Number(date)} ${MONTHS[Number(month) - 1]}`;
+}
+
+/**
  * Show a date (a `YYYY-MM-DD` day, or a full timestamp) in one of the formats
  * of {@linkcode DATE_FORMATS}. Unknown formats fall back to YYYY-MM-DD.
  */

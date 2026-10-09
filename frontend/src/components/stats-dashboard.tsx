@@ -1,24 +1,7 @@
 import { Card } from "./card";
 import { BarList } from "./bar-list";
-import { chartLabel, formatDate } from "../lib/dates";
-
-/**
- * The stats of one dashboard: the same shape the backend returns for one
- * site and for several sites combined.
- */
-export type SiteStats = {
-  days: number | "today";
-  pageviews: number;
-  visitors: number;
-  byDay: { day: string; pageviews: number; visitors: number }[];
-  paths: { path: string; pageviews: number; visitors: number }[];
-  countries: { country: string; visitors: number }[];
-  devices: { device: string; visitors: number }[];
-  browsers: { browser: string; visitors: number }[];
-  os: { os: string; visitors: number }[];
-  referrers: { referrer: string; pageviews: number }[];
-  clicks: { name: string; clicks: number }[];
-};
+import { bucketLabel, chartLabel, formatDate } from "../lib/dates";
+import type { SiteStats } from "../lib/api";
 
 /** The dashboard content: totals, the chart and the breakdowns. */
 export function StatsDashboard({
@@ -29,6 +12,8 @@ export function StatsDashboard({
   dateFormat?: string;
 }) {
   const maxDay = Math.max(1, ...stats.byDay.map((d) => d.pageviews));
+  const label = (day: string) =>
+    stats.bucket ? bucketLabel(day, stats.bucket) : chartLabel(day, stats.days);
   return (
     <>
       <div className="grid grid-cols-2 gap-4">
@@ -60,7 +45,7 @@ export function StatsDashboard({
               {/* Thin the labels, so at most about 12 of them show. */}
               <span className="h-3 text-[10px] text-slate-400">
                 {i % Math.max(1, Math.ceil(stats.byDay.length / 12)) === 0
-                  ? chartLabel(d.day, stats.days)
+                  ? label(d.day)
                   : "\u00a0"}
               </span>
             </div>

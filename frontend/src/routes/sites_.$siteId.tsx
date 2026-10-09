@@ -2,9 +2,11 @@ import { useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Button } from "../components/button";
 import { Card } from "../components/card";
+import { DateRangeBar } from "../components/date-range-bar";
 import { ErrorText } from "../components/error-text";
-import { StatsDashboard, type SiteStats } from "../components/stats-dashboard";
-import { api, useApi } from "../lib/api";
+import { StatsDashboard } from "../components/stats-dashboard";
+import { api, useApi, type SiteStats } from "../lib/api";
+import { useDateRange } from "../lib/date-range";
 
 type Stats = SiteStats & {
   site: { id: number; hostname: string; honor_dnt: number };
@@ -16,8 +18,8 @@ function SitePage() {
   const { siteId } = Route.useParams();
   const { session } = Route.useRouteContext();
   const navigate = useNavigate();
-  const [days, setDays] = useState<number | "today">(7);
-  const { data, error, reload } = useApi<Stats>(`/sites/${siteId}/stats?days=${days}`);
+  const { range, setRange, query } = useDateRange();
+  const { data, error, reload } = useApi<Stats>(`/sites/${siteId}/stats?${query}`);
   const isAdmin = session.user?.is_admin === 1;
 
   if (error) return <ErrorText>{error}</ErrorText>;
@@ -25,25 +27,14 @@ function SitePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <h1 className="text-xl font-semibold">{data.site.hostname}</h1>
-        <div className="flex items-center gap-4">
-          <select
-            className="rounded border border-slate-300 px-2 py-1 text-sm"
-            value={days}
-            onChange={(e) => {
-              setDays(e.target.value === "today" ? ("today" as const) : Number(e.target.value));
-            }}
-          >
-            <option value="today">Today</option>
-            {[1, 7, 30, 90, 365].map((d) => (
-              <option key={d} value={d}>
-                {d === 1 ? "Last 24 hours" : `Last ${d} days`}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
+      <h1 className="text-xl font-semibold">{data.site.hostname}</h1>
+
+      <DateRangeBar
+        range={range}
+        onRange={setRange}
+        stats={data}
+        dateFormat={session.user?.date_format}
+      />
 
       <StatsDashboard stats={data} dateFormat={session.user?.date_format} />
 

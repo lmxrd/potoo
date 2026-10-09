@@ -771,3 +771,119 @@ Deno.test("global stats across sites", async () => {
     400,
   );
 });
+
+Deno.test("stats with an explicit minute-precise range", async () => {
+  await using db = await openDb(":memory:");
+  const app = createApp(db, () => "NO", "frontend/dist");
+  const admin = { email: "a@example.com", password: "correct horse battery" };
+  const setup = await app.request("/api/setup", json(admin));
+  const cookie = setup.headers.get("set-cookie")!.split(";")[0];
+  const auth = { cookie };
+  const site = await (await app.request(
+    "/api/sites",
+    json({ hostname: "example.com" }, auth),
+  )).json();
+  const insert = (path: string, visitor: string, at: string) =>
+    db.execute(
+      `INSERT INTO hits (site_id, kind, path, name, referrer, country, device, visitor, created_at)
+       VALUES (?, 'pageview', ?, NULL, NULL, NULL, 'desktop', ?, ?)`,
+      [site.id, path, visitor, at],
+    );
+  await insert("/a", "v1", "2026-01-01T12:10:00.000Z");
+  await insert("/a", "v2", "2026-01-01T12:40:00.000Z");
+  await insert("/b", "v3", "2026-01-02T09:15:00.000Z");
+  await insert("/b", "v4", "2026-01-02T09:16:00.000Z");
+  const get = (query: string) =>
+    app.request(`/api/sites/${site.id}/stats?${query}`, { headers: auth });
+
+  // Up to two days: hourly buckets, empty hours included.
+  const hourly = await (await get("from=2026-01-01T12:00&to=2026-01-01T14:00"))
+    .json();
+  assertEquals(hourly.bucket, "hour");
+  assertEquals(hourly.pageviews, 2);
+  assertEquals(hourly.byDay.length, 3);
+  assertEquals(hourly.byDay[0], {
+    day: "2026-01-01T12:00",
+    pageviews: 2,
+    visitors: 2,
+  });
+  assertEquals(hourly.byDay[1].pageviews, 0);
+  assertEquals(hourly.byDay[2].day, "2026-01-01T14:00");
+
+  // The `to` minute is included.
+  const clipped = await (await get("from=2026-01-01T12:00&to=2026-01-01T12:40"))
+    .json();
+  assertEquals(clipped.pageviews, 2);
+  assertEquals(clipped.byDay.length, 1);
+
+  // Beyond 48 hours, up to 35 days: daily buckets.
+  const daily = await (await get(
+    "from=2025-12-31T18:00&to=2026-01-03T09:16",
+  )).json();
+  assertEquals(daily.bucket, "day");
+  assertEquals(daily.pageviews, 4);
+  assertEquals(daily.byDay.map((d: { day: string }) => d.day), [
+    "2025-12-31",
+    "2026-01-01",
+    "2026-01-02",
+    "2026-01-03",
+  ]);
+  assertEquals(daily.byDay[1], {
+    day: "2026-01-01",
+    pageviews: 2,
+    visitors: 2,
+  });
+
+  // Up to 180 days: weekly buckets, aligned to Mondays.
+  const weekly = await (await get(
+    "from=2026-01-01T00:00&to=2026-03-01T00:00",
+  )).json();
+  assertEquals(weekly.bucket, "week");
+  assertEquals(weekly.byDay.length, 9);
+  assertEquals(weekly.byDay[0].day, "2025-12-29");
+  assertEquals(
+    weekly.byDay.every((d: { day: string }) =>
+      new Date(`${d.day}T00:00:00Z`).getUTCDay() === 1
+    ),
+    true,
+  );
+  // All four hits fall in the week of Dec 29.
+  assertEquals(weekly.byDay[0].pageviews, 4);
+
+  // Beyond that: monthly buckets.
+  const monthly = await (await get(
+    "from=2025-01-15T00:00&to=2026-03-01T00:00",
+  )).json();
+  assertEquals(monthly.bucket, "month");
+  assertEquals(monthly.byDay.length, 15);
+  assertEquals(monthly.byDay[0].day, "2025-01-01");
+  assertEquals(monthly.byDay.at(-1).day, "2026-03-01");
+
+  // The same range on the global stats route.
+  const global = await (await app.request(
+    "/api/stats?from=2026-01-01T12:00&to=2026-01-01T14:00",
+    { headers: auth },
+  )).json();
+  assertEquals(global.pageviews, 2);
+  assertEquals(global.bucket, "hour");
+
+  // Both bounds are required, ordered, well-formed, and at most 730 days.
+  assertEquals((await get("from=2026-01-01T12:00")).status, 400);
+  assertEquals((await get("to=2026-01-01T12:00")).status, 400);
+  assertEquals(
+    (await get("from=2026-01-01T12:00&to=2026-01-01T12:00"))
+      .status,
+    400,
+  );
+  assertEquals(
+    (await get("from=2026-01-01T12:00&to=2025-01-01T12:00"))
+      .status,
+    400,
+  );
+  assertEquals((await get("from=banana&to=2026-01-01T12:00")).status, 400);
+  assertEquals(
+    (await get("from=2024-01-01T00:00&to=2026-06-01T00:00"))
+      .status,
+    400,
+  );
+});

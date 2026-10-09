@@ -2,13 +2,9 @@ import { Hono } from "@hono/hono";
 import { z } from "@zod/zod";
 import { all, type Db } from "../db.ts";
 import { type AuthEnv, requireUser } from "../lib/auth.ts";
-import { statsFor } from "../lib/stats.ts";
+import { parseRange, statsFor } from "../lib/stats.ts";
 
 const Query = z.object({
-  days: z.union([
-    z.coerce.number().int().min(1).max(365),
-    z.literal("today"),
-  ]).default(7),
   // Comma separated site ids. Without it, every site is included.
   sites: z.string().regex(/^\d+(,\d+)*$/).optional(),
 });
@@ -22,13 +18,20 @@ export function statsRoutes(db: Db) {
     if (!parsed.success) {
       return c.json({ error: z.treeifyError(parsed.error) }, 400);
     }
-    const { days, sites } = parsed.data;
-    const siteIds = sites
-      ? sites.split(",").map(Number)
+    const range = parseRange(
+      c.req.query("days"),
+      c.req.query("from"),
+      c.req.query("to"),
+    );
+    if (!range.ok) {
+      return c.json({ error: range.error }, 400);
+    }
+    const siteIds = parsed.data.sites
+      ? parsed.data.sites.split(",").map(Number)
       : (await all<{ id: number }>(db, "SELECT id FROM sites")).map((s) =>
         s.id
       );
-    return c.json(await statsFor(db, siteIds, days));
+    return c.json(await statsFor(db, siteIds, range.range));
   });
 
   return app;
