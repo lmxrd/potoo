@@ -23,19 +23,28 @@ function SitePage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-xl font-semibold">{data.site.hostname}</h1>
-        <select
-          className="rounded border border-slate-300 px-2 py-1 text-sm"
-          value={days}
-          onChange={(e) => setDays(Number(e.target.value))}
-        >
-          {[1, 7, 30, 90, 365].map((d) => (
-            <option key={d} value={d}>
-              Last {d} day{d > 1 && "s"}
-            </option>
-          ))}
-        </select>
+        <div className="flex items-center gap-4">
+          <a
+            href={`/api/sites/${siteId}/export.csv`}
+            download
+            className="text-sm text-slate-600 hover:underline"
+          >
+            Export CSV
+          </a>
+          <select
+            className="rounded border border-slate-300 px-2 py-1 text-sm"
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+          >
+            {[1, 7, 30, 90, 365].map((d) => (
+              <option key={d} value={d}>
+                Last {d} day{d > 1 && "s"}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <StatsDashboard stats={data} />

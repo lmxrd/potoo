@@ -129,4 +129,5 @@ stats, static serving). Known limitations:
 - Stats show counts only, with a simple bar chart.
 - No manual click-through of the UI in a real browser has been done yet; the
   smoke run drives the HTTP API directly. Possible additions: per-site "view as
-  public" dashboards, CSV export, filtering by path or country, Dockerfile.
+  public" dashboards, filtering by path or country, Dockerfile. Each site's hits
+  can be exported as CSV from its page.

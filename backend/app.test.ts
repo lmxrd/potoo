@@ -348,6 +348,74 @@ Deno.test("multiple admins, roles and email change", async () => {
   );
 });
 
+Deno.test("CSV export of a site's hits", async () => {
+  Deno.env.set("TRUST_PROXY", "1");
+  await using db = await openDb(":memory:");
+  const app = createApp(db, () => "NO", "frontend/dist");
+  const setup = await app.request(
+    "/api/setup",
+    json({ email: "a@example.com", password: "correct horse battery" }),
+  );
+  const auth = { cookie: setup.headers.get("set-cookie")!.split(";")[0] };
+  const site = await (await app.request(
+    "/api/sites",
+    json({ hostname: "example.com" }, auth),
+  )).json();
+
+  const ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile";
+  const hit = (body: unknown, ip = "203.0.113.5") =>
+    app.request("/api/collect", {
+      method: "POST",
+      body: JSON.stringify(body),
+      headers: { "user-agent": ua, "x-forwarded-for": ip },
+    });
+  await hit({
+    type: "pageview",
+    host: "example.com",
+    path: "/a?x=1",
+    referrer: "https://ref.example.com/x",
+  });
+  await hit({
+    type: "click",
+    host: "example.com",
+    path: "/",
+    name: 'signup"btn',
+  }, "203.0.113.6");
+
+  assertEquals(
+    (await app.request(`/api/sites/${site.id}/export.csv`)).status,
+    401,
+  );
+
+  const res = await app.request(`/api/sites/${site.id}/export.csv`, {
+    headers: auth,
+  });
+  assertEquals(res.status, 200);
+  assertEquals(res.headers.get("content-type"), "text/csv; charset=utf-8");
+  assertEquals(
+    res.headers.get("content-disposition"),
+    `attachment; filename="potoo-example.com.csv"`,
+  );
+  const csv = await res.text();
+  const lines = csv.split("\n");
+  assertEquals(
+    lines[0],
+    "created_at,kind,path,name,referrer,country,device",
+  );
+  assertEquals(lines.length, 4); // header + 2 rows + trailing empty
+  // Values are quoted and inner quotes doubled; query strings never stored.
+  assertEquals(csv.includes('"signup""btn"'), true);
+  assertEquals(csv.includes('"/a",'), true);
+  assertEquals(csv.includes('"ref.example.com"'), true);
+  assertEquals(csv.includes('"NO","mobile"'), true);
+
+  assertEquals(
+    (await app.request(`/api/sites/9999/export.csv`, { headers: auth }))
+      .status,
+    404,
+  );
+});
+
 Deno.test("openDb applies and records migrations", async () => {
   const dir = await Deno.makeTempDir();
   const file = `${dir}/potoo.db`;

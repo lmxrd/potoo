@@ -83,5 +83,52 @@ export function sitesRoutes(db: Db) {
     return c.json({ site, ...await statsFor(db, [id], days.data) });
   });
 
+  // All hits of a site as CSV, so the data is portable. It only contains
+  // what is stored anyway: no IP addresses, no user agents.
+  app.get("/:id/export.csv", async (c) => {
+    const id = Number(c.req.param("id"));
+    const site = await one<{ hostname: string }>(
+      db,
+      "SELECT hostname FROM sites WHERE id = ?",
+      [id],
+    );
+    if (!site) return c.json({ error: "Not found" }, 404);
+    const hits = await all<{
+      created_at: string;
+      kind: string;
+      path: string;
+      name: string | null;
+      referrer: string | null;
+      country: string | null;
+      device: string;
+    }>(
+      db,
+      `SELECT created_at, kind, path, name, referrer, country, device
+       FROM hits WHERE site_id = ? ORDER BY created_at, id`,
+      [id],
+    );
+    const cell = (v: string | null) =>
+      v == null ? "" : `"${v.replaceAll('"', '""')}"`;
+    const csv = [
+      "created_at,kind,path,name,referrer,country,device",
+      ...hits.map((h) =>
+        [
+          h.created_at,
+          h.kind,
+          h.path,
+          h.name,
+          h.referrer,
+          h.country,
+          h.device,
+        ].map(cell).join(",")
+      ),
+    ].join("\n") + "\n";
+    return c.body(csv, 200, {
+      "content-type": "text/csv; charset=utf-8",
+      "content-disposition":
+        `attachment; filename="potoo-${site.hostname}.csv"`,
+    });
+  });
+
   return app;
 }
