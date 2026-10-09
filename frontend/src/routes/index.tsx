@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useApi } from "../api";
-import { Card, ErrorText } from "../components";
+import { ErrorText } from "../components";
 import { StatsDashboard, type SiteStats } from "../dashboard";
 
 type Site = { id: number; hostname: string; honor_dnt: number };
@@ -71,28 +71,6 @@ function Overview() {
       ) : (
         !statsError && <p className="text-slate-500">Loading…</p>
       )}
-
-      <Card title="Sites">
-        <ul className="divide-y divide-slate-200">
-          {sites?.length === 0 && (
-            <li className="py-2 text-slate-500">
-              No sites yet. Add one with "Add site" in the top bar, then embed the snippet from its
-              page.
-            </li>
-          )}
-          {sites?.map((s) => (
-            <li key={s.id} className="py-2">
-              <Link
-                to="/sites/$siteId"
-                params={{ siteId: String(s.id) }}
-                className="font-medium hover:underline"
-              >
-                {s.hostname}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      </Card>
     </div>
   );
 }

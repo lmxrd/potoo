@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetupRouteImport } from './routes/setup'
+import { Route as SitesRouteImport } from './routes/sites'
 import { Route as UsersRouteImport } from './routes/users'
 import { Route as SitesSiteIdRouteImport } from './routes/sites.$siteId'
 
@@ -36,15 +37,20 @@ const SetupRoute = SetupRouteImport.update({
   path: '/setup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SitesRoute = SitesRouteImport.update({
+  id: '/sites',
+  path: '/sites',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const UsersRoute = UsersRouteImport.update({
   id: '/users',
   path: '/users',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SitesSiteIdRoute = SitesSiteIdRouteImport.update({
-  id: '/sites/$siteId',
-  path: '/sites/$siteId',
-  getParentRoute: () => rootRouteImport,
+  id: '/$siteId',
+  path: '/$siteId',
+  getParentRoute: () => SitesRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -52,6 +58,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
+  '/sites': typeof SitesRouteWithChildren
   '/users': typeof UsersRoute
   '/sites/$siteId': typeof SitesSiteIdRoute
 }
@@ -60,6 +67,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
+  '/sites': typeof SitesRouteWithChildren
   '/users': typeof UsersRoute
   '/sites/$siteId': typeof SitesSiteIdRoute
 }
@@ -69,21 +77,36 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
+  '/sites': typeof SitesRouteWithChildren
   '/users': typeof UsersRoute
   '/sites/$siteId': typeof SitesSiteIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/login' | '/settings' | '/setup' | '/users' | '/sites/$siteId'
+    | '/'
+    | '/login'
+    | '/settings'
+    | '/setup'
+    | '/sites'
+    | '/users'
+    | '/sites/$siteId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login' | '/settings' | '/setup' | '/users' | '/sites/$siteId'
+  to:
+    | '/'
+    | '/login'
+    | '/settings'
+    | '/setup'
+    | '/sites'
+    | '/users'
+    | '/sites/$siteId'
   id:
     | '__root__'
     | '/'
     | '/login'
     | '/settings'
     | '/setup'
+    | '/sites'
     | '/users'
     | '/sites/$siteId'
   fileRoutesById: FileRoutesById
@@ -93,8 +116,8 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   SettingsRoute: typeof SettingsRoute
   SetupRoute: typeof SetupRoute
+  SitesRoute: typeof SitesRouteWithChildren
   UsersRoute: typeof UsersRoute
-  SitesSiteIdRoute: typeof SitesSiteIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -127,6 +150,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SetupRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/sites': {
+      id: '/sites'
+      path: '/sites'
+      fullPath: '/sites'
+      preLoaderRoute: typeof SitesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/users': {
       id: '/users'
       path: '/users'
@@ -136,21 +166,31 @@ declare module '@tanstack/react-router' {
     }
     '/sites/$siteId': {
       id: '/sites/$siteId'
-      path: '/sites/$siteId'
+      path: '/$siteId'
       fullPath: '/sites/$siteId'
       preLoaderRoute: typeof SitesSiteIdRouteImport
-      parentRoute: typeof rootRouteImport
+      parentRoute: typeof SitesRoute
     }
   }
 }
+
+interface SitesRouteChildren {
+  SitesSiteIdRoute: typeof SitesSiteIdRoute
+}
+
+const SitesRouteChildren: SitesRouteChildren = {
+  SitesSiteIdRoute: SitesSiteIdRoute,
+}
+
+const SitesRouteWithChildren = SitesRoute._addFileChildren(SitesRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   SettingsRoute: SettingsRoute,
   SetupRoute: SetupRoute,
+  SitesRoute: SitesRouteWithChildren,
   UsersRoute: UsersRoute,
-  SitesSiteIdRoute: SitesSiteIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
