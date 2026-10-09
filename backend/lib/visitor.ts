@@ -17,6 +17,30 @@ export function parseDevice(ua: string): Device | "bot" {
   return "desktop";
 }
 
+/**
+ * The coarse browser family, derived from the user agent. The order
+ * matters: Edge, Opera and iOS Chrome all contain "Chrome" and "Safari".
+ */
+export function parseBrowser(ua: string): string {
+  if (/edg\//i.test(ua)) return "Edge";
+  if (/opr\/|opera/i.test(ua)) return "Opera";
+  if (/crios|chrome\//i.test(ua)) return "Chrome";
+  if (/firefox\/|fxios/i.test(ua)) return "Firefox";
+  if (/safari\//i.test(ua)) return "Safari";
+  return "Other";
+}
+
+/** The coarse operating system, derived from the user agent. */
+export function parseOs(ua: string): string {
+  if (/windows/i.test(ua)) return "Windows";
+  if (/iphone|ipod/i.test(ua)) return "iOS";
+  if (/ipad/i.test(ua)) return "iPadOS";
+  if (/android/i.test(ua)) return "Android";
+  if (/macintosh|mac os x/i.test(ua)) return "macOS";
+  if (/linux|x11/i.test(ua)) return "Linux";
+  return "Other";
+}
+
 export function clientIp(c: Context): string {
   if (Deno.env.get("TRUST_PROXY") === "1") {
     const fwd = c.req.header("x-forwarded-for")?.split(",")[0].trim();

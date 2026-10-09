@@ -13,6 +13,8 @@ export type SiteStats = {
   paths: { path: string; pageviews: number; visitors: number }[];
   countries: { country: string; visitors: number }[];
   devices: { device: string; visitors: number }[];
+  browsers: { browser: string; visitors: number }[];
+  os: { os: string; visitors: number }[];
   referrers: { referrer: string; pageviews: number }[];
   clicks: { name: string; clicks: number }[];
 };
@@ -90,6 +92,22 @@ export function StatsDashboard({
             rows={stats.devices.map((d) => ({
               label: d.device,
               value: d.visitors,
+            }))}
+          />
+        </Card>
+        <Card title="Browsers">
+          <BarList
+            rows={stats.browsers.map((b) => ({
+              label: b.browser,
+              value: b.visitors,
+            }))}
+          />
+        </Card>
+        <Card title="Operating systems">
+          <BarList
+            rows={stats.os.map((o) => ({
+              label: o.os,
+              value: o.visitors,
             }))}
           />
         </Card>

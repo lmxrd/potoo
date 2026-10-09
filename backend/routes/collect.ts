@@ -2,7 +2,13 @@ import type { Context } from "@hono/hono";
 import { Hono } from "@hono/hono";
 import { cors } from "@hono/hono/cors";
 import { type Db, one } from "../db.ts";
-import { clientIp, parseDevice, visitorHash } from "../lib/visitor.ts";
+import {
+  clientIp,
+  parseBrowser,
+  parseDevice,
+  parseOs,
+  visitorHash,
+} from "../lib/visitor.ts";
 import type { GeoLookup } from "../lib/geo.ts";
 import { TRACKER_JS } from "../lib/tracker.ts";
 
@@ -68,11 +74,14 @@ export function collectRoutes(db: Db, geo: GeoLookup) {
     const ua = c.req.header("user-agent") ?? "";
     const device = parseDevice(ua);
     if (device === "bot") return;
+    const browser = parseBrowser(ua);
+    const os = parseOs(ua);
     const ip = clientIp(c);
 
     await db.execute(
-      `INSERT INTO hits (site_id, kind, path, name, referrer, country, device, visitor)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO hits
+         (site_id, kind, path, name, referrer, country, device, browser, os, visitor)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         site.id,
         hit.kind,
@@ -83,6 +92,8 @@ export function collectRoutes(db: Db, geo: GeoLookup) {
         hit.kind === "pageview" ? cleanReferrer(hit.referrer, host) : null,
         ip ? geo(ip) : null,
         device,
+        browser,
+        os,
         await visitorHash(db, site.id, ip, ua),
       ],
     );

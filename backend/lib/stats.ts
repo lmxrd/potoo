@@ -13,6 +13,8 @@ export type SiteStats = {
   paths: { path: string; pageviews: number; visitors: number }[];
   countries: { country: string; visitors: number }[];
   devices: { device: string; visitors: number }[];
+  browsers: { browser: string; visitors: number }[];
+  os: { os: string; visitors: number }[];
   referrers: { referrer: string; pageviews: number }[];
   clicks: { name: string; clicks: number }[];
 };
@@ -24,6 +26,8 @@ const EMPTY: Omit<SiteStats, "days"> = {
   paths: [],
   countries: [],
   devices: [],
+  browsers: [],
+  os: [],
   referrers: [],
   clicks: [],
 };
@@ -133,37 +137,54 @@ export async function statsFor(
     );
   const pv = "kind = 'pageview'";
 
-  const [totals, hitDays, paths, countries, devices, referrers, clicks] =
-    await Promise.all([
-      q<{ pageviews: number; visitors: number }>(
-        "COUNT(*) AS pageviews, COUNT(DISTINCT visitor) AS visitors",
-        `AND ${pv}`,
-      ),
-      q<{ day: string; pageviews: number; visitors: number }>(
-        `${sql} AS day, COUNT(*) AS pageviews, COUNT(DISTINCT visitor) AS visitors`,
-        `AND ${pv} GROUP BY day ORDER BY day`,
-      ),
-      q<{ path: string; pageviews: number; visitors: number }>(
-        "path, COUNT(*) AS pageviews, COUNT(DISTINCT visitor) AS visitors",
-        `AND ${pv} GROUP BY path ORDER BY pageviews DESC LIMIT 50`,
-      ),
-      q<{ country: string; visitors: number }>(
-        "COALESCE(country, '??') AS country, COUNT(DISTINCT visitor) AS visitors",
-        `AND ${pv} GROUP BY country ORDER BY visitors DESC LIMIT 50`,
-      ),
-      q<{ device: string; visitors: number }>(
-        "device, COUNT(DISTINCT visitor) AS visitors",
-        `AND ${pv} GROUP BY device ORDER BY visitors DESC`,
-      ),
-      q<{ referrer: string; pageviews: number }>(
-        "referrer, COUNT(*) AS pageviews",
-        `AND ${pv} AND referrer IS NOT NULL GROUP BY referrer ORDER BY pageviews DESC LIMIT 20`,
-      ),
-      q<{ name: string; clicks: number }>(
-        "name, COUNT(*) AS clicks",
-        `AND kind = 'click' GROUP BY name ORDER BY clicks DESC LIMIT 50`,
-      ),
-    ]);
+  const [
+    totals,
+    hitDays,
+    paths,
+    countries,
+    devices,
+    browsers,
+    os,
+    referrers,
+    clicks,
+  ] = await Promise.all([
+    q<{ pageviews: number; visitors: number }>(
+      "COUNT(*) AS pageviews, COUNT(DISTINCT visitor) AS visitors",
+      `AND ${pv}`,
+    ),
+    q<{ day: string; pageviews: number; visitors: number }>(
+      `${sql} AS day, COUNT(*) AS pageviews, COUNT(DISTINCT visitor) AS visitors`,
+      `AND ${pv} GROUP BY day ORDER BY day`,
+    ),
+    q<{ path: string; pageviews: number; visitors: number }>(
+      "path, COUNT(*) AS pageviews, COUNT(DISTINCT visitor) AS visitors",
+      `AND ${pv} GROUP BY path ORDER BY pageviews DESC LIMIT 50`,
+    ),
+    q<{ country: string; visitors: number }>(
+      "COALESCE(country, '??') AS country, COUNT(DISTINCT visitor) AS visitors",
+      `AND ${pv} GROUP BY country ORDER BY visitors DESC LIMIT 50`,
+    ),
+    q<{ device: string; visitors: number }>(
+      "device, COUNT(DISTINCT visitor) AS visitors",
+      `AND ${pv} GROUP BY device ORDER BY visitors DESC`,
+    ),
+    q<{ browser: string; visitors: number }>(
+      "browser, COUNT(DISTINCT visitor) AS visitors",
+      `AND ${pv} GROUP BY browser ORDER BY visitors DESC`,
+    ),
+    q<{ os: string; visitors: number }>(
+      "os, COUNT(DISTINCT visitor) AS visitors",
+      `AND ${pv} GROUP BY os ORDER BY visitors DESC`,
+    ),
+    q<{ referrer: string; pageviews: number }>(
+      "referrer, COUNT(*) AS pageviews",
+      `AND ${pv} AND referrer IS NOT NULL GROUP BY referrer ORDER BY pageviews DESC LIMIT 20`,
+    ),
+    q<{ name: string; clicks: number }>(
+      "name, COUNT(*) AS clicks",
+      `AND kind = 'click' GROUP BY name ORDER BY clicks DESC LIMIT 50`,
+    ),
+  ]);
   // Zero fill the periods without hits, so the chart shows every bucket.
   const hits = new Map(hitDays.map((d) => [d.day, d]));
   const byDay = keys.map((day) => ({
@@ -178,6 +199,8 @@ export async function statsFor(
     paths,
     countries,
     devices,
+    browsers,
+    os,
     referrers,
     clicks,
   };

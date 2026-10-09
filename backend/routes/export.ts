@@ -21,9 +21,12 @@ type HitRow = {
   referrer: string | null;
   country: string | null;
   device: string;
+  browser: string;
+  os: string;
 };
 
-const COLUMNS = "site,created_at,kind,path,name,referrer,country,device";
+const COLUMNS =
+  "site,created_at,kind,path,name,referrer,country,device,browser,os";
 
 const cell = (v: string | null) =>
   v == null ? "" : `"${v.replaceAll('"', '""')}"`;
@@ -66,7 +69,7 @@ export function exportRoutes(db: Db) {
     const hits = await all<HitRow>(
       db,
       `SELECT s.hostname AS site, h.created_at, h.kind, h.path, h.name,
-              h.referrer, h.country, h.device
+              h.referrer, h.country, h.device, h.browser, h.os
        FROM hits h JOIN sites s ON s.id = h.site_id
        WHERE ${where.join(" AND ")}
        ORDER BY h.created_at, h.id`,
@@ -84,6 +87,8 @@ export function exportRoutes(db: Db) {
             h.referrer,
             h.country,
             h.device,
+            h.browser,
+            h.os,
           ].map(cell).join(",")
         ),
       )

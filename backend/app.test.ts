@@ -406,7 +406,7 @@ Deno.test("CSV export with site and date selection", async () => {
   const csv = await allRes.text();
   assertEquals(
     csv.split("\n")[0],
-    "site,created_at,kind,path,name,referrer,country,device",
+    "site,created_at,kind,path,name,referrer,country,device,browser,os",
   );
   assertEquals(csv.split("\n").length - 1, 4); // header + 3 hits
   assertEquals(csv.includes('"a.example.com"'), true);
@@ -433,6 +433,66 @@ Deno.test("CSV export with site and date selection", async () => {
     (await (await get("?sites=999")).text()).split("\n").length - 1,
     1,
   );
+});
+
+Deno.test("browser and os are tracked", async () => {
+  Deno.env.set("TRUST_PROXY", "1");
+  await using db = await openDb(":memory:");
+  const app = createApp(db, () => "NO", "frontend/dist");
+  const setup = await app.request(
+    "/api/setup",
+    json({ email: "a@example.com", password: "correct horse battery" }),
+  );
+  const auth = { cookie: setup.headers.get("set-cookie")!.split(";")[0] };
+  const site = await (await app.request(
+    "/api/sites",
+    json({ hostname: "example.com" }, auth),
+  )).json();
+
+  const hit = (ua: string) =>
+    app.request("/api/collect", {
+      method: "POST",
+      body: JSON.stringify({
+        type: "pageview",
+        host: "example.com",
+        path: "/",
+      }),
+      headers: { "user-agent": ua, "x-forwarded-for": "203.0.113.7" },
+    });
+  // Edge contains "Chrome" and "Safari", so it must be matched first.
+  await hit(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/130.0.0.0",
+  );
+  await hit(
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15",
+  );
+  await hit(
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/131.0.6778.73 Mobile/15E148 Safari/604.1",
+  );
+  await hit(
+    "Mozilla/5.0 (X11; Linux x86_64; rv:132.0) Gecko/20100101 Firefox/132.0",
+  );
+
+  const stats = await (await app.request(
+    `/api/sites/${site.id}/stats?days=7`,
+    { headers: auth },
+  )).json();
+  assertEquals(
+    stats.browsers.map((b: { browser: string }) => b.browser).sort(),
+    ["Chrome", "Edge", "Firefox", "Safari"],
+  );
+  assertEquals(
+    stats.os.map((o: { os: string }) => o.os).sort(),
+    ["Linux", "Windows", "iOS", "macOS"],
+  );
+
+  // The export carries the new columns too.
+  const csv = await (await app.request(
+    `/api/export.csv?sites=${site.id}`,
+    { headers: auth },
+  )).text();
+  assertEquals(csv.includes('"Edge","Windows"'), true);
+  assertEquals(csv.includes('"Safari","macOS"'), true);
 });
 
 Deno.test("the bar chart series is complete and calendar aligned", async () => {
@@ -605,6 +665,7 @@ Deno.test("openDb applies and records migrations", async () => {
         "20261008090000_init_schema.ts",
         "20261009000000_allow_multiple_admins.ts",
         "20261009010000_user_date_format.ts",
+        "20261009020000_browser_os.ts",
       ],
     );
   }
@@ -630,6 +691,7 @@ Deno.test("openDb applies and records migrations", async () => {
         "20261008090000_init_schema.ts",
         "20261009000000_allow_multiple_admins.ts",
         "20261009010000_user_date_format.ts",
+        "20261009020000_browser_os.ts",
       ],
     );
     const users = await all<{ email: string }>(
