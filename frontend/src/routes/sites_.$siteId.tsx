@@ -8,7 +8,7 @@ type Stats = SiteStats & {
   site: { id: number; hostname: string; honor_dnt: number };
 };
 
-export const Route = createFileRoute("/sites/$siteId")({ component: SitePage });
+export const Route = createFileRoute("/sites_/$siteId")({ component: SitePage });
 
 function SitePage() {
   const { siteId } = Route.useParams();
