@@ -13,17 +13,24 @@ import {
 /**
  * The toolbar above the dashboard: preset ranges, exact from and to times
  * down to the minute, and the CSV export of the selected view.
+ *
+ * The custom times use the browser's native datetime picker: it is the most
+ * robust input there is, but it always displays and opens in the browser's
+ * locale, so the configured formats apply to the app's own text (the
+ * summary line, the chart), not to the picker.
  */
 export function DateRangeBar({
   range,
   onRange,
   stats = null,
   dateFormat,
+  timeFormat,
 }: {
   range: DateRange;
   onRange: (range: DateRange) => void;
   stats?: SiteStats | null;
   dateFormat?: string;
+  timeFormat?: string;
 }) {
   const window = rangeWindow(range);
   const from = range.preset === "custom" ? range.from : (window && localInput(window.from)) || "";
@@ -31,7 +38,7 @@ export function DateRangeBar({
 
   const exportCsv = () => {
     if (!stats) return;
-    download("potoo-stats.csv", statsCsv(stats, rangeSummary(range, dateFormat)));
+    download("potoo-stats.csv", statsCsv(stats, rangeSummary(range, dateFormat, timeFormat)));
   };
 
   return (
@@ -52,19 +59,21 @@ export function DateRangeBar({
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2 text-sm text-slate-500">
+        <div className="flex w-full items-center gap-2 sm:w-auto">
           <input
             type="datetime-local"
             aria-label="Range start"
-            className="rounded border border-slate-300 px-2 py-1"
+            className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1.5 sm:flex-none"
             value={from}
             onChange={(e) => onRange({ preset: "custom", from: e.target.value, to })}
           />
-          <span aria-hidden="true">&ndash;</span>
+          <span aria-hidden="true" className="text-slate-400">
+            &ndash;
+          </span>
           <input
             type="datetime-local"
             aria-label="Range end"
-            className="rounded border border-slate-300 px-2 py-1"
+            className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1.5 sm:flex-none"
             value={to}
             onChange={(e) => onRange({ preset: "custom", from, to: e.target.value })}
           />
@@ -75,7 +84,7 @@ export function DateRangeBar({
         </Button>
       </div>
       <p className="mt-2 text-xs text-slate-500">
-        {rangeSummary(range, dateFormat)}
+        {rangeSummary(range, dateFormat, timeFormat)}
         {stats &&
           ` \u00b7 ${stats.pageviews.toLocaleString()} page views \u00b7 ${stats.visitors.toLocaleString()} visitors`}
       </p>
