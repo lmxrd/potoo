@@ -5,6 +5,7 @@ export type User = {
   email: string;
   is_admin: number;
   date_format: string;
+  time_format: string;
 };
 export type Session = { needsSetup: boolean; user: User | null };
 

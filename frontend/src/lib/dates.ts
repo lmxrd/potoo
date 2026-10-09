@@ -10,12 +10,23 @@ export const DATE_FORMATS = [
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /**
+ * A `HH:MM` time as configured: 24-hour by default, or 12-hour with AM/PM.
+ */
+export function formatTime(time: string, format = "24h"): string {
+  if (format !== "12h") return time;
+  const [hour, minute] = time.split(":").map(Number);
+  const ampm = hour < 12 ? "AM" : "PM";
+  const h12 = hour % 12 || 12;
+  return `${h12}:${String(minute).padStart(2, "0")} ${ampm}`;
+}
+
+/**
  * The short axis label of one chart bucket, for the range it belongs to:
  * the hour for hourly buckets, the month for a year, and "9 Oct" style
  * days otherwise.
  */
-export function chartLabel(day: string, range: number | "today"): string {
-  if (range === "today" || range === 1) return day.slice(11, 16);
+export function chartLabel(day: string, range: number | "today", timeFormat = "24h"): string {
+  if (range === "today" || range === 1) return formatTime(day.slice(11, 16), timeFormat);
   if (typeof range === "number" && range > 90) {
     const [, month, year] = day.split("-");
     return Number(month) === 1 ? `${MONTHS[0]} ${year.slice(2)}` : MONTHS[Number(month) - 1];
@@ -29,8 +40,12 @@ export function chartLabel(day: string, range: number | "today"): string {
  * range is aggregated over: the hour for hourly buckets, the month for
  * monthly ones, and "9 Oct" style days and weeks otherwise.
  */
-export function bucketLabel(day: string, bucket: "hour" | "day" | "week" | "month"): string {
-  if (bucket === "hour") return day.slice(11, 16);
+export function bucketLabel(
+  day: string,
+  bucket: "hour" | "day" | "week" | "month",
+  timeFormat = "24h",
+): string {
+  if (bucket === "hour") return formatTime(day.slice(11, 16), timeFormat);
   if (bucket === "month") {
     const [, month] = day.split("-");
     return MONTHS[Number(month) - 1];

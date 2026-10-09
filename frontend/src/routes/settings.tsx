@@ -5,7 +5,7 @@ import { Card } from "../components/card";
 import { ErrorText } from "../components/error-text";
 import { Input } from "../components/input";
 import { api } from "../lib/api";
-import { DATE_FORMATS, formatDate } from "../lib/dates";
+import { DATE_FORMATS, formatDate, formatTime } from "../lib/dates";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
 
@@ -29,6 +29,9 @@ function Settings() {
       </Card>
       <Card title="Date format">
         <DateFormat current={user.date_format} />
+      </Card>
+      <Card title="Time format">
+        <TimeFormat current={user.time_format} />
       </Card>
       <Card title="Change email">
         <ChangeEmail current={user.email} />
@@ -71,6 +74,46 @@ function DateFormat({ current }: { current: string }) {
       </select>
       <p className="text-xs text-slate-500">
         Dates across the app, for example {formatDate(new Date().toISOString(), value)}.
+      </p>
+      <ErrorText>{error}</ErrorText>
+    </div>
+  );
+}
+
+const TIME_FORMATS = [
+  { value: "24h", label: "24 hours (14:30)" },
+  { value: "12h", label: "12 hours (2:30 PM)" },
+];
+
+function TimeFormat({ current }: { current: string }) {
+  const [value, setValue] = useState(current);
+  const [error, setError] = useState<string>();
+  const router = useRouter();
+  return (
+    <div className="space-y-2">
+      <select
+        className="rounded border border-slate-300 px-2 py-2 text-sm"
+        value={value}
+        onChange={async (e) => {
+          const next = e.target.value;
+          setValue(next);
+          setError(undefined);
+          try {
+            await api("/settings", { body: { time_format: next } });
+            await router.invalidate();
+          } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed");
+          }
+        }}
+      >
+        {TIME_FORMATS.map((f) => (
+          <option key={f.value} value={f.value}>
+            {f.label}
+          </option>
+        ))}
+      </select>
+      <p className="text-xs text-slate-500">
+        Times across the app, for example {formatTime("14:30", value)}.
       </p>
       <ErrorText>{error}</ErrorText>
     </div>

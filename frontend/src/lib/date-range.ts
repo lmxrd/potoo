@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { formatDate } from "./dates";
+import { formatDate, formatTime } from "./dates";
 
 /** The preset ranges, the same ones the backend's `days` param accepts. */
 export type RangePreset = "today" | 1 | 7 | 30 | 90 | 365;
@@ -80,12 +80,12 @@ export function localInput(date: Date): string {
 }
 
 /** The range as one line of local text, e.g. "9 Oct 2026 14:30 – 16:00". */
-export function rangeSummary(range: DateRange, format = "YYYY-MM-DD"): string {
+export function rangeSummary(range: DateRange, format = "YYYY-MM-DD", timeFormat = "24h"): string {
   const window = rangeWindow(range);
   if (!window) return "Invalid range: the start must be before the end.";
   const p = (n: number) => String(n).padStart(2, "0");
   const day = (d: Date) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-  const time = (d: Date) => `${p(d.getHours())}:${p(d.getMinutes())}`;
+  const time = (d: Date) => formatTime(`${p(d.getHours())}:${p(d.getMinutes())}`, timeFormat);
   return `${formatDate(
     day(window.from),
     format,

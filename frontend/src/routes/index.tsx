@@ -47,10 +47,15 @@ function Overview() {
         onRange={setRange}
         stats={stats}
         dateFormat={session.user?.date_format}
+        timeFormat={session.user?.time_format}
       />
       <ErrorText>{statsError}</ErrorText>
       {stats ? (
-        <StatsDashboard stats={stats} dateFormat={session.user?.date_format} />
+        <StatsDashboard
+          stats={stats}
+          dateFormat={session.user?.date_format}
+          timeFormat={session.user?.time_format}
+        />
       ) : (
         !statsError && <p className="text-slate-500">Loading…</p>
       )}

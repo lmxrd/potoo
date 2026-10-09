@@ -34,9 +34,14 @@ function SitePage() {
         onRange={setRange}
         stats={data}
         dateFormat={session.user?.date_format}
+        timeFormat={session.user?.time_format}
       />
 
-      <StatsDashboard stats={data} dateFormat={session.user?.date_format} />
+      <StatsDashboard
+        stats={data}
+        dateFormat={session.user?.date_format}
+        timeFormat={session.user?.time_format}
+      />
 
       <Snippet hostname={data.site.hostname} />
 

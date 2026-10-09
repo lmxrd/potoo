@@ -621,6 +621,7 @@ Deno.test("date format setting", async () => {
   const before = await (await app.request("/api/session", { headers: auth }))
     .json();
   assertEquals(before.user.date_format, "YYYY-MM-DD");
+  assertEquals(before.user.time_format, "24h");
 
   assertEquals(
     (await app.request(
@@ -633,12 +634,28 @@ Deno.test("date format setting", async () => {
     .json();
   assertEquals(after.user.date_format, "DD/MM/YYYY");
 
+  assertEquals(
+    (await app.request(
+      "/api/settings",
+      json({ time_format: "12h" }, auth),
+    )).status,
+    204,
+  );
+  const twelve = await (await app.request("/api/session", { headers: auth }))
+    .json();
+  assertEquals(twelve.user.time_format, "12h");
+
   // Only the known formats are accepted.
   assertEquals(
     (await app.request(
       "/api/settings",
       json({ date_format: "DD-MM-YYYY" }, auth),
     )).status,
+    400,
+  );
+  assertEquals(
+    (await app.request("/api/settings", json({ time_format: "13h" }, auth)))
+      .status,
     400,
   );
   assertEquals(
@@ -666,6 +683,7 @@ Deno.test("openDb applies and records migrations", async () => {
         "20261009000000_allow_multiple_admins.ts",
         "20261009010000_user_date_format.ts",
         "20261009020000_browser_os.ts",
+        "20261009030000_user_time_format.ts",
       ],
     );
   }
@@ -692,6 +710,7 @@ Deno.test("openDb applies and records migrations", async () => {
         "20261009000000_allow_multiple_admins.ts",
         "20261009010000_user_date_format.ts",
         "20261009020000_browser_os.ts",
+        "20261009030000_user_time_format.ts",
       ],
     );
     const users = await all<{ email: string }>(

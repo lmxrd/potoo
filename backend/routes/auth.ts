@@ -10,6 +10,7 @@ import {
   hashPassword,
   requireAdmin,
   requireUser,
+  TIME_FORMATS,
   verifyPassword,
 } from "../lib/auth.ts";
 import { clientIp } from "../lib/visitor.ts";
@@ -138,16 +139,30 @@ export function authRoutes(db: Db) {
 
   // Change the signed-in user's own preferences.
   app.post("/settings", requireUser(db), async (c) => {
-    const parsed = z.object({ date_format: z.enum(DATE_FORMATS) }).safeParse(
-      await c.req.json().catch(() => null),
-    );
+    const parsed = z.object({
+      date_format: z.enum(DATE_FORMATS).optional(),
+      time_format: z.enum(TIME_FORMATS).optional(),
+    })
+      .refine((data) => data.date_format || data.time_format, {
+        message: "A setting to change is required",
+      })
+      .safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) {
       return c.json({ error: z.treeifyError(parsed.error) }, 400);
     }
-    await db.execute("UPDATE users SET date_format = ? WHERE id = ?", [
-      parsed.data.date_format,
-      c.get("user").id,
-    ]);
+    const id = c.get("user").id;
+    if (parsed.data.date_format) {
+      await db.execute("UPDATE users SET date_format = ? WHERE id = ?", [
+        parsed.data.date_format,
+        id,
+      ]);
+    }
+    if (parsed.data.time_format) {
+      await db.execute("UPDATE users SET time_format = ? WHERE id = ?", [
+        parsed.data.time_format,
+        id,
+      ]);
+    }
     return c.body(null, 204);
   });
 

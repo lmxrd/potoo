@@ -7,6 +7,7 @@ export type User = {
   email: string;
   is_admin: number;
   date_format: string;
+  time_format: string;
 };
 export type AuthEnv = { Variables: { user: User } };
 
@@ -18,6 +19,9 @@ export const DATE_FORMATS = [
   "DD.MM.YYYY",
   "D MMM YYYY",
 ] as const;
+
+/** The time formats a user can pick from, for displaying times. */
+export const TIME_FORMATS = ["24h", "12h"] as const;
 
 const COOKIE = "potoo_session";
 const SESSION_DAYS = 30;
@@ -103,7 +107,7 @@ export async function currentUser(db: Db, c: Context) {
   if (!token) return undefined;
   return one<User>(
     db,
-    `SELECT u.id, u.email, u.is_admin, u.date_format FROM sessions s
+    `SELECT u.id, u.email, u.is_admin, u.date_format, u.time_format FROM sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ? AND s.expires_at > ?`,
     [await sha256(token), new Date().toISOString()],
