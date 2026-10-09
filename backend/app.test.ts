@@ -204,7 +204,7 @@ Deno.test("password change and admin reset", async () => {
       `/api/users/${admin.id}/password`,
       json({ new_password: "reset pass 123" }, auth),
     )).status,
-    404,
+    204,
   );
   assertEquals(
     (await app.request(
@@ -212,6 +212,139 @@ Deno.test("password change and admin reset", async () => {
       json({ email: "u@example.com", password: "reset pass 123" }),
     )).status,
     204,
+  );
+});
+
+Deno.test("multiple admins, roles and email change", async () => {
+  await using db = await openDb(":memory:");
+  const app = createApp(db, () => "NO", "frontend/dist");
+  const setup = await app.request(
+    "/api/setup",
+    json({ email: "a@example.com", password: "correct horse battery" }),
+  );
+  const auth = { cookie: setup.headers.get("set-cookie")!.split(";")[0] };
+
+  // Creating a user with a role: a second admin, and a regular user.
+  assertEquals(
+    (await app.request(
+      "/api/users",
+      json(
+        {
+          email: "b@example.com",
+          password: "another long pass",
+          is_admin: true,
+        },
+        auth,
+      ),
+    )).status,
+    201,
+  );
+  assertEquals(
+    (await app.request(
+      "/api/users",
+      json({ email: "u@example.com", password: "another long pass" }, auth),
+    )).status,
+    201,
+  );
+  const users = await (await app.request("/api/users", { headers: auth }))
+    .json();
+  const admins = users.filter((u: { is_admin: number }) => u.is_admin === 1);
+  assertEquals(admins.length, 2);
+
+  // An admin promotes a regular user, and demotes another admin.
+  const u = users.find((x: { email: string }) => x.email === "u@example.com");
+  const b = users.find((x: { email: string }) => x.email === "b@example.com");
+  const patch = (id: number, isAdmin: boolean) =>
+    app.request(`/api/users/${id}`, {
+      method: "PATCH",
+      headers: { ...auth, "content-type": "application/json" },
+      body: JSON.stringify({ is_admin: isAdmin }),
+    });
+  assertEquals((await patch(u.id, true)).status, 204);
+  assertEquals((await patch(b.id, false)).status, 204);
+  const after = await (await app.request("/api/users", { headers: auth }))
+    .json();
+  assertEquals(
+    after.filter((x: { is_admin: number }) => x.is_admin === 1).length,
+    2,
+  );
+
+  // The last admin cannot be demoted or deleted. Demoting the first
+  // admin leaves u as the only admin, so the admin session from here on
+  // is u's.
+  assertEquals((await patch(1, false)).status, 204);
+  const loginU = await app.request(
+    "/api/login",
+    json({ email: "u@example.com", password: "another long pass" }),
+  );
+  const authU = { cookie: loginU.headers.get("set-cookie")!.split(";")[0] };
+  const patchU = (id: number, isAdmin: boolean) =>
+    app.request(`/api/users/${id}`, {
+      method: "PATCH",
+      headers: { ...authU, "content-type": "application/json" },
+      body: JSON.stringify({ is_admin: isAdmin }),
+    });
+  assertEquals((await patchU(u.id, false)).status, 409);
+  assertEquals(
+    (await app.request(`/api/users/${u.id}`, {
+      method: "DELETE",
+      headers: authU,
+    }))
+      .status,
+    409,
+  );
+
+  // Admins can delete other admins and reset their passwords.
+  assertEquals((await patchU(1, true)).status, 204);
+  assertEquals(
+    (await app.request(`/api/users/1`, { method: "DELETE", headers: authU }))
+      .status,
+    204,
+  );
+  assertEquals(
+    (await app.request(
+      `/api/users/${b.id}/password`,
+      json({ new_password: "reset pass 123" }, authU),
+    )).status,
+    204,
+  );
+  assertEquals(
+    (await app.request(
+      "/api/login",
+      json({ email: "b@example.com", password: "reset pass 123" }),
+    )).status,
+    204,
+  );
+
+  // Changing your own email: the new one logs in, the old one does not,
+  // and a taken email is refused.
+  assertEquals(
+    (await app.request("/api/email", json({ email: "new@example.com" }, authU)))
+      .status,
+    204,
+  );
+  assertEquals(
+    (await app.request(
+      "/api/login",
+      json({ email: "u@example.com", password: "another long pass" }),
+    )).status,
+    401,
+  );
+  assertEquals(
+    (await app.request(
+      "/api/login",
+      json({ email: "new@example.com", password: "another long pass" }),
+    )).status,
+    204,
+  );
+  assertEquals(
+    (await app.request("/api/email", json({ email: "b@example.com" }, authU)))
+      .status,
+    409,
+  );
+  assertEquals(
+    (await app.request("/api/email", json({ email: "x@y.com" }))).status,
+    401,
   );
 });
 
@@ -226,7 +359,13 @@ Deno.test("openDb applies and records migrations", async () => {
       db,
       "SELECT file_name AS name FROM nessie_migrations",
     );
-    assertEquals(applied.map((m) => m.name), ["20261008090000_init_schema.ts"]);
+    assertEquals(
+      applied.map((m) => m.name),
+      [
+        "20261008090000_init_schema.ts",
+        "20261009000000_allow_multiple_admins.ts",
+      ],
+    );
   }
 
   // A user created between the two runs, as a database that predates
@@ -244,7 +383,13 @@ Deno.test("openDb applies and records migrations", async () => {
       reopened,
       "SELECT file_name AS name FROM nessie_migrations",
     );
-    assertEquals(applied.map((m) => m.name), ["20261008090000_init_schema.ts"]);
+    assertEquals(
+      applied.map((m) => m.name),
+      [
+        "20261008090000_init_schema.ts",
+        "20261009000000_allow_multiple_admins.ts",
+      ],
+    );
     const users = await all<{ email: string }>(
       reopened,
       "SELECT email FROM users",

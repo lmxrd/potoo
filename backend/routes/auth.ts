@@ -14,13 +14,21 @@ import {
 import { clientIp } from "../lib/visitor.ts";
 
 const Password = z.string().min(10).max(200);
+const Email = z.email().max(254).transform((e) => e.toLowerCase());
 const Credentials = z.object({
-  email: z.email().max(254).transform((e) => e.toLowerCase()),
+  email: Email,
   password: Password,
 });
 
 const hasUsers = async (db: Db) =>
   (await one<{ n: number }>(db, "SELECT COUNT(*) AS n FROM users"))!.n > 0;
+
+const adminCount = async (db: Db) =>
+  (await one<{ n: number }>(
+    db,
+    "SELECT COUNT(*) AS n FROM users WHERE is_admin = 1",
+  ))!
+    .n;
 
 // In-memory throttle for failed logins: after MAX_FAILURES within WINDOW_MS
 // the IP + email pair is locked out until the oldest failure expires.
@@ -106,6 +114,27 @@ export function authRoutes(db: Db) {
     return c.body(null, 204);
   });
 
+  // Change the signed-in user's own email.
+  app.post("/email", requireUser(db), async (c) => {
+    const parsed = z.object({ email: Email }).safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return c.json({ error: z.treeifyError(parsed.error) }, 400);
+    }
+    const taken = await one(
+      db,
+      "SELECT 1 FROM users WHERE email = ? AND id != ?",
+      [parsed.data.email, c.get("user").id],
+    );
+    if (taken) return c.json({ error: "Email already in use" }, 409);
+    await db.execute("UPDATE users SET email = ? WHERE id = ?", [
+      parsed.data.email,
+      c.get("user").id,
+    ]);
+    return c.body(null, 204);
+  });
+
   // Change the signed-in user's own password.
   app.post("/password", requireUser(db), async (c) => {
     const parsed = z.object({
@@ -143,7 +172,11 @@ export function authRoutes(db: Db) {
       ).toRecords(),
     ));
   users.post("/", async (c) => {
-    const parsed = Credentials.safeParse(await c.req.json().catch(() => null));
+    const parsed = z.object({
+      email: Email,
+      password: Password,
+      is_admin: z.boolean().default(false),
+    }).safeParse(await c.req.json().catch(() => null));
     if (!parsed.success) {
       return c.json({ error: z.treeifyError(parsed.error) }, 400);
     }
@@ -153,14 +186,56 @@ export function authRoutes(db: Db) {
       return c.json({ error: "Email already in use" }, 409);
     }
     await db.execute(
-      "INSERT INTO users (email, password_hash, is_admin) VALUES (?, ?, 0)",
-      [parsed.data.email, await hashPassword(parsed.data.password)],
+      "INSERT INTO users (email, password_hash, is_admin) VALUES (?, ?, ?)",
+      [
+        parsed.data.email,
+        await hashPassword(parsed.data.password),
+        parsed.data.is_admin ? 1 : 0,
+      ],
     );
     return c.body(null, 201);
   });
+  // Change the role of a user. The last admin cannot be demoted, so the
+  // app always has at least one admin left.
+  users.patch("/:id", async (c) => {
+    const parsed = z.object({ is_admin: z.boolean() }).safeParse(
+      await c.req.json().catch(() => null),
+    );
+    if (!parsed.success) {
+      return c.json({ error: z.treeifyError(parsed.error) }, 400);
+    }
+    const id = Number(c.req.param("id"));
+    const target = await one<{ is_admin: number }>(
+      db,
+      "SELECT is_admin FROM users WHERE id = ?",
+      [id],
+    );
+    if (!target) return c.json({ error: "Not found" }, 404);
+    if (
+      target.is_admin === 1 && !parsed.data.is_admin &&
+      (await adminCount(db)) === 1
+    ) {
+      return c.json({ error: "Cannot demote the last admin" }, 409);
+    }
+    await db.execute("UPDATE users SET is_admin = ? WHERE id = ?", [
+      parsed.data.is_admin ? 1 : 0,
+      id,
+    ]);
+    return c.body(null, 204);
+  });
+
   users.delete("/:id", async (c) => {
     const id = Number(c.req.param("id"));
-    await db.execute("DELETE FROM users WHERE id = ? AND is_admin = 0", [id]);
+    const target = await one<{ is_admin: number }>(
+      db,
+      "SELECT is_admin FROM users WHERE id = ?",
+      [id],
+    );
+    if (!target) return c.body(null, 204);
+    if (target.is_admin === 1 && (await adminCount(db)) === 1) {
+      return c.json({ error: "Cannot delete the last admin" }, 409);
+    }
+    await db.execute("DELETE FROM users WHERE id = ?", [id]);
     return c.body(null, 204);
   });
   // Admin sets a new password for a regular user. The admin account is
@@ -173,7 +248,7 @@ export function authRoutes(db: Db) {
       return c.json({ error: z.treeifyError(parsed.error) }, 400);
     }
     const res = await db.execute(
-      "UPDATE users SET password_hash = ? WHERE id = ? AND is_admin = 0",
+      "UPDATE users SET password_hash = ? WHERE id = ?",
       [await hashPassword(parsed.data.new_password), Number(c.req.param("id"))],
     );
     return res.affectedRows

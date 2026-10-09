@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { api } from "../api";
 import { Button, Card, ErrorText, Input } from "../components";
 
@@ -23,10 +23,49 @@ function Settings() {
           </div>
         </dl>
       </Card>
+      <Card title="Change email">
+        <ChangeEmail current={user.email} />
+      </Card>
       <Card title="Change password">
         <ChangePassword />
       </Card>
     </div>
+  );
+}
+
+function ChangeEmail({ current }: { current: string }) {
+  const [email, setEmail] = useState(current);
+  const [error, setError] = useState<string>();
+  const [saved, setSaved] = useState(false);
+  const router = useRouter();
+  return (
+    <form
+      className="flex flex-col gap-3"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        setError(undefined);
+        setSaved(false);
+        try {
+          await api("/email", { body: { email } });
+          setSaved(true);
+          // The nav bar shows the email from the session; refresh it.
+          await router.invalidate();
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Something went wrong");
+        }
+      }}
+    >
+      <Input
+        type="email"
+        placeholder="you@example.com"
+        required
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+      />
+      <ErrorText>{error}</ErrorText>
+      {saved && <p className="text-sm text-emerald-600">Email updated.</p>}
+      <Button type="submit">Update email</Button>
+    </form>
   );
 }
 

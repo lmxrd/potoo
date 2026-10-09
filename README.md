@@ -48,13 +48,14 @@ and the built React frontend.
 
 ### Users and access
 
-- Multiple users, **exactly one admin**, no organisations or teams. A partial
-  unique index enforces a single admin.
+- Multiple users, any number of **admins**, no organisations or teams. The last
+  admin cannot be demoted or deleted, so there is always at least one.
 - On first start (no users) **every page redirects to `/setup`**, which creates
-  the admin. `POST /api/setup` only works while there are no users.
-- Only the admin creates and deletes other users (`/users`) and adds, edits and
-  deletes sites.
-- All signed-in users can view all sites.
+  the first admin. `POST /api/setup` only works while there are no users.
+- Admins create and delete users, choose and change their role, and reset their
+  passwords (`/users`); they also add, edit and delete sites.
+- All signed-in users can view all sites, and change their own email and
+  password in the settings.
 - Auth: email + password (PBKDF2-SHA256), opaque server-side session in an
   HttpOnly `SameSite=Strict` cookie.
 
