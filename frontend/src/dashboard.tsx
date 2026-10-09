@@ -1,5 +1,5 @@
 import { BarList, Card } from "./components";
-import { formatDate } from "./dates";
+import { chartLabel, formatDate } from "./dates";
 
 /**
  * The stats of one dashboard: the same shape the backend returns for one
@@ -17,19 +17,13 @@ export type SiteStats = {
   clicks: { name: string; clicks: number }[];
 };
 
-/** The dashboard content: totals, views per day and the breakdowns. */
+/** The dashboard content: totals, the chart and the breakdowns. */
 export function StatsDashboard({
   stats,
   dateFormat = "YYYY-MM-DD",
-  granularity = "day",
-  onGranularity,
-  hourAvailable = false,
 }: {
   stats: SiteStats;
   dateFormat?: string;
-  granularity?: "day" | "hour";
-  onGranularity?: (granularity: "day" | "hour") => void;
-  hourAvailable?: boolean;
 }) {
   const maxDay = Math.max(1, ...stats.byDay.map((d) => d.pageviews));
   return (
@@ -43,34 +37,30 @@ export function StatsDashboard({
         </Card>
       </div>
 
-      <Card>
-        <div className="mb-3 flex items-center justify-between gap-4">
-          <h2 className="text-sm font-medium text-slate-500">Page views per {granularity}</h2>
-          {onGranularity && (
-            <select
-              className="rounded border border-slate-300 px-2 py-1 text-sm"
-              value={granularity}
-              onChange={(e) => onGranularity(e.target.value as "day" | "hour")}
-            >
-              <option value="day">Per day</option>
-              <option value="hour" disabled={!hourAvailable}>
-                Per hour
-              </option>
-            </select>
-          )}
-        </div>
-        <div className="flex h-24 items-end gap-1">
-          {stats.byDay.map((d) => (
-            <div
-              key={d.day}
-              title={`${
-                d.day.length > 10
-                  ? `${formatDate(d.day.slice(0, 10), dateFormat)} ${d.day.slice(11, 16)}`
-                  : formatDate(d.day, dateFormat)
-              }: ${d.pageviews}`}
-              className="flex-1 rounded-t bg-slate-800"
-              style={{ height: `${(d.pageviews / maxDay) * 100}%` }}
-            />
+      <Card title="Page views">
+        <div className="flex items-end gap-1">
+          {stats.byDay.map((d, i) => (
+            <div key={d.day} className="flex flex-1 flex-col items-center gap-1">
+              <div
+                className="flex h-24 w-full items-end"
+                title={`${
+                  d.day.length > 10
+                    ? `${formatDate(d.day.slice(0, 10), dateFormat)} ${d.day.slice(11, 16)}`
+                    : formatDate(d.day, dateFormat)
+                }: ${d.pageviews}`}
+              >
+                <div
+                  className="w-full rounded-t bg-slate-800"
+                  style={{ height: `${(d.pageviews / maxDay) * 100}%` }}
+                />
+              </div>
+              {/* Thin the labels, so at most about 12 of them show. */}
+              <span className="h-3 text-[10px] text-slate-400">
+                {i % Math.max(1, Math.ceil(stats.byDay.length / 12)) === 0
+                  ? chartLabel(d.day, stats.days)
+                  : "\u00a0"}
+              </span>
+            </div>
           ))}
         </div>
       </Card>

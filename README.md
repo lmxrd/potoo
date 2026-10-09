@@ -17,8 +17,10 @@ and the built React frontend.
 - Track **page views by path**, plus optional **clicks** on links and buttons.
 - Store only very basic visitor information: **country** and **device** (desktop
   / mobile / tablet). Bots are ignored.
-- Dashboard per site: page views, unique visitors, views per day, top paths,
-  referrers, countries, devices, clicks. Selectable range (1–365 days).
+- Dashboard per site and across sites: page views, unique visitors, a complete
+  per-period chart (hours for today and the last 24 hours, days up to 30, weeks
+  up to 90, months for a year), top paths, referrers, countries, devices,
+  clicks. Selectable range (today, 24 hours, 7–365 days).
 - Tracking options are chosen by whoever embeds it (the site page has a snippet
   generator):
   - JS snippet that records page views, including SPA navigation via

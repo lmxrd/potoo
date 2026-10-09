@@ -13,12 +13,11 @@ function Overview() {
   const { session } = Route.useRouteContext();
   const { data: sites, error: sitesError } = useApi<Site[]>("/sites");
   const [days, setDays] = useState<number | "today">(7);
-  const [granularity, setGranularity] = useState<"day" | "hour">("day");
   // The selected site ids; empty means every site.
   const [selected, setSelected] = useState<Set<number>>(new Set());
 
   const included = [...selected].join(",");
-  const statsPath = `/stats?days=${days}&granularity=${granularity}${included ? `&sites=${included}` : ""}`;
+  const statsPath = `/stats?days=${days}${included ? `&sites=${included}` : ""}`;
   const { data: stats, error: statsError } = useApi<SiteStats>(statsPath);
 
   const toggle = (id: number) => {
@@ -38,16 +37,13 @@ function Overview() {
           className="rounded border border-slate-300 px-2 py-1 text-sm"
           value={days}
           onChange={(e) => {
-            const next = e.target.value === "today" ? ("today" as const) : Number(e.target.value);
-            setDays(next);
-            // The per-hour view only exists for short ranges.
-            if (next !== "today" && next > 3) setGranularity("day");
+            setDays(e.target.value === "today" ? ("today" as const) : Number(e.target.value));
           }}
         >
           <option value="today">Today</option>
           {[1, 7, 30, 90, 365].map((d) => (
             <option key={d} value={d}>
-              Last {d} day{d > 1 && "s"}
+              {d === 1 ? "Last 24 hours" : `Last ${d} days`}
             </option>
           ))}
         </select>
@@ -63,13 +59,7 @@ function Overview() {
 
       <ErrorText>{statsError}</ErrorText>
       {stats ? (
-        <StatsDashboard
-          stats={stats}
-          dateFormat={session.user?.date_format}
-          granularity={granularity}
-          onGranularity={setGranularity}
-          hourAvailable={days === "today" || days <= 3}
-        />
+        <StatsDashboard stats={stats} dateFormat={session.user?.date_format} />
       ) : (
         !statsError && <p className="text-slate-500">Loading…</p>
       )}

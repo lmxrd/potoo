@@ -435,7 +435,7 @@ Deno.test("CSV export with site and date selection", async () => {
   );
 });
 
-Deno.test("hourly granularity", async () => {
+Deno.test("the bar chart series is complete and calendar aligned", async () => {
   await using db = await openDb(":memory:");
   const app = createApp(db, () => "NO", "frontend/dist");
   const setup = await app.request(
@@ -448,109 +448,104 @@ Deno.test("hourly granularity", async () => {
     json({ hostname: "example.com" }, auth),
   )).json();
 
-  // Three hits today, in three different hours.
-  for (const hour of [2, 10, 22]) {
+  // Hits at 5, 2 and 0 hours ago: today if it is past midnight, else
+  // yesterday; the last 24 hours include them either way.
+  const day = new Date().toISOString().slice(0, 10);
+  const midnight = Date.parse(day + "T00:00:00Z");
+  const at = (hoursAgo: number) => new Date(Date.now() - hoursAgo * 3_600_000);
+  const times = [at(5), at(2), at(0)];
+  for (const t of times) {
     await db.execute(
       `INSERT INTO hits (site_id, kind, path, name, referrer, country, device, visitor, created_at)
        VALUES (?, 'pageview', '/x', NULL, NULL, NULL, 'desktop', ?, ?)`,
-      [
-        site.id,
-        crypto.randomUUID().replaceAll("-", ""),
-        `2026-10-09T${String(hour).padStart(2, "0")}:15:00.000Z`,
-      ],
+      [site.id, crypto.randomUUID().replaceAll("-", ""), t.toISOString()],
     );
   }
+  const expectedToday = times.filter((t) => t.getTime() >= midnight).length;
 
-  const hourly = await (await app.request(
-    `/api/sites/${site.id}/stats?days=1&granularity=hour`,
-    { headers: auth },
-  )).json();
-  assertEquals(hourly.byDay.length, 3);
-  assertEquals(
-    hourly.byDay.map((d: { day: string }) => d.day),
-    ["2026-10-09T02:00", "2026-10-09T10:00", "2026-10-09T22:00"],
-  );
-  assertEquals(hourly.byDay[0].pageviews, 1);
-
-  // The global endpoint supports it too, and long ranges refuse it.
-  const globalHourly = await (await app.request(
-    "/api/stats?days=1&granularity=hour",
-    { headers: auth },
-  )).json();
-  assertEquals(globalHourly.byDay.length, 3);
-  assertEquals(
-    (await app.request(`/api/sites/${site.id}/stats?days=7&granularity=hour`, {
-      headers: auth,
-    })).status,
-    400,
-  );
-  assertEquals(
-    (await app.request("/api/stats?days=30&granularity=hour", {
-      headers: auth,
-    }))
-      .status,
-    400,
-  );
-});
-
-Deno.test("today range is since midnight, not the last 24 hours", async () => {
-  await using db = await openDb(":memory:");
-  const app = createApp(db, () => "NO", "frontend/dist");
-  const setup = await app.request(
-    "/api/setup",
-    json({ email: "a@example.com", password: "correct horse battery" }),
-  );
-  const auth = { cookie: setup.headers.get("set-cookie")!.split(";")[0] };
-  const site = await (await app.request(
-    "/api/sites",
-    json({ hostname: "example.com" }, auth),
-  )).json();
-
-  const midnight = Date.parse(
-    new Date().toISOString().slice(0, 10) + "T00:00:00Z",
-  );
-  await db.execute(
-    `INSERT INTO hits (site_id, kind, path, name, referrer, country, device, visitor, created_at)
-     VALUES (?, 'pageview', '/yesterday', NULL, NULL, NULL, 'desktop', 'a',
-       strftime('%Y-%m-%dT%H:%M:%fZ', ?, 'unixepoch'))`,
-    [site.id, (midnight - 3_600_000) / 1000],
-  );
-  await db.execute(
-    `INSERT INTO hits (site_id, kind, path, name, referrer, country, device, visitor, created_at)
-     VALUES (?, 'pageview', '/today', NULL, NULL, NULL, 'desktop', 'b',
-       strftime('%Y-%m-%dT%H:%M:%fZ', ?, 'unixepoch'))`,
-    [site.id, (midnight + 7_200_000) / 1000],
-  );
-
-  // The rolling window includes the late-evening hit from yesterday.
+  // The last 24 hours: 24 started hours, ending with the current one,
+  // empty hours included.
   const rolling = await (await app.request(
     `/api/sites/${site.id}/stats?days=1`,
     { headers: auth },
   )).json();
-  assertEquals(rolling.pageviews, 2);
+  assertEquals(rolling.byDay.length, 24);
+  assertEquals(rolling.pageviews, 3);
+  const hourLabel = (ms: number) =>
+    new Date(ms).toISOString().slice(0, 13) + ":00";
+  assertEquals(rolling.byDay[23].day, hourLabel(Date.now()));
+  assertEquals(
+    rolling.byDay[0].day,
+    hourLabel(Date.now() - 23 * 3_600_000),
+  );
+  const fiveHoursAgo = rolling.byDay.findIndex((d: { day: string }) =>
+    d.day === hourLabel(Date.now() - 5 * 3_600_000)
+  );
+  assertEquals(rolling.byDay[fiveHoursAgo].pageviews, 1);
 
-  // "Today" starts at midnight.
+  // Today: this day's 24 hours, from midnight.
   const today = await (await app.request(
     `/api/sites/${site.id}/stats?days=today`,
     { headers: auth },
   )).json();
-  assertEquals(today.pageviews, 1);
-  assertEquals(today.paths[0].path, "/today");
-  assertEquals(today.days, "today");
+  assertEquals(today.byDay.length, 24);
+  assertEquals(today.byDay[0].day, `${day}T00:00`);
+  assertEquals(today.byDay[23].day, `${day}T23:00`);
+  assertEquals(today.pageviews, expectedToday);
 
-  // "Today" is a short range, so the hourly view is allowed.
-  const hourly = await (await app.request(
-    `/api/sites/${site.id}/stats?days=today&granularity=hour`,
-    { headers: auth },
-  )).json();
-  assertEquals(
-    hourly.byDay[0].day.slice(0, 10),
-    new Date().toISOString().slice(0, 10),
-  );
   const globalToday = await (await app.request("/api/stats?days=today", {
     headers: auth,
   })).json();
-  assertEquals(globalToday.pageviews, 1);
+  assertEquals(globalToday.pageviews, expectedToday);
+  assertEquals(globalToday.byDay.length, 24);
+
+  // 7 days: one bar per calendar day, ending today.
+  const week = await (await app.request(
+    `/api/sites/${site.id}/stats?days=7`,
+    { headers: auth },
+  )).json();
+  assertEquals(week.byDay.length, 7);
+  assertEquals(week.byDay[6].day, day);
+  assertEquals(
+    week.byDay[0].day,
+    new Date(Date.now() - 6 * 86_400_000).toISOString().slice(0, 10),
+  );
+
+  // 30 days: 30 bars.
+  const month = await (await app.request(
+    `/api/sites/${site.id}/stats?days=30`,
+    { headers: auth },
+  )).json();
+  assertEquals(month.byDay.length, 30);
+
+  // 90 days: one bar per calendar week, Mondays, 13 of them.
+  const quarter = await (await app.request(
+    `/api/sites/${site.id}/stats?days=90`,
+    { headers: auth },
+  )).json();
+  assertEquals(quarter.byDay.length, 13);
+  const allMondays = quarter.byDay.every((d: { day: string }) =>
+    new Date(`${d.day}T00:00:00Z`).getUTCDay() === 1
+  );
+  assertEquals(allMondays, true);
+
+  // A year: one bar per calendar month, 12 of them, ending this month.
+  const year = await (await app.request(
+    `/api/sites/${site.id}/stats?days=365`,
+    { headers: auth },
+  )).json();
+  assertEquals(year.byDay.length, 12);
+  assertEquals(
+    year.byDay.every((d: { day: string }) => d.day.endsWith("-01")),
+    true,
+  );
+  const now = new Date();
+  assertEquals(
+    year.byDay[11].day,
+    `${now.getUTCFullYear()}-${
+      String(now.getUTCMonth() + 1).padStart(2, "0")
+    }-01`,
+  );
 });
 
 Deno.test("date format setting", async () => {
@@ -685,7 +680,7 @@ Deno.test("global stats across sites", async () => {
   // so visitors cannot be linked across sites.
   assertEquals(all.visitors, 3);
   assertEquals(all.paths.length, 3);
-  assertEquals(all.byDay.length, 1);
+  assertEquals(all.byDay.length, 7);
 
   // One site selected.
   const onlyA = await (await app.request(`/api/stats?sites=${a.id}`, {

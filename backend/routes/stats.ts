@@ -9,7 +9,6 @@ const Query = z.object({
     z.coerce.number().int().min(1).max(365),
     z.literal("today"),
   ]).default(7),
-  granularity: z.enum(["day", "hour"]).default("day"),
   // Comma separated site ids. Without it, every site is included.
   sites: z.string().regex(/^\d+(,\d+)*$/).optional(),
 });
@@ -23,17 +22,13 @@ export function statsRoutes(db: Db) {
     if (!parsed.success) {
       return c.json({ error: z.treeifyError(parsed.error) }, 400);
     }
-    const { days, sites, granularity } = parsed.data;
-    // The per-hour view only makes sense for short ranges.
-    if (granularity === "hour" && days !== "today" && days > 3) {
-      return c.json({ error: "Hourly is only available up to 3 days" }, 400);
-    }
+    const { days, sites } = parsed.data;
     const siteIds = sites
       ? sites.split(",").map(Number)
       : (await all<{ id: number }>(db, "SELECT id FROM sites")).map((s) =>
         s.id
       );
-    return c.json(await statsFor(db, siteIds, days, granularity));
+    return c.json(await statsFor(db, siteIds, days));
   });
 
   return app;
