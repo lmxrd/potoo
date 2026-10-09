@@ -5,7 +5,10 @@ import { type AuthEnv, requireUser } from "../lib/auth.ts";
 import { statsFor } from "../lib/stats.ts";
 
 const Query = z.object({
-  days: z.coerce.number().int().min(1).max(365).default(7),
+  days: z.union([
+    z.coerce.number().int().min(1).max(365),
+    z.literal("today"),
+  ]).default(7),
   granularity: z.enum(["day", "hour"]).default("day"),
   // Comma separated site ids. Without it, every site is included.
   sites: z.string().regex(/^\d+(,\d+)*$/).optional(),
@@ -22,7 +25,7 @@ export function statsRoutes(db: Db) {
     }
     const { days, sites, granularity } = parsed.data;
     // The per-hour view only makes sense for short ranges.
-    if (granularity === "hour" && days > 3) {
+    if (granularity === "hour" && days !== "today" && days > 3) {
       return c.json({ error: "Hourly is only available up to 3 days" }, 400);
     }
     const siteIds = sites

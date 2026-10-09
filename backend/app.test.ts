@@ -493,6 +493,66 @@ Deno.test("hourly granularity", async () => {
   );
 });
 
+Deno.test("today range is since midnight, not the last 24 hours", async () => {
+  await using db = await openDb(":memory:");
+  const app = createApp(db, () => "NO", "frontend/dist");
+  const setup = await app.request(
+    "/api/setup",
+    json({ email: "a@example.com", password: "correct horse battery" }),
+  );
+  const auth = { cookie: setup.headers.get("set-cookie")!.split(";")[0] };
+  const site = await (await app.request(
+    "/api/sites",
+    json({ hostname: "example.com" }, auth),
+  )).json();
+
+  const midnight = Date.parse(
+    new Date().toISOString().slice(0, 10) + "T00:00:00Z",
+  );
+  await db.execute(
+    `INSERT INTO hits (site_id, kind, path, name, referrer, country, device, visitor, created_at)
+     VALUES (?, 'pageview', '/yesterday', NULL, NULL, NULL, 'desktop', 'a',
+       strftime('%Y-%m-%dT%H:%M:%fZ', ?, 'unixepoch'))`,
+    [site.id, (midnight - 3_600_000) / 1000],
+  );
+  await db.execute(
+    `INSERT INTO hits (site_id, kind, path, name, referrer, country, device, visitor, created_at)
+     VALUES (?, 'pageview', '/today', NULL, NULL, NULL, 'desktop', 'b',
+       strftime('%Y-%m-%dT%H:%M:%fZ', ?, 'unixepoch'))`,
+    [site.id, (midnight + 7_200_000) / 1000],
+  );
+
+  // The rolling window includes the late-evening hit from yesterday.
+  const rolling = await (await app.request(
+    `/api/sites/${site.id}/stats?days=1`,
+    { headers: auth },
+  )).json();
+  assertEquals(rolling.pageviews, 2);
+
+  // "Today" starts at midnight.
+  const today = await (await app.request(
+    `/api/sites/${site.id}/stats?days=today`,
+    { headers: auth },
+  )).json();
+  assertEquals(today.pageviews, 1);
+  assertEquals(today.paths[0].path, "/today");
+  assertEquals(today.days, "today");
+
+  // "Today" is a short range, so the hourly view is allowed.
+  const hourly = await (await app.request(
+    `/api/sites/${site.id}/stats?days=today&granularity=hour`,
+    { headers: auth },
+  )).json();
+  assertEquals(
+    hourly.byDay[0].day.slice(0, 10),
+    new Date().toISOString().slice(0, 10),
+  );
+  const globalToday = await (await app.request("/api/stats?days=today", {
+    headers: auth,
+  })).json();
+  assertEquals(globalToday.pageviews, 1);
+});
+
 Deno.test("date format setting", async () => {
   await using db = await openDb(":memory:");
   const app = createApp(db, () => "NO", "frontend/dist");

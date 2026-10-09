@@ -14,7 +14,7 @@ function SitePage() {
   const { siteId } = Route.useParams();
   const { session } = Route.useRouteContext();
   const navigate = useNavigate();
-  const [days, setDays] = useState(7);
+  const [days, setDays] = useState<number | "today">(7);
   const [granularity, setGranularity] = useState<"day" | "hour">("day");
   const { data, error, reload } = useApi<Stats>(
     `/sites/${siteId}/stats?days=${days}&granularity=${granularity}`,
@@ -33,12 +33,13 @@ function SitePage() {
             className="rounded border border-slate-300 px-2 py-1 text-sm"
             value={days}
             onChange={(e) => {
-              const next = Number(e.target.value);
+              const next = e.target.value === "today" ? ("today" as const) : Number(e.target.value);
               setDays(next);
               // The per-hour view only exists for short ranges.
-              if (next > 3) setGranularity("day");
+              if (next !== "today" && next > 3) setGranularity("day");
             }}
           >
+            <option value="today">Today</option>
             {[1, 7, 30, 90, 365].map((d) => (
               <option key={d} value={d}>
                 Last {d} day{d > 1 && "s"}
@@ -53,7 +54,7 @@ function SitePage() {
         dateFormat={session.user?.date_format}
         granularity={granularity}
         onGranularity={setGranularity}
-        hourAvailable={days <= 3}
+        hourAvailable={days === "today" || days <= 3}
       />
 
       <Snippet hostname={data.site.hostname} />

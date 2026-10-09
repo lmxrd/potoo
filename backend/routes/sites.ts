@@ -12,7 +12,10 @@ const SiteInput = z.object({
   hostname: Hostname,
   honor_dnt: z.boolean().default(true),
 });
-const Days = z.coerce.number().int().min(1).max(365).default(7);
+const Days = z.union([
+  z.coerce.number().int().min(1).max(365),
+  z.literal("today"),
+]).default(7);
 const Granularity = z.enum(["day", "hour"]);
 
 export function sitesRoutes(db: Db) {
@@ -78,7 +81,7 @@ export function sitesRoutes(db: Db) {
       return c.json({ error: z.treeifyError(granularity.error) }, 400);
     }
     // The per-hour view only makes sense for short ranges.
-    if (granularity.data === "hour" && days.data > 3) {
+    if (granularity.data === "hour" && days.data !== "today" && days.data > 3) {
       return c.json({ error: "Hourly is only available up to 3 days" }, 400);
     }
     const site = await one<{

@@ -12,7 +12,7 @@ export const Route = createFileRoute("/")({ component: Overview });
 function Overview() {
   const { session } = Route.useRouteContext();
   const { data: sites, error: sitesError } = useApi<Site[]>("/sites");
-  const [days, setDays] = useState(7);
+  const [days, setDays] = useState<number | "today">(7);
   const [granularity, setGranularity] = useState<"day" | "hour">("day");
   // The selected site ids; empty means every site.
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -38,12 +38,13 @@ function Overview() {
           className="rounded border border-slate-300 px-2 py-1 text-sm"
           value={days}
           onChange={(e) => {
-            const next = Number(e.target.value);
+            const next = e.target.value === "today" ? ("today" as const) : Number(e.target.value);
             setDays(next);
             // The per-hour view only exists for short ranges.
-            if (next > 3) setGranularity("day");
+            if (next !== "today" && next > 3) setGranularity("day");
           }}
         >
+          <option value="today">Today</option>
           {[1, 7, 30, 90, 365].map((d) => (
             <option key={d} value={d}>
               Last {d} day{d > 1 && "s"}
@@ -67,7 +68,7 @@ function Overview() {
           dateFormat={session.user?.date_format}
           granularity={granularity}
           onGranularity={setGranularity}
-          hourAvailable={days <= 3}
+          hourAvailable={days === "today" || days <= 3}
         />
       ) : (
         !statsError && <p className="text-slate-500">Loading…</p>

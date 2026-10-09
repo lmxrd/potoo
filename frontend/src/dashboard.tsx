@@ -6,7 +6,7 @@ import { formatDate } from "./dates";
  * site and for several sites combined.
  */
 export type SiteStats = {
-  days: number;
+  days: number | "today";
   pageviews: number;
   visitors: number;
   byDay: { day: string; pageviews: number; visitors: number }[];

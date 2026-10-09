@@ -6,7 +6,7 @@ import { all, type Db } from "../db.ts";
  * for several sites combined.
  */
 export type SiteStats = {
-  days: number;
+  days: number | "today";
   pageviews: number;
   visitors: number;
   byDay: { day: string; pageviews: number; visitors: number }[];
@@ -38,11 +38,14 @@ const EMPTY: Omit<SiteStats, "days"> = {
 export async function statsFor(
   db: Db,
   siteIds: number[],
-  days: number,
+  days: number | "today",
   granularity: "day" | "hour" = "day",
 ): Promise<SiteStats> {
   if (!siteIds.length) return { days, ...EMPTY };
-  const since = new Date(Date.now() - days * 86_400_000).toISOString();
+  // "today" is the current day, not the last 24 hours.
+  const since = days === "today"
+    ? `${new Date().toISOString().slice(0, 10)}T00:00:00.000`
+    : new Date(Date.now() - days * 86_400_000).toISOString();
   const inSites = `site_id IN (${siteIds.map(() => "?").join(", ")})`;
   const q = <T>(select: string, tail = "") =>
     all<T>(
