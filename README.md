@@ -68,7 +68,9 @@ and the built React frontend.
 - **Backend:** Deno, `jsr:@hono/hono`, `jsr:@stdx/database` (SQLite driver,
   pinned to `^0.1.1` because 0.2.0 was newer than Deno's minimum dependency age
   at the time), `jsr:@zod/zod`, `npm:maxmind` for GeoIP, `jsr:@halvardm/nessie`
-  for migrations (runs automatically on startup).
+  for migrations (runs automatically on startup). Compiled binaries use the
+  experimental QuickJS engine for their smaller size; drop `--engine quickjs`
+  from `compile:base` for V8.
 - **Frontend:** Vite, React, TanStack Router (file-based), Tailwind v4, oxlint,
   oxfmt. Client-side rendered and served statically by the backend, with an
   `index.html` fallback for client routes.
@@ -111,6 +113,13 @@ deno task start            # serves API + frontend on :8000
 and migrations into a single executable, `./potoo`. The binary serves the
 frontend from its embedded virtual filesystem and applies migrations from the
 embedded migration files; `DATABASE_PATH` and the other env vars work as above.
+Docker: `deno task build:docker` builds a multi-stage image: the Vite frontend
+build, a cross compile of the binary (QuickJS), and a `debian:bookworm-slim`
+runtime holding just the binary. It listens on :8000 and keeps the database and
+the GeoIP database in the `/data` volume. For both architectures:
+`docker buildx build --platform linux/amd64,linux/arm64 -t
+<registry>/potoo --push .`
+
 Development: `deno task dev` runs the backend (`--watch`, :8000) and the
 frontend (Vite, :5173, proxies `/api` to :8000) together, with hot reload on
 both. Checks: `deno task check` (format, lint and types for backend and
@@ -134,5 +143,5 @@ stats, static serving). Known limitations:
 - Stats show counts only, with a simple bar chart.
 - No manual click-through of the UI in a real browser has been done yet; the
   smoke run drives the HTTP API directly. Possible additions: per-site "view as
-  public" dashboards, filtering by path or country, Dockerfile. Each site's hits
-  can be exported as CSV from its page.
+  public" dashboards, filtering by path or country. Each site's hits can be
+  exported as CSV from its page.

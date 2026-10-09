@@ -38,7 +38,8 @@
       "command": "deno task compile:base --target x86_64-unknown-linux-gnu --output dist/potoo-linux-x86 backend/main.ts",
       "dependencies": ["build:frontend"]
     },
-    "compile:base": "deno compile -A --include backend/db/migrations --include frontend/dist --bundle",
+    "compile:base": "deno compile -A --engine quickjs --include backend/db/migrations --include frontend/dist",
+    "build:docker": "docker build -t potoo .",
     "fix": { "dependencies": ["fix:frontend", "fix:backend"] },
     "fix:frontend": "pnpm run -C frontend fix",
     "fix:backend": "deno fmt && deno lint --fix",
