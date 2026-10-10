@@ -93,9 +93,8 @@ not a change we can take. Concretely:
 
 ## Releasing
 
-CI runs the checks on every pull request and push to main, and pushes
-the image of main to `ghcr.io/lmxrd/potoo` as `latest` and the
-commit sha. A release is a tag and a published GitHub release:
+CI runs the checks on every pull request and push to main — nothing is
+published from CI. A release is a tag and a published GitHub release:
 
 1. Tag the commit: `git tag v1.2.3 && git push origin v1.2.3`.
 2. Create and publish the release on GitHub, with the same tag.
