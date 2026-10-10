@@ -7,13 +7,16 @@
     "jsr:@standard-schema/spec@1": "1.1.0",
     "jsr:@standard-schema/utils@0": "0.3.0",
     "jsr:@std/assert@1": "1.0.19",
+    "jsr:@std/bytes@^1.0.6": "1.0.6",
     "jsr:@std/cli@1": "1.0.32",
+    "jsr:@std/csv@1": "1.0.6",
     "jsr:@std/datetime@~0.225.7": "0.225.7",
     "jsr:@std/fmt@1": "1.0.10",
     "jsr:@std/fs@1": "1.0.24",
     "jsr:@std/internal@^1.0.12": "1.0.14",
     "jsr:@std/internal@^1.0.14": "1.0.14",
     "jsr:@std/path@1": "1.1.6",
+    "jsr:@std/streams@^1.0.9": "1.2.0",
     "jsr:@std/text@1": "1.1.0",
     "jsr:@stdx/cli@~0.1.1": "0.1.2",
     "jsr:@stdx/cli@~0.1.2": "0.1.2",
@@ -25,6 +28,12 @@
     "jsr:@zod/zod@^4.6.5": "4.6.5",
     "npm:@faker-js/faker@9": "9.9.0",
     "npm:@jsr/standard-schema__spec@1.0.0-beta.4": "1.0.0-beta.4",
+    "npm:@rsql/ast@*": "1.6.0",
+    "npm:@rsql/ast@^1.6.0": "1.6.0",
+    "npm:@rsql/builder@*": "1.6.0",
+    "npm:@rsql/emitter@*": "1.6.0",
+    "npm:@rsql/parser@*": "1.6.0",
+    "npm:@rsql/parser@^1.6.0": "1.6.0",
     "npm:maxmind@5": "5.0.7"
   },
   "jsr": {
@@ -67,8 +76,17 @@
         "jsr:@std/internal@^1.0.12"
       ]
     },
+    "@std/bytes@1.0.6": {
+      "integrity": "f6ac6adbd8ccd99314045f5703e23af0a68d7f7e58364b47d2c7f408aeb5820a"
+    },
     "@std/cli@1.0.32": {
       "integrity": "188b3a100d6202d64e3f5bd3d799c7fa4f6d77f92cc65eb7f641c1fa0aa92a66"
+    },
+    "@std/csv@1.0.6": {
+      "integrity": "52ef0e62799a0028d278fa04762f17f9bd263fad9a8e7f98c14fbd371d62d9fd",
+      "dependencies": [
+        "jsr:@std/streams"
+      ]
     },
     "@std/datetime@0.225.7": {
       "integrity": "e62c6c454a0ecfc2918fe41e7a621e0f334a6f82605e98fd32eb1e6371999328"
@@ -86,6 +104,12 @@
       "integrity": "c68485c2a4dfbb5ae3cc74fae4e8c4e5d874cf8a8ed12927917235c758b46cbe",
       "dependencies": [
         "jsr:@std/internal@^1.0.14"
+      ]
+    },
+    "@std/streams@1.2.0": {
+      "integrity": "256b934254778f2bf45f5713b934209ff29e9b4b7fd4ec095219966813758c5f",
+      "dependencies": [
+        "jsr:@std/bytes"
       ]
     },
     "@std/text@1.1.0": {
@@ -136,6 +160,27 @@
       "integrity": "sha512-AsZnKHK8JC2KvCx2wfzY9upnxmH2mL2Yg8y4rex50HqC6gBmZqdVI/hJ23A6MgbIOZz+DQhqMxPDBppfgszHtg==",
       "tarball": "https://npm.jsr.io/~/11/@jsr/standard-schema__spec/1.0.0-beta.4.tgz"
     },
+    "@rsql/ast@1.6.0": {
+      "integrity": "sha512-ClciA8jxCCekVx53DEg5sNQLYFHZgq9KR4rbPLLzxStnvWh+Mym9W8wFoRLwMpGemXT+c+Sl0TwumLJ5ysw0Dg=="
+    },
+    "@rsql/builder@1.6.0": {
+      "integrity": "sha512-AL64U3dEUiBFNEc//g9U8mXI4fmL0qFA1mTK7Z5vPJ6ck78/ztDkoqnuZgTPBW//yfPaN/l28gUy9SHffWDQ8w==",
+      "dependencies": [
+        "@rsql/ast"
+      ]
+    },
+    "@rsql/emitter@1.6.0": {
+      "integrity": "sha512-lp76FEHh8Y3ughjtFHM0SOTpXwhAJRXj87KZaDqgJofYPdE+aD46WKku+fCXGNzWFxWcU8ieY+1Cnati2gvz6w==",
+      "dependencies": [
+        "@rsql/ast"
+      ]
+    },
+    "@rsql/parser@1.6.0": {
+      "integrity": "sha512-U5t6u6XdeXXInU46IOZOv4yiPpNkBJSA/bxSijnym1ir0RVuV7fZyUw2wBDiIGtVbsaP6W/tMLO1/cbySBLyRw==",
+      "dependencies": [
+        "@rsql/ast"
+      ]
+    },
     "maxmind@5.0.7": {
       "integrity": "sha512-+w637dwfv01MKjkrp4sKDBTEKHLPvWLYb647QTjiz3wG/teSemqudIKNShaS6eqZ7ffxC9oZlQQgIqY0rGojog==",
       "dependencies": [
@@ -155,9 +200,12 @@
       "jsr:@halvardm/nessie@3.0.0-rc.4",
       "jsr:@hono/hono@^4.13.13",
       "jsr:@std/assert@1",
+      "jsr:@std/csv@1",
       "jsr:@stdx/database@~0.1.1",
       "jsr:@zod/zod@^4.6.5",
       "npm:@faker-js/faker@9",
+      "npm:@rsql/ast@^1.6.0",
+      "npm:@rsql/parser@^1.6.0",
       "npm:maxmind@5"
     ]
   }

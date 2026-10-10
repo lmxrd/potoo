@@ -14,6 +14,10 @@
     "check": "oxfmt --check && oxlint && tsc --noEmit"
   },
   "dependencies": {
+    "@rsql/ast": "^1.6.0",
+    "@rsql/builder": "^1.6.0",
+    "@rsql/emitter": "^1.6.0",
+    "@rsql/parser": "^1.6.0",
     "@tabler/icons-react": "^3.49.0",
     "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-router": "^1.170.41",

@@ -2,16 +2,21 @@ import { Card } from "./card";
 import { BarList } from "./bar-list";
 import { bucketLabel, chartLabel, formatDate, formatTime } from "../lib/dates";
 import type { SiteStats } from "../lib/api";
+import type { FacetFilters } from "../lib/filter";
 
 /** The dashboard content: totals, the chart and the breakdowns. */
 export function StatsDashboard({
   stats,
   dateFormat = "YYYY-MM-DD",
   timeFormat = "24h",
+  filters,
+  onToggleFilter,
 }: {
   stats: SiteStats;
   dateFormat?: string;
   timeFormat?: string;
+  filters: FacetFilters;
+  onToggleFilter: (facet: string, value: string) => void;
 }) {
   const maxDay = Math.max(1, ...stats.byDay.map((d) => d.pageviews));
   const label = (day: string) =>
@@ -59,14 +64,17 @@ export function StatsDashboard({
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="Paths">
-          <BarList rows={stats.paths.map((p) => ({ label: p.path, value: p.pageviews }))} />
+          <BarList
+            rows={stats.paths.map((p) => ({ label: p.path, value: p.pageviews }))}
+            active={filters.get("path")}
+            onToggle={(value) => onToggleFilter("path", value)}
+          />
         </Card>
         <Card title="Referrers">
           <BarList
-            rows={stats.referrers.map((r) => ({
-              label: r.referrer,
-              value: r.pageviews,
-            }))}
+            rows={stats.referrers.map((r) => ({ label: r.referrer, value: r.pageviews }))}
+            active={filters.get("referrer")}
+            onToggle={(value) => onToggleFilter("referrer", value)}
           />
         </Card>
         <Card title="Countries">
@@ -75,6 +83,8 @@ export function StatsDashboard({
               label: c.country,
               value: c.visitors,
             }))}
+            active={filters.get("country")}
+            onToggle={(value) => onToggleFilter("country", value)}
           />
         </Card>
         <Card title="Devices">
@@ -83,6 +93,8 @@ export function StatsDashboard({
               label: d.device,
               value: d.visitors,
             }))}
+            active={filters.get("device")}
+            onToggle={(value) => onToggleFilter("device", value)}
           />
         </Card>
         <Card title="Browsers">
@@ -91,6 +103,8 @@ export function StatsDashboard({
               label: b.browser,
               value: b.visitors,
             }))}
+            active={filters.get("browser")}
+            onToggle={(value) => onToggleFilter("browser", value)}
           />
         </Card>
         <Card title="Operating systems">
@@ -99,6 +113,8 @@ export function StatsDashboard({
               label: o.os,
               value: o.visitors,
             }))}
+            active={filters.get("os")}
+            onToggle={(value) => onToggleFilter("os", value)}
           />
         </Card>
         <Card title="Clicks">
@@ -108,6 +124,8 @@ export function StatsDashboard({
               value: c.clicks,
             }))}
             empty="No clicks tracked. Enable click tracking in the snippet."
+            active={filters.get("name")}
+            onToggle={(value) => onToggleFilter("name", value)}
           />
         </Card>
       </div>

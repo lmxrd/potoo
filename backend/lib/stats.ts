@@ -1,4 +1,5 @@
 import { all, type Db } from "../db.ts";
+import { type FacetFilters, filterSql } from "./filter.ts";
 
 /** The buckets a custom range's chart can use. */
 export type Bucket = "hour" | "day" | "week" | "month";
@@ -275,6 +276,7 @@ export async function statsFor(
   db: Db,
   siteIds: number[],
   range: StatsRange,
+  filters: FacetFilters = {},
 ): Promise<SiteStats> {
   const days = "days" in range
     ? range.days
@@ -282,10 +284,13 @@ export async function statsFor(
   if (!siteIds.length) return { days, ...EMPTY };
   const { keys, since, until, sql, bucket } = buckets(range);
   const inSites = `site_id IN (${siteIds.map(() => "?").join(", ")})`;
-  const within = until
-    ? "created_at >= ? AND created_at < ?"
-    : "created_at >= ?";
-  const params = until ? [since, until] : [since];
+  // The filters apply to every aggregation, so a filtered view is fully
+  // recomputed: the same facets, restricted to the selected values.
+  const { clause: filterClause, params: filterParams } = filterSql(filters);
+  const within = `${
+    until ? "created_at >= ? AND created_at < ?" : "created_at >= ?"
+  }${filterClause ? ` AND ${filterClause}` : ""}`;
+  const params = [...(until ? [since, until] : [since]), ...filterParams];
   const q = <T>(select: string, tail = "") =>
     all<T>(
       db,

@@ -6,6 +6,7 @@ import { DateRangeBar } from "../components/date-range-bar";
 import { ErrorText } from "../components/error-text";
 import { StatsDashboard } from "../components/stats-dashboard";
 import { api, useApi, type SiteStats } from "../lib/api";
+import { buildFilter, useDashboardFilters } from "../lib/filter";
 import { useDateRange, validateDashboardSearch } from "../lib/date-range";
 
 type Stats = SiteStats & {
@@ -22,7 +23,10 @@ function SitePage() {
   const { session } = Route.useRouteContext();
   const navigate = useNavigate();
   const { range, setRange, query } = useDateRange();
-  const { data, error, reload } = useApi<Stats>(`/sites/${siteId}/stats?${query}`);
+  const { filters, toggle, setFilters } = useDashboardFilters();
+  const rsql = buildFilter(filters);
+  const params = `${query}${rsql ? `&q=${encodeURIComponent(rsql)}` : ""}`;
+  const { data, error, reload } = useApi<Stats>(`/sites/${siteId}/stats?${params}`);
   const isAdmin = session.user?.is_admin === 1;
 
   if (error) return <ErrorText>{error}</ErrorText>;
@@ -38,12 +42,17 @@ function SitePage() {
         stats={data}
         dateFormat={session.user?.date_format}
         timeFormat={session.user?.time_format}
+        filters={filters}
+        onFilters={setFilters}
+        exportUrl={`/api/sites/${siteId}/stats.csv?${params}`}
       />
 
       <StatsDashboard
         stats={data}
         dateFormat={session.user?.date_format}
         timeFormat={session.user?.time_format}
+        filters={filters}
+        onToggleFilter={toggle}
       />
 
       <Snippet hostname={data.site.hostname} />

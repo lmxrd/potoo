@@ -8,6 +8,18 @@ importers:
 
   .:
     dependencies:
+      '@rsql/ast':
+        specifier: ^1.6.0
+        version: 1.6.0
+      '@rsql/builder':
+        specifier: ^1.6.0
+        version: 1.6.0
+      '@rsql/emitter':
+        specifier: ^1.6.0
+        version: 1.6.0
+      '@rsql/parser':
+        specifier: ^1.6.0
+        version: 1.6.0
       '@tabler/icons-react':
         specifier: ^3.49.0
         version: 3.49.0(react@19.3.0)
@@ -482,6 +494,22 @@ packages:
 
   '@rolldown/pluginutils@1.0.1':
     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
+
+  '@rsql/ast@1.6.0':
+    resolution: {integrity: sha512-ClciA8jxCCekVx53DEg5sNQLYFHZgq9KR4rbPLLzxStnvWh+Mym9W8wFoRLwMpGemXT+c+Sl0TwumLJ5ysw0Dg==}
+    engines: {node: '>= 8'}
+
+  '@rsql/builder@1.6.0':
+    resolution: {integrity: sha512-AL64U3dEUiBFNEc//g9U8mXI4fmL0qFA1mTK7Z5vPJ6ck78/ztDkoqnuZgTPBW//yfPaN/l28gUy9SHffWDQ8w==}
+    engines: {node: '>= 8'}
+
+  '@rsql/emitter@1.6.0':
+    resolution: {integrity: sha512-lp76FEHh8Y3ughjtFHM0SOTpXwhAJRXj87KZaDqgJofYPdE+aD46WKku+fCXGNzWFxWcU8ieY+1Cnati2gvz6w==}
+    engines: {node: '>= 8'}
+
+  '@rsql/parser@1.6.0':
+    resolution: {integrity: sha512-U5t6u6XdeXXInU46IOZOv4yiPpNkBJSA/bxSijnym1ir0RVuV7fZyUw2wBDiIGtVbsaP6W/tMLO1/cbySBLyRw==}
+    engines: {node: '>= 8'}
 
   '@tabler/icons-react@3.49.0':
     resolution: {integrity: sha512-Um59pm5RVNUaQjFUtG0r4oYJbZuBS3tGugAA2tgBg0WufMk34Eio3nsO30RUkLuL2giYPQUNdY9HvqltLLYyNA==}
@@ -1541,6 +1569,20 @@ snapshots:
     optional: true
 
   '@rolldown/pluginutils@1.0.1': {}
+
+  '@rsql/ast@1.6.0': {}
+
+  '@rsql/builder@1.6.0':
+    dependencies:
+      '@rsql/ast': 1.6.0
+
+  '@rsql/emitter@1.6.0':
+    dependencies:
+      '@rsql/ast': 1.6.0
+
+  '@rsql/parser@1.6.0':
+    dependencies:
+      '@rsql/ast': 1.6.0
 
   '@tabler/icons-react@3.49.0(react@19.3.0)':
     dependencies:

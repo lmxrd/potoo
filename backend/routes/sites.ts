@@ -2,6 +2,8 @@ import { Hono } from "@hono/hono";
 import { z } from "@zod/zod";
 import { all, type Db, one } from "../db.ts";
 import { type AuthEnv, requireAdmin, requireUser } from "../lib/auth.ts";
+import { rangeLine, statsCsv } from "../lib/csv.ts";
+import { parseFilterParam } from "../lib/filter.ts";
 import { parseRange, statsFor } from "../lib/stats.ts";
 
 const Hostname = z.string().trim().toLowerCase().max(253).regex(
@@ -73,6 +75,10 @@ export function sitesRoutes(db: Db) {
     if (!range.ok) {
       return c.json({ error: range.error }, 400);
     }
+    const filter = parseFilterParam(c.req.query("q"));
+    if (!filter.ok) {
+      return c.json({ error: filter.error }, 400);
+    }
     const site = await one<{
       id: number;
       hostname: string;
@@ -83,7 +89,42 @@ export function sitesRoutes(db: Db) {
       [id],
     );
     if (!site) return c.json({ error: "Not found" }, 404);
-    return c.json({ site, ...await statsFor(db, [id], range.range) });
+    return c.json({
+      site,
+      ...await statsFor(db, [id], range.range, filter.filters),
+    });
+  });
+
+  // The same stats as a CSV document: one dashboard view of one site.
+  app.get("/:id/stats.csv", async (c) => {
+    const id = Number(c.req.param("id"));
+    const range = parseRange(
+      c.req.query("days"),
+      c.req.query("from"),
+      c.req.query("to"),
+    );
+    if (!range.ok) {
+      return c.json({ error: range.error }, 400);
+    }
+    const filter = parseFilterParam(c.req.query("q"));
+    if (!filter.ok) {
+      return c.json({ error: filter.error }, 400);
+    }
+    const site = await one<{ id: number }>(
+      db,
+      "SELECT id FROM sites WHERE id = ?",
+      [id],
+    );
+    if (!site) return c.json({ error: "Not found" }, 404);
+    const stats = await statsFor(db, [id], range.range, filter.filters);
+    const csv = statsCsv(stats, {
+      range: rangeLine(range.range),
+      filter: c.req.query("q"),
+    });
+    return c.body(csv, 200, {
+      "content-type": "text/csv; charset=utf-8",
+      "content-disposition": 'attachment; filename="potoo-stats.csv"',
+    });
   });
 
   return app;

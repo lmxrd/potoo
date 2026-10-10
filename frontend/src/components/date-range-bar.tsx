@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { IconDownload } from "@tabler/icons-react";
 import { Button } from "./button";
 import type { SiteStats } from "../lib/api";
-import { download, statsCsv } from "../lib/csv";
+import { FACETS, type FacetFilters } from "../lib/filter";
 import {
   RANGE_PRESETS,
   localInput,
@@ -14,13 +14,14 @@ import {
 
 /**
  * The toolbar above the dashboard: relative preset chips, a Custom chip
- * that opens the absolute from and to times down to the minute, and the
- * CSV export of the selected view.
+ * that opens the absolute from and to times down to the minute, the
+ * active filters as removable chips, and the CSV download of the
+ * selected view.
  *
- * The range lives in the page's URL; the bar only reads and writes it.
- * The custom times use the browser's native datetime picker, which always
- * displays in the browser's locale — the configured formats apply to the
- * app's own text: the summary line and the chart.
+ * The range and the filters live in the page's URL; the bar only reads and
+ * writes them. The custom times use the browser's native datetime picker,
+ * which always displays in the browser's locale — the configured formats
+ * apply to the app's own text: the summary line and the chart.
  */
 export function DateRangeBar({
   range,
@@ -28,12 +29,18 @@ export function DateRangeBar({
   stats = null,
   dateFormat,
   timeFormat,
+  filters,
+  onFilters,
+  exportUrl,
 }: {
   range: DateRange;
   onRange: (range: DateRange) => void;
   stats?: SiteStats | null;
   dateFormat?: string;
   timeFormat?: string;
+  filters: FacetFilters;
+  onFilters: (filters: FacetFilters) => void;
+  exportUrl: string;
 }) {
   const window = rangeWindow(range);
   const applied = {
@@ -60,12 +67,17 @@ export function DateRangeBar({
     onRange({ preset: "custom", from: shown.from, to: shown.to });
   };
 
-  const exportCsv = () => {
-    if (!stats) return;
-    download("potoo-stats.csv", statsCsv(stats, rangeSummary(range, dateFormat, timeFormat)));
+  const removeFilter = (facet: string, value: string) => {
+    const next = new Map(filters);
+    const values = new Set(next.get(facet) ?? []);
+    values.delete(value);
+    if (values.size) next.set(facet, values);
+    else next.delete(facet);
+    onFilters(next);
   };
 
   const chip = "rounded px-2.5 py-1.5 text-sm";
+  const count = [...filters.values()].reduce((n, values) => n + values.size, 0);
 
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -104,10 +116,13 @@ export function DateRangeBar({
             Custom&hellip;
           </button>
         </div>
-        <Button className="flex items-center gap-1.5" disabled={!stats} onClick={exportCsv}>
-          <IconDownload size={16} stroke={2} aria-hidden />
-          Export
-        </Button>
+        <div className="flex items-center gap-2">
+          <a href={exportUrl} download>
+            <Button aria-label="Export as CSV" className="flex items-center gap-1.5">
+              <IconDownload size={16} stroke={2} aria-hidden />
+            </Button>
+          </a>
+        </div>
       </div>
 
       {open && (
@@ -134,6 +149,38 @@ export function DateRangeBar({
           </Button>
         </div>
       )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-1.5 text-sm">
+        {[...filters].flatMap(([facet, values]) =>
+          [...values].map((value) => (
+            <span
+              key={`${facet}:${value}`}
+              className="rounded bg-slate-900 px-2 py-0.5 text-xs text-white"
+            >
+              {FACETS[facet]}: {value}{" "}
+              <button
+                aria-label={`Remove the ${FACETS[facet]} ${value} filter`}
+                className="text-slate-300 hover:text-white"
+                onClick={() => removeFilter(facet, value)}
+              >
+                &times;
+              </button>
+            </span>
+          )),
+        )}
+        {count === 0 ? (
+          <span className="text-xs text-slate-500">
+            Click any item of a breakdown to filter by it.
+          </span>
+        ) : (
+          <button
+            className="text-xs text-slate-500 underline hover:text-slate-700"
+            onClick={() => onFilters(new Map())}
+          >
+            Clear all
+          </button>
+        )}
+      </div>
 
       <p className="mt-2 text-xs text-slate-500">
         {rangeSummary(range, dateFormat, timeFormat)}

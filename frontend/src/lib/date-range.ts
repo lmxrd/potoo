@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
+import { parseFilter } from "./filter";
 import { formatDate, formatTime } from "./dates";
 
 /**
@@ -126,6 +127,7 @@ export type DashboardSearch = {
   from?: string;
   to?: string;
   sites?: string;
+  q?: string;
 };
 
 /** The routes' validateSearch: keep only well-formed dashboard params. */
@@ -145,6 +147,11 @@ export function validateDashboardSearch(search: Record<string, unknown>): Dashbo
   }
   if (typeof search.sites === "string" && /^\d+(,\d+)*$/.test(search.sites)) {
     out.sites = search.sites;
+  }
+  // Only expressions the dashboard can express survive: unknown facets,
+  // other operators, or OR across facets degrade to the unfiltered view.
+  if (typeof search.q === "string" && parseFilter(search.q)) {
+    out.q = search.q;
   }
   return out;
 }

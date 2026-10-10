@@ -405,18 +405,18 @@ Deno.test("CSV export with site and date selection", async () => {
   );
   const csv = await allRes.text();
   assertEquals(
-    csv.split("\n")[0],
+    csv.split(/\r?\n/)[0],
     "site,created_at,kind,path,name,referrer,country,device,browser,os",
   );
   assertEquals(csv.split("\n").length - 1, 4); // header + 3 hits
-  assertEquals(csv.includes('"a.example.com"'), true);
-  assertEquals(csv.includes('"b.example.com"'), true);
+  assertEquals(csv.includes("a.example.com"), true);
+  assertEquals(csv.includes("b.example.com"), true);
   assertEquals(csv.includes('"signup""btn"'), true);
 
   // One site selected.
   const onlyB = await (await get(`?sites=${b.id}`)).text();
-  assertEquals(onlyB.includes('"b.example.com"'), true);
-  assertEquals(onlyB.includes('"a.example.com"'), false);
+  assertEquals(onlyB.includes("b.example.com"), true);
+  assertEquals(onlyB.includes("a.example.com"), false);
 
   // The date range: from and to are inclusive days.
   const oldOnly = await (await get("?from=2026-01-01&to=2026-01-02")).text();
@@ -491,8 +491,8 @@ Deno.test("browser and os are tracked", async () => {
     `/api/export.csv?sites=${site.id}`,
     { headers: auth },
   )).text();
-  assertEquals(csv.includes('"Edge","Windows"'), true);
-  assertEquals(csv.includes('"Safari","macOS"'), true);
+  assertEquals(csv.includes("Edge,Windows"), true);
+  assertEquals(csv.includes("Safari,macOS"), true);
 });
 
 Deno.test("the bar chart series is complete and calendar aligned", async () => {
@@ -904,5 +904,145 @@ Deno.test("stats with an explicit minute-precise range", async () => {
     (await get("from=2024-01-01T00:00&to=2026-06-01T00:00"))
       .status,
     400,
+  );
+});
+
+Deno.test("stats filtering with RSQL", async () => {
+  await using db = await openDb(":memory:");
+  const app = createApp(db, () => "NO", "frontend/dist");
+  const admin = { email: "a@example.com", password: "correct horse battery" };
+  const setup = await app.request("/api/setup", json(admin));
+  const cookie = setup.headers.get("set-cookie")!.split(";")[0];
+  const auth = { cookie };
+  const site = await (await app.request(
+    "/api/sites",
+    json({ hostname: "example.com" }, auth),
+  )).json();
+  const insert = (hit: Record<string, string | null>) =>
+    db.execute(
+      `INSERT INTO hits (site_id, kind, path, name, referrer, country, device, browser, os, visitor, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        site.id,
+        hit.kind,
+        hit.path,
+        hit.name ?? null,
+        hit.referrer ?? null,
+        hit.country ?? null,
+        hit.device,
+        hit.browser,
+        hit.os,
+        hit.visitor,
+        "2026-01-02T09:00:00.000Z",
+      ],
+    );
+  await insert({
+    kind: "pageview",
+    path: "/a",
+    country: "NO",
+    device: "desktop",
+    browser: "Chrome",
+    os: "Windows",
+    visitor: "v1",
+    referrer: "https://g.example",
+  });
+  await insert({
+    kind: "pageview",
+    path: "/a",
+    country: "US",
+    device: "mobile",
+    browser: "Safari",
+    os: "iOS",
+    visitor: "v2",
+  });
+  await insert({
+    kind: "pageview",
+    path: "/b",
+    country: "NO",
+    device: "desktop",
+    browser: "Chrome",
+    os: "Windows",
+    visitor: "v3",
+  });
+  await insert({
+    kind: "click",
+    path: "/",
+    name: "signup",
+    country: "NO",
+    device: "desktop",
+    browser: "Chrome",
+    os: "Windows",
+    visitor: "v4",
+  });
+  const get = (query: string) =>
+    app.request(`/api/sites/${site.id}/stats?${query}`, { headers: auth });
+
+  // One facet: only /a's numbers, across every breakdown.
+  const path = await (await get("days=365&q=path==/a")).json();
+  assertEquals(path.pageviews, 2);
+  assertEquals(path.paths.map((p: { path: string }) => p.path), ["/a"]);
+  assertEquals(
+    path.countries.map((c: { country: string }) => c.country).sort(),
+    ["NO", "US"],
+  );
+
+  // OR within a facet.
+  const either = await (await get("days=365&q=country==NO,country==US"))
+    .json();
+  assertEquals(either.pageviews, 3);
+
+  // AND across facets.
+  const both = await (await get("days=365&q=path==/a;country==US")).json();
+  assertEquals(both.pageviews, 1);
+  assertEquals(both.devices[0].device, "mobile");
+
+  // The click facet: pageviews have no name, so only the click survives.
+  const click = await (await get("days=365&q=name==signup")).json();
+  assertEquals(click.pageviews, 0);
+  assertEquals(click.clicks, [{ name: "signup", clicks: 1 }]);
+
+  // Referrers filter too, and groups stay within one facet.
+  const ref = await (await get("days=365&q=referrer==https://g.example"))
+    .json();
+  assertEquals(ref.pageviews, 1);
+
+  // The same filter on the global stats route.
+  const global = await (await app.request(
+    "/api/stats?days=365&q=path==/a;country==US",
+    { headers: auth },
+  )).json();
+  assertEquals(global.pageviews, 1);
+
+  // Unknown facets, unsupported operators, OR across facets, and broken RSQL.
+  assertEquals((await get("days=365&q=email==x")).status, 400);
+  assertEquals((await get("days=365&q=path=gt=/a")).status, 400);
+  assertEquals((await get("days=365&q=country==NO,path==/a")).status, 400);
+  assertEquals(
+    (await get("days=365&q=country==NO;country==US")).status,
+    200,
+  );
+  assertEquals((await get("days=365&q=banana")).status, 400);
+
+  // The same filtered view, as a CSV document.
+  const csvRes = await app.request(
+    "/api/stats.csv?days=365&q=country==NO",
+    { headers: auth },
+  );
+  assertEquals(csvRes.status, 200);
+  assertEquals(csvRes.headers.get("content-type"), "text/csv; charset=utf-8");
+  const viewCsv = await csvRes.text();
+  assertEquals(viewCsv.split(/\r?\n/)[0], "# potoo stats,last 365 days");
+  assertEquals(viewCsv.includes("# filter,country==NO"), true);
+  assertEquals(viewCsv.includes("path,pageviews,visitors"), true);
+
+  // Per site as well.
+  const siteCsv = await app.request(
+    `/api/sites/${site.id}/stats.csv?days=365&q=country==NO`,
+    { headers: auth },
+  );
+  assertEquals(siteCsv.status, 200);
+  assertEquals(
+    (await siteCsv.text()).split(/\r?\n/)[0],
+    "# potoo stats,last 365 days",
   );
 });
