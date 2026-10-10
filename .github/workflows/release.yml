@@ -48,8 +48,7 @@ jobs:
           path: potoo-linux-*
           if-no-files-found: error
 
-  # The macOS binaries: both architectures from one runner, Xcode cross
-  # compiles.
+  # The macOS binary: arm64, from Xcode.
   macos:
     runs-on: macos-latest
     steps:
@@ -62,9 +61,7 @@ jobs:
       - name: Build
         run: |
           cargo build --release --manifest-path backend/Cargo.toml --target aarch64-apple-darwin
-          cargo build --release --manifest-path backend/Cargo.toml --target x86_64-apple-darwin
           cp backend/target/aarch64-apple-darwin/release/potoo potoo-macos-arm64
-          cp backend/target/x86_64-apple-darwin/release/potoo potoo-macos-amd64
       - uses: actions/upload-artifact@v4
         with:
           name: potoo-macos
@@ -73,7 +70,7 @@ jobs:
 
   # The release: the binaries attached, the image pushed with the
   # version tags (1.2.3, 1.2 and latest). The image is amd64, matching
-  # the Dockerfile; the binaries cover both macOS ones and arm64 Linux.
+  # the Dockerfile; the binaries cover macOS, and both Linux ones.
   publish:
     needs: [linux, macos]
     runs-on: ubuntu-latest
