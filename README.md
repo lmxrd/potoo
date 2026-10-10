@@ -36,7 +36,9 @@ identity, and you keep your data.
 - **Multiple users, any number of admins**, with role management, password
   resets, and per-user settings (email, password, date format).
 
-![A site with its snippet](docs/screenshots/site.png)
+![The dashboard's stats](docs/screenshots/dashboard-stats.png)
+
+![More of the dashboard's stats](docs/screenshots/dashboard-stats-2.png)
 
 ## Self-hosting
 
