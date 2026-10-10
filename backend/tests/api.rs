@@ -1,0 +1,431 @@
+//! End-to-end tests over real HTTP, against an in-memory database.
+
+use potoo::{app, auth, db, geo, state::AppState};
+use reqwest::{Client, Method, Response};
+use serde_json::{Value, json};
+use std::sync::Arc;
+
+const UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
+
+struct TestApp {
+    base: String,
+    client: Client,
+}
+
+async fn spawn_app() -> TestApp {
+    let state = AppState {
+        db: db::open(":memory:"),
+        geo: Arc::new(geo::Geo::open("/nonexistent/country.mmdb", None).await),
+        trust_proxy: true,
+        throttle: Arc::new(auth::LoginThrottle::default()),
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    TestApp {
+        base: format!("http://{addr}"),
+        client: Client::new(),
+    }
+}
+
+/// The session cookie of a response.
+fn cookie(response: &Response) -> String {
+    let set_cookie = response
+        .headers()
+        .get("set-cookie")
+        .expect("a set-cookie header")
+        .to_str()
+        .unwrap()
+        .to_string();
+    set_cookie
+        .split(';')
+        .next()
+        .expect("a cookie name and value")
+        .to_string()
+}
+
+async fn request(
+    app: &TestApp,
+    method: Method,
+    path: &str,
+    session: Option<&str>,
+    body: Option<Value>,
+) -> Response {
+    let mut builder = app
+        .client
+        .request(method, format!("{}{path}", app.base))
+        .header("user-agent", UA)
+        .header("x-forwarded-for", "203.0.113.5");
+    if let Some(session) = session {
+        builder = builder.header("cookie", session);
+    }
+    if let Some(body) = body {
+        builder = builder.json(&body);
+    }
+    builder.send().await.unwrap()
+}
+
+async fn json(response: Response) -> Value {
+    response.json().await.unwrap()
+}
+
+#[tokio::test]
+async fn setup_users_sites_collection_stats_and_exports() {
+    let app = spawn_app().await;
+    let admin = json!({ "email": "a@example.com", "password": "correct horse battery" });
+
+    // First run: no users yet, every page redirects to setup.
+    let session = json(request(&app, Method::GET, "/api/session", None, None).await).await;
+    assert_eq!(session["needsSetup"], json!(true));
+    assert_eq!(session["user"], json!(null));
+
+    let response = request(&app, Method::POST, "/api/setup", None, Some(admin.clone())).await;
+    assert_eq!(response.status(), 201);
+    let session = cookie(&response);
+    assert_eq!(
+        request(&app, Method::POST, "/api/setup", None, Some(admin.clone()))
+            .await
+            .status(),
+        409
+    );
+
+    // A wrong password is a 401; the right one a 204 with a new cookie.
+    assert_eq!(
+        request(
+            &app,
+            Method::POST,
+            "/api/login",
+            None,
+            Some(json!({ "email": "a@example.com", "password": "wrong password" })),
+        )
+        .await
+        .status(),
+        401
+    );
+    assert_eq!(
+        request(&app, Method::POST, "/api/login", None, Some(admin.clone()))
+            .await
+            .status(),
+        204
+    );
+
+    // Admin creates a regular user, and a site. Hostnames normalize.
+    assert_eq!(
+        request(
+            &app,
+            Method::POST,
+            "/api/users",
+            Some(&session),
+            Some(json!({ "email": "u@example.com", "password": "another long pass" })),
+        )
+        .await
+        .status(),
+        201
+    );
+    assert_eq!(
+        request(&app, Method::GET, "/api/sites", None, None)
+            .await
+            .status(),
+        401
+    );
+    let site = json(
+        request(
+            &app,
+            Method::POST,
+            "/api/sites",
+            Some(&session),
+            Some(json!({ "hostname": "Blog.Example.com" })),
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(site["hostname"], json!("blog.example.com"));
+    let site_id = site["id"].as_i64().unwrap();
+
+    // Collection: a pageview and a click; unknown hosts are ignored, and
+    // so are query strings on paths.
+    let hit = |body: Value| request(&app, Method::POST, "/api/collect", None, Some(body));
+    assert_eq!(
+        hit(json!({ "type": "pageview", "host": "blog.example.com", "path": "/a?secret=1" }))
+            .await
+            .status(),
+        204
+    );
+    assert_eq!(
+        hit(json!({ "type": "click", "host": "blog.example.com", "path": "/a", "name": "signup" }))
+            .await
+            .status(),
+        204
+    );
+    assert_eq!(
+        hit(json!({ "type": "pageview", "host": "unknown.com", "path": "/" }))
+            .await
+            .status(),
+        204
+    );
+
+    // One site's dashboard.
+    let stats = json(
+        request(
+            &app,
+            Method::GET,
+            &format!("/api/sites/{site_id}/stats?days=today"),
+            Some(&session),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(stats["pageviews"], json!(1));
+    assert_eq!(stats["paths"][0]["path"], json!("/a"));
+    assert_eq!(stats["devices"][0]["device"], json!("mobile"));
+    assert_eq!(stats["browsers"][0]["browser"], json!("Safari"));
+    assert_eq!(stats["os"][0]["os"], json!("iOS"));
+    assert_eq!(stats["clicks"][0], json!({ "name": "signup", "clicks": 1 }));
+    assert_eq!(stats["site"]["honor_dnt"], json!(1));
+
+    // DNT: honored by default, and the admin can turn that off.
+    let response = app
+        .client
+        .request(Method::PATCH, format!("{}/api/sites/{site_id}", app.base))
+        .header("cookie", &session)
+        .json(&json!({ "honor_dnt": false }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 204);
+
+    // The same stats with an RSQL filter, across sites.
+    let stats = json(
+        request(
+            &app,
+            Method::GET,
+            &format!("/api/stats?sites={site_id}&q=path==/a"),
+            Some(&session),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(stats["pageviews"], json!(1));
+    assert_eq!(
+        request(
+            &app,
+            Method::GET,
+            "/api/stats?sites=abc",
+            Some(&session),
+            None
+        )
+        .await
+        .status(),
+        400
+    );
+
+    // The CSV exports.
+    let export = request(
+        &app,
+        Method::GET,
+        &format!("/api/export?sites={site_id}"),
+        Some(&session),
+        None,
+    )
+    .await;
+    assert_eq!(export.status(), 200);
+    let csv = export.text().await.unwrap();
+    assert!(
+        csv.starts_with("site,created_at,kind,path,name,referrer,country,device,browser,os\r\n")
+    );
+    assert!(csv.contains("blog.example.com,"));
+    assert!(csv.contains("pageview,/a,,"));
+
+    let stats_csv = request(
+        &app,
+        Method::GET,
+        &format!("/api/export/stats?sites={site_id}&days=today"),
+        Some(&session),
+        None,
+    )
+    .await
+    .text()
+    .await
+    .unwrap();
+    assert!(stats_csv.starts_with("# potoo stats,today\r\n"));
+    assert!(stats_csv.contains("# Page views per period"));
+
+    let site_csv = request(
+        &app,
+        Method::GET,
+        &format!("/api/sites/{site_id}/export?days=today"),
+        Some(&session),
+        None,
+    )
+    .await
+    .text()
+    .await
+    .unwrap();
+    assert!(site_csv.starts_with("# potoo stats,today\r\n"));
+
+    // Users: the last admin cannot be demoted or deleted.
+    let users = json(request(&app, Method::GET, "/api/users", Some(&session), None).await).await;
+    let admin_id = users[0]["id"].as_i64().unwrap();
+    let user_id = users[1]["id"].as_i64().unwrap();
+    let response = app
+        .client
+        .request(Method::PATCH, format!("{}/api/users/{admin_id}", app.base))
+        .header("cookie", &session)
+        .json(&json!({ "is_admin": false }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 409);
+    assert_eq!(
+        request(
+            &app,
+            Method::DELETE,
+            &format!("/api/users/{admin_id}"),
+            Some(&session),
+            None
+        )
+        .await
+        .status(),
+        409
+    );
+    assert_eq!(
+        request(
+            &app,
+            Method::DELETE,
+            &format!("/api/users/{user_id}"),
+            Some(&session),
+            None
+        )
+        .await
+        .status(),
+        204
+    );
+
+    // Logout ends the session.
+    assert_eq!(
+        request(
+            &app,
+            Method::POST,
+            "/api/logout",
+            Some(&session),
+            Some(json!({}))
+        )
+        .await
+        .status(),
+        204
+    );
+    assert_eq!(
+        request(&app, Method::GET, "/api/sites", Some(&session), None)
+            .await
+            .status(),
+        401
+    );
+}
+
+#[tokio::test]
+async fn pixel_tracker_and_api_404() {
+    let app = spawn_app().await;
+
+    // The no-JS pixel: a GIF that records a pageview from its referer.
+    let response = app
+        .client
+        .get(format!(
+            "{}/api/collect/pixel?h=example.com&p=/page",
+            app.base
+        ))
+        .header("user-agent", UA)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.headers().get("content-type").unwrap(), "image/gif");
+    let bytes = response.bytes().await.unwrap();
+    assert_eq!(&bytes[..3], b"GIF");
+
+    // The tracker script points its beacons at /api/collect.
+    let response = app
+        .client
+        .get(format!("{}/api/tracker", app.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 200);
+    assert!(
+        response
+            .headers()
+            .get("content-type")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("text/javascript")
+    );
+    let js = response.text().await.unwrap();
+    assert!(js.contains("new URL(\"collect\", s.src)"));
+
+    // Unknown API paths answer with JSON, not the frontend.
+    let response = request(&app, Method::GET, "/api/nope", None, None).await;
+    assert_eq!(response.status(), 404);
+    assert_eq!(json(response).await["error"], json!("Not found"));
+}
+
+#[tokio::test]
+async fn bots_and_dnt_are_not_recorded() {
+    let app = spawn_app().await;
+    let admin = json!({ "email": "a@example.com", "password": "correct horse battery" });
+    let response = request(&app, Method::POST, "/api/setup", None, Some(admin)).await;
+    let session = cookie(&response);
+    let site = json(
+        request(
+            &app,
+            Method::POST,
+            "/api/sites",
+            Some(&session),
+            Some(json!({ "hostname": "example.com" })),
+        )
+        .await,
+    )
+    .await;
+    let site_id = site["id"].as_i64().unwrap();
+
+    let bot = app
+        .client
+        .post(format!("{}/api/collect", app.base))
+        .header("user-agent", "curl/8.0")
+        .json(&json!({ "type": "pageview", "host": "example.com", "path": "/" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(bot.status(), 204);
+    let dnt = app
+        .client
+        .post(format!("{}/api/collect", app.base))
+        .header("user-agent", UA)
+        .header("dnt", "1")
+        .json(&json!({ "type": "pageview", "host": "example.com", "path": "/" }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(dnt.status(), 204);
+
+    let stats = json(
+        request(
+            &app,
+            Method::GET,
+            &format!("/api/sites/{site_id}/stats"),
+            Some(&session),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(stats["pageviews"], json!(0));
+}

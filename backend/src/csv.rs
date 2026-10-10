@@ -8,6 +8,7 @@ pub fn write_csv(rows: &[Vec<String>]) -> String {
     {
         let mut writer = csv::WriterBuilder::new()
             .terminator(csv::Terminator::CRLF)
+            .flexible(true)
             .from_writer(&mut out);
         for row in rows {
             writer.write_record(row).expect("in-memory CSV cannot fail");

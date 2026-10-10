@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 /// facets the dashboard shows, OR (`,`) within a facet and AND (`;`)
 /// across facets. Anything outside that subset is an error.
 ///
-///     country==NO,country==DE;path==/pricing
+/// ```text
+/// country==NO,country==DE;path==/pricing
+/// ```
 ///
 /// Each facet, as the column its values are stored in.
 const COLUMNS: [&str; 7] = [
@@ -218,5 +220,66 @@ impl<'a> Input<'a> {
         } else {
             Err("Invalid filter".into())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_or_within_a_facet_and_and_across() {
+        let filters = parse_filter("country==NO,country==DE;path==/pricing").unwrap();
+        assert_eq!(
+            filters,
+            FacetFilters::from([
+                ("country".into(), vec!["NO".into(), "DE".into()]),
+                ("path".into(), vec!["/pricing".into()]),
+            ])
+        );
+    }
+
+    #[test]
+    fn parses_quoted_values() {
+        let filters = parse_filter("path==\"/with space\"").unwrap();
+        assert_eq!(
+            filters,
+            FacetFilters::from([("path".into(), vec!["/with space".into()])])
+        );
+    }
+
+    #[test]
+    fn deduplicates_values() {
+        let filters = parse_filter("device==mobile,device==mobile").unwrap();
+        assert_eq!(
+            filters,
+            FacetFilters::from([("device".into(), vec!["mobile".into()])])
+        );
+    }
+
+    #[test]
+    fn rejects_the_unsupported() {
+        assert!(parse_filter("path!=/a").unwrap_err().contains("!="));
+        assert!(
+            parse_filter("nope==x")
+                .unwrap_err()
+                .contains("unknown facet")
+        );
+        assert!(
+            parse_filter("path==/a,country==NO")
+                .unwrap_err()
+                .contains("single facet")
+        );
+        assert!(parse_filter("path==").is_err());
+        assert!(parse_filter("==x").is_err());
+        assert!(parse_filter("path==/a,").is_err());
+    }
+
+    #[test]
+    fn builds_the_sql_clause() {
+        let filters = parse_filter("country==NO;device==mobile,device==desktop").unwrap();
+        let (clause, params) = filter_sql(&filters);
+        assert_eq!(clause, "country IN (?) AND device IN (?, ?)");
+        assert_eq!(params, vec!["NO", "mobile", "desktop"]);
     }
 }

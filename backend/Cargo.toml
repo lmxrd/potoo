@@ -14,7 +14,7 @@ hex = "0.4.3"
 maxminddb = "0.32.0"
 mime_guess = "2.0.5"
 rand = "0.10.3"
-reqwest = { version = "0.13.5", default-features = false, features = ["rustls"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 rust-embed = "8.13.0"
 serde = { version = "1.0.229", features = ["derive"] }

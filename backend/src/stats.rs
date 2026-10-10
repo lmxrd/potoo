@@ -649,3 +649,71 @@ pub async fn stats_for(
         clicks,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn parses_presets_and_ranges() {
+        assert!(matches!(
+            parse_range(None, None, None),
+            Ok(StatsRange::Days(7))
+        ));
+        assert!(matches!(
+            parse_range(Some("today"), None, None),
+            Ok(StatsRange::Today)
+        ));
+        assert!(matches!(
+            parse_range(Some("30"), None, None),
+            Ok(StatsRange::Days(30))
+        ));
+        assert!(parse_range(Some("366"), None, None).is_err());
+        assert!(parse_range(Some("x"), None, None).is_err());
+        // Explicit ranges: both ends, minute precision, ordered.
+        assert!(parse_range(None, Some("2026-10-09T00:00"), None).is_err());
+        assert!(parse_range(None, Some("2026-10-09T00:00"), Some("2026-10-09T09:99")).is_err());
+        assert!(matches!(
+            parse_range(None, Some("2026-10-09T00:00"), Some("2026-10-10T00:00")),
+            Ok(StatsRange::FromTo { .. })
+        ));
+        assert!(parse_range(None, Some("2026-10-10T00:00"), Some("2026-10-09T00:00")).is_err());
+    }
+
+    #[test]
+    fn custom_buckets_follow_the_span() {
+        let from = Utc.with_ymd_and_hms(2026, 1, 1, 10, 30, 0).unwrap();
+        let to = Utc.with_ymd_and_hms(2026, 1, 2, 12, 30, 0).unwrap();
+        let buckets = custom_buckets(from, to);
+        assert_eq!(buckets.bucket, Some("hour"));
+        assert_eq!(buckets.keys.first().unwrap(), "2026-01-01T10:00");
+        assert_eq!(buckets.keys.last().unwrap(), "2026-01-02T12:00");
+        assert_eq!(buckets.since, "2026-01-01T10:30:00.000Z");
+        assert_eq!(buckets.until.as_deref(), Some("2026-01-02T12:31:00.000Z"));
+
+        let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let to = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+        let buckets = custom_buckets(from, to);
+        assert_eq!(buckets.bucket, Some("day"));
+        assert_eq!(buckets.keys.len(), 32);
+        assert_eq!(buckets.keys.first().unwrap(), "2026-01-01");
+    }
+
+    #[test]
+    fn preset_buckets_are_calendar_aligned() {
+        // A fixed moment: 2026-10-09 is a Friday.
+        let now = Utc.with_ymd_and_hms(2026, 10, 9, 14, 0, 0).unwrap();
+        let buckets = preset_buckets(7, now);
+        assert_eq!(buckets.keys.first().unwrap(), "2026-10-03");
+        assert_eq!(buckets.keys.last().unwrap(), "2026-10-09");
+        // Weeks start on Monday.
+        let buckets = preset_buckets(90, now);
+        assert_eq!(buckets.keys.last().unwrap(), "2026-10-05");
+        assert_eq!(buckets.keys.len(), 13);
+        // The last 24 started hours end with the current one.
+        let buckets = preset_buckets(1, now);
+        assert_eq!(buckets.keys.last().unwrap(), "2026-10-09T14:00");
+        assert_eq!(buckets.keys.len(), 24);
+    }
+}

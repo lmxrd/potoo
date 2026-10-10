@@ -120,8 +120,7 @@ async fn has_users(state: &AppState) -> Result<bool, HttpError> {
     Ok(count > 0)
 }
 
-async fn admin_count(state: &AppState) -> Result<i64, HttpError> {
-    let conn = state.db.lock().await;
+fn admin_count(conn: &rusqlite::Connection) -> Result<i64, HttpError> {
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM users WHERE is_admin = 1", [], |r| {
         r.get(0)
     })?;
@@ -441,7 +440,7 @@ async fn change_role(
             message: "Not found".into(),
         });
     };
-    if target == 1 && !body.is_admin && admin_count(&state).await? == 1 {
+    if target == 1 && !body.is_admin && admin_count(&conn)? == 1 {
         return Err(HttpError {
             status: StatusCode::CONFLICT,
             message: "Cannot demote the last admin".into(),
@@ -471,7 +470,7 @@ async fn delete_user(
     let Some(target) = target else {
         return Ok(StatusCode::NO_CONTENT.into_response());
     };
-    if target == 1 && admin_count(&state).await? == 1 {
+    if target == 1 && admin_count(&conn)? == 1 {
         return Err(HttpError {
             status: StatusCode::CONFLICT,
             message: "Cannot delete the last admin".into(),
