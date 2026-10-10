@@ -1,4 +1,4 @@
-/// Tracker served at /api/tracker. Cookie-less; sends only host, path,
+/// Tracker served at /tracker.js. Cookie-less; sends only host, path,
 /// referrer and (for clicks) a label. Options are data attributes on the
 /// tag:
 ///   data-outbound   track clicks on links to other sites
@@ -7,7 +7,7 @@
 pub const TRACKER_JS: &str = r#"(function () {
   var s = document.currentScript;
   if (!s) return;
-  var endpoint = new URL("collect", s.src).href;
+  var endpoint = new URL("api/collect", s.src).href;
   var host = s.getAttribute("data-host") || location.host;
   function send(type, extra) {
     var p = { type: type, host: host, path: location.pathname };

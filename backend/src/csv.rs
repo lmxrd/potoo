@@ -1,4 +1,6 @@
 use crate::stats::{SiteStats, StatsRange};
+use axum::http::header;
+use axum::response::Response;
 use chrono::{DateTime, Utc};
 
 /// A CSV writer with the same conventions as the old export: RFC 4180
@@ -128,4 +130,20 @@ pub fn stats_csv(stats: &SiteStats, range: &str, filter: Option<&str>) -> String
         }
     }
     write_csv(&rows)
+}
+
+/// A CSV document as a download.
+pub fn download(body: String, filename: &str) -> Response {
+    let mut response = Response::new(axum::body::Body::from(body));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        header::HeaderValue::from_static("text/csv; charset=utf-8"),
+    );
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        header::HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
+            .expect("a filename header value"),
+    );
+    response
 }

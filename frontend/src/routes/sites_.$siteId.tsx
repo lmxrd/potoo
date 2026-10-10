@@ -44,7 +44,7 @@ function SitePage() {
         timeFormat={session.user?.time_format}
         filters={filters}
         onFilters={setFilters}
-        exportUrl={`/api/sites/${siteId}/export?${params}`}
+        exportUrl={`/api/export?sites=${siteId}&${params}`}
       />
 
       <StatsDashboard
@@ -106,10 +106,10 @@ function Snippet({ hostname }: { hostname: string }) {
   const [clicks, setClicks] = useState(false);
   const [pixel, setPixel] = useState(false);
   const origin = location.origin;
-  const script = `<script async src="${origin}/api/tracker"${clicks ? " data-clicks" : ""}${
+  const script = `<script async src="${origin}/tracker.js"${clicks ? " data-clicks" : ""}${
     outbound ? " data-outbound" : ""
   }></script>`;
-  const img = `<noscript><img src="${origin}/api/collect/pixel?h=${hostname}" alt="" /></noscript>`;
+  const img = `<noscript><img src="${origin}/api/pixel?h=${hostname}" alt="" /></noscript>`;
   return (
     <Card title="Tracking snippet">
       <div className="mb-3 flex flex-wrap gap-4 text-sm">

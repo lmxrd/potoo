@@ -28,6 +28,7 @@ struct Dist;
 /// SPA fallback.
 pub fn app(state: AppState) -> Router {
     Router::new()
+        .merge(routes::collect::tracker_router())
         .nest("/api", routes::router())
         .fallback(static_handler)
         .layer(middleware::from_fn(no_cache))

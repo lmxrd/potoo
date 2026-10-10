@@ -25,15 +25,6 @@ export const RANGE_PRESETS: { value: RangePreset; label: string }[] = [
   { value: "P1Y", label: "12mo" },
 ];
 
-/** Each preset as the backend's `days` value: 24h is one rolling day. */
-const PRESET_DAYS: Record<Exclude<RangePreset, "today">, number> = {
-  PT24H: 1,
-  P7D: 7,
-  P30D: 30,
-  P90D: 90,
-  P1Y: 365,
-};
-
 const DAY = 86_400_000;
 const HOUR = 3_600_000;
 const MINUTE_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;

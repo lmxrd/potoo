@@ -18,9 +18,15 @@ pub fn router() -> Router<AppState> {
     // is needed; the wildcard keeps the pixel usable anywhere.
     Router::new()
         .route("/collect", post(collect_post))
-        .route("/collect/pixel", get(collect_pixel))
-        .route("/tracker", get(tracker))
+        .route("/pixel", get(collect_pixel))
         .layer(CorsLayer::permissive())
+}
+
+/// The tracker script, a static file served at /tracker.js with its
+/// ending. It belongs at the root: it is the one thing other people's
+/// pages load, not part of the dashboard's API.
+pub fn tracker_router() -> Router<AppState> {
+    Router::new().route("/tracker.js", get(tracker))
 }
 
 /// The host part of a URL or bare hostname, lowercased.
@@ -151,8 +157,7 @@ async fn record(
     Ok(())
 }
 
-// JS tracker. Sent as text/plain by sendBeacon so no CORS preflight is
-// needed; anything malformed is ignored.
+// The beacon endpoint of /api/collect, hit by the tracker script.
 async fn collect_post(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -191,7 +196,7 @@ async fn collect_post(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-// No-JS fallback: <img src=".../api/collect/pixel?h=example.com&p=/page">.
+// No-JS fallback: <img src=".../api/pixel?h=example.com&p=/page">.
 // Without `p`/`h`, the Referer header is used when the browser sends it.
 async fn collect_pixel(
     State(state): State<AppState>,

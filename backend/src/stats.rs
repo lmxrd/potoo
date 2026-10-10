@@ -24,10 +24,16 @@ pub enum StatsRange {
     },
 }
 
-/// Parse the range of a stats request: a `days` preset, or an explicit
-/// `from`/`to` pair as YYYY-MM-DDTHH:MM in UTC.
+/// Parse the range of a stats or export request — the one shape every
+/// endpoint that filters by time accepts:
+///
+/// - `range`: an ISO 8601 duration like `P7D`, `PT24H` or `P1Y` — a
+///   rolling window ending now, rounded up to whole days (at least
+///   one) — or `today`, the calendar day so far;
+/// - or `from`/`to`: an explicit pair of ISO timestamps, YYYY-MM-DDTHH:MM
+///   in UTC, with the `to` minute included.
 pub fn parse_range(
-    days: Option<&str>,
+    range: Option<&str>,
     from: Option<&str>,
     to: Option<&str>,
 ) -> Result<StatsRange, String> {
@@ -49,19 +55,70 @@ pub fn parse_range(
             to: Utc.timestamp_millis_opt(end).unwrap(),
         });
     }
-    match days {
+    match range {
         None => Ok(StatsRange::Days(7)),
         Some("today") => Ok(StatsRange::Today),
-        Some(days) => {
-            let n: u32 = days
-                .parse()
-                .map_err(|_| "days must be an integer from 1 to 365, or \"today\"".to_string())?;
-            if !(1..=365).contains(&n) {
-                return Err("days must be an integer from 1 to 365, or \"today\"".into());
+        Some(range) => {
+            let Some(millis) = parse_duration(range) else {
+                return Err(
+                    "range must be a duration like P7D or PT24H, or \"today\"".into(),
+                );
+            };
+            // Durations are whole days, at least one: PT12H is a day.
+            let days = ((millis + DAY_MS - 1) / DAY_MS).max(1);
+            if days > 365 {
+                return Err("range can span at most P1Y (365 days)".into());
             }
-            Ok(StatsRange::Days(n))
+            Ok(StatsRange::Days(days as u32))
         }
     }
+}
+
+/// An ISO 8601 duration like P1Y, P3M, P2W, P7D or PT24H, as
+/// milliseconds. Years count as 365 and months as 30 days, which is
+/// exactly how the day presets behave.
+fn parse_duration(raw: &str) -> Option<i64> {
+    let body = raw.strip_prefix('P')?;
+    let (date, time) = body
+        .split_once('T')
+        .map(|(date, time)| (date, Some(time)))
+        .unwrap_or((body, None));
+    let mut total = 0i64;
+    let mut scan = |part: &str, date_units: bool| -> Option<()> {
+        let mut number: i64 = 0;
+        let mut digits = 0;
+        for c in part.chars() {
+            match c.to_digit(10) {
+                Some(d) => {
+                    number = number * 10 + i64::from(d);
+                    digits += 1;
+                }
+                None => {
+                    if digits == 0 {
+                        return None;
+                    }
+                    total += match (c, date_units) {
+                        ('Y', true) => number * 365 * DAY_MS,
+                        ('M', true) => number * 30 * DAY_MS,
+                        ('W', true) => number * 7 * DAY_MS,
+                        ('D', true) => number * DAY_MS,
+                        ('H', false) => number * HOUR_MS,
+                        ('M', false) => number * MINUTE_MS,
+                        ('S', false) => number * 1_000,
+                        _ => return None,
+                    };
+                    number = 0;
+                    digits = 0;
+                }
+            }
+        }
+        (digits == 0).then_some(())
+    };
+    scan(date, true)?;
+    if let Some(time) = time {
+        scan(time, false)?;
+    }
+    (total > 0).then_some(total)
 }
 
 /// A strict YYYY-MM-DDTHH:MM, as milliseconds since the epoch.
@@ -118,6 +175,15 @@ fn buckets(range: &StatsRange, now: DateTime<Utc>) -> Buckets {
         StatsRange::Today => preset_buckets_today(now),
         StatsRange::FromTo { from, to } => custom_buckets(*from, *to),
     }
+}
+
+/// The window a range covers, as ISO timestamps: rows with
+/// `created_at >= since` and, when the range ends before now,
+/// `created_at < until`. Shared by the stats aggregations and the raw
+/// export, so both always cover exactly the same rows.
+pub fn range_bounds(range: &StatsRange, now: DateTime<Utc>) -> (String, Option<String>) {
+    let buckets = buckets(range, now);
+    (buckets.since, buckets.until)
 }
 
 fn iso(millis: i64) -> String {
@@ -665,12 +731,28 @@ mod tests {
             parse_range(Some("today"), None, None),
             Ok(StatsRange::Today)
         ));
+        // Durations are rolling windows, rounded up to whole days.
         assert!(matches!(
-            parse_range(Some("30"), None, None),
+            parse_range(Some("P30D"), None, None),
             Ok(StatsRange::Days(30))
         ));
-        assert!(parse_range(Some("366"), None, None).is_err());
-        assert!(parse_range(Some("x"), None, None).is_err());
+        assert!(matches!(
+            parse_range(Some("PT24H"), None, None),
+            Ok(StatsRange::Days(1))
+        ));
+        assert!(matches!(
+            parse_range(Some("P2W"), None, None),
+            Ok(StatsRange::Days(14))
+        ));
+        assert!(matches!(
+            parse_range(Some("P1Y"), None, None),
+            Ok(StatsRange::Days(365))
+        ));
+        assert!(parse_range(Some("P400D"), None, None).is_err());
+        assert!(parse_range(Some("7"), None, None).is_err());
+        assert!(parse_range(Some("P"), None, None).is_err());
+        assert!(parse_range(Some("P7X"), None, None).is_err());
+        assert!(parse_range(Some("P7"), None, None).is_err());
         // Explicit ranges: both ends, minute precision, ordered.
         assert!(parse_range(None, Some("2026-10-09T00:00"), None).is_err());
         assert!(parse_range(None, Some("2026-10-09T00:00"), Some("2026-10-09T09:99")).is_err());

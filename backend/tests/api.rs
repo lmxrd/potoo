@@ -177,7 +177,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::GET,
-            &format!("/api/sites/{site_id}/stats?days=today"),
+            &format!("/api/sites/{site_id}/stats?range=today"),
             Some(&session),
             None,
         )
@@ -229,11 +229,11 @@ async fn setup_users_sites_collection_stats_and_exports() {
         400
     );
 
-    // The CSV exports.
+    // The export: raw rows only, filtered like the dashboard view.
     let export = request(
         &app,
         Method::GET,
-        &format!("/api/export?sites={site_id}"),
+        &format!("/api/export?sites={site_id}&range=P1D"),
         Some(&session),
         None,
     )
@@ -243,13 +243,14 @@ async fn setup_users_sites_collection_stats_and_exports() {
     assert!(
         csv.starts_with("site,created_at,kind,path,name,referrer,country,device,browser,os\r\n")
     );
+    assert_eq!(csv.lines().count(), 3); // the header, the pageview and the click
     assert!(csv.contains("blog.example.com,"));
     assert!(csv.contains("pageview,/a,,"));
-
-    let stats_csv = request(
+    // The q filter narrows the export to the same rows the stats show.
+    let filtered = request(
         &app,
         Method::GET,
-        &format!("/api/export/stats?sites={site_id}&days=today"),
+        &format!("/api/export?sites={site_id}&range=P1D&q=name==signup"),
         Some(&session),
         None,
     )
@@ -257,21 +258,8 @@ async fn setup_users_sites_collection_stats_and_exports() {
     .text()
     .await
     .unwrap();
-    assert!(stats_csv.starts_with("# potoo stats,today\r\n"));
-    assert!(stats_csv.contains("# Page views per period"));
-
-    let site_csv = request(
-        &app,
-        Method::GET,
-        &format!("/api/sites/{site_id}/export?days=today"),
-        Some(&session),
-        None,
-    )
-    .await
-    .text()
-    .await
-    .unwrap();
-    assert!(site_csv.starts_with("# potoo stats,today\r\n"));
+    assert_eq!(filtered.lines().count(), 2); // the header and the click
+    assert!(filtered.contains("click,/a,signup"));
 
     // Users: the last admin cannot be demoted or deleted.
     let users = json(request(&app, Method::GET, "/api/users", Some(&session), None).await).await;
@@ -340,7 +328,7 @@ async fn pixel_tracker_and_api_404() {
     let response = app
         .client
         .get(format!(
-            "{}/api/collect/pixel?h=example.com&p=/page",
+            "{}/api/pixel?h=example.com&p=/page",
             app.base
         ))
         .header("user-agent", UA)
@@ -355,7 +343,7 @@ async fn pixel_tracker_and_api_404() {
     // The tracker script points its beacons at /api/collect.
     let response = app
         .client
-        .get(format!("{}/api/tracker", app.base))
+        .get(format!("{}/tracker.js", app.base))
         .send()
         .await
         .unwrap();
@@ -370,7 +358,7 @@ async fn pixel_tracker_and_api_404() {
             .starts_with("text/javascript")
     );
     let js = response.text().await.unwrap();
-    assert!(js.contains("new URL(\"collect\", s.src)"));
+    assert!(js.contains("new URL(\"api/collect\", s.src)"));
 
     // Unknown API paths answer with JSON, not the frontend.
     let response = request(&app, Method::GET, "/api/nope", None, None).await;

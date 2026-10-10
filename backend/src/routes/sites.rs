@@ -2,9 +2,9 @@ use crate::error::HttpError;
 use crate::routes::auth::AuthUser;
 use crate::state::AppState;
 use crate::stats::{parse_range, stats_for};
-use crate::{csv, filter};
+use crate::filter;
 use axum::extract::{Path, Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch};
 use axum::{Json, Router};
@@ -18,13 +18,12 @@ pub fn router() -> Router<AppState> {
         .route("/", get(list).post(create))
         .route("/{id}", patch(update).delete(delete))
         .route("/{id}/stats", get(site_stats))
-        .route("/{id}/export", get(site_export))
 }
 
 #[derive(Deserialize)]
 pub struct StatsQuery {
     pub sites: Option<String>,
-    pub days: Option<String>,
+    pub range: Option<String>,
     pub from: Option<String>,
     pub to: Option<String>,
     pub q: Option<String>,
@@ -49,34 +48,20 @@ pub async fn site_ids(state: &AppState, sites: Option<&str>) -> Result<Vec<i64>,
     Ok(ids)
 }
 
-/// Parse the range and filter of a stats request, or answer with the 400.
+/// Parse the range and filter of a stats or export request, or answer
+/// with the 400. Every endpoint that filters by time takes the same
+/// params, so they all go through here.
 pub fn range_and_filter(
     query: &StatsQuery,
 ) -> Result<(crate::stats::StatsRange, filter::FacetFilters), HttpError> {
     let range = parse_range(
-        query.days.as_deref(),
+        query.range.as_deref(),
         query.from.as_deref(),
         query.to.as_deref(),
     )
     .map_err(HttpError::bad_request)?;
     let filters = filter::parse_filter_param(query.q.as_deref()).map_err(HttpError::bad_request)?;
     Ok((range, filters))
-}
-
-/// A CSV document as a download.
-pub fn csv_response(body: String, filename: &str) -> Response {
-    let mut response = Response::new(axum::body::Body::from(body));
-    let headers = response.headers_mut();
-    headers.insert(
-        header::CONTENT_TYPE,
-        header::HeaderValue::from_static("text/csv; charset=utf-8"),
-    );
-    headers.insert(
-        header::CONTENT_DISPOSITION,
-        header::HeaderValue::from_str(&format!("attachment; filename=\"{filename}\""))
-            .expect("a filename header value"),
-    );
-    response
 }
 
 async fn list(
@@ -246,28 +231,3 @@ async fn site_stats(
     Ok(Json(value))
 }
 
-// The same stats as a CSV document: one dashboard view of one site.
-async fn site_export(
-    State(state): State<AppState>,
-    _user: AuthUser,
-    Path(id): Path<i64>,
-    Query(query): Query<StatsQuery>,
-) -> Result<Response, HttpError> {
-    let (range, filters) = range_and_filter(&query)?;
-    let conn = state.db.lock().await;
-    let site: Option<i64> = conn
-        .query_row("SELECT id FROM sites WHERE id = ?1", params![id], |r| {
-            r.get(0)
-        })
-        .optional()?;
-    drop(conn);
-    let Some(id) = site else {
-        return Err(HttpError {
-            status: StatusCode::NOT_FOUND,
-            message: "Not found".into(),
-        });
-    };
-    let stats = stats_for(&state.db, &[id], &range, &filters, Utc::now()).await?;
-    let body = csv::stats_csv(&stats, &csv::range_line(&range), query.q.as_deref());
-    Ok(csv_response(body, "potoo-stats.csv"))
-}
