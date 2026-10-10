@@ -13,11 +13,13 @@ permissions:
   contents: read
 
 jobs:
-  # The Linux binaries: static musl for both architectures, from one
-  # amd64 runner — the arm64 one cross compiles with the musl.cc
-  # toolchain. The frontend is built once and embedded in both, like the
-  # image build does. The tools — including both targets — come from
-  # mise.toml, like everywhere else.
+  # The Linux binaries: static musl for both architectures — the plain
+  # names, since those run on any Linux — and the glibc (GNU) builds of
+  # both for those who prefer them, suffixed -gnu. All from one amd64
+  # runner; the arm64 legs cross compile, musl with the musl.cc
+  # toolchain, gnu with Debian's cross gcc. The frontend is built once
+  # and embedded in all four, like the image build does. The tools —
+  # including every target — come from mise.toml, like everywhere else.
   linux:
     runs-on: ubuntu-latest
     steps:
@@ -27,10 +29,10 @@ jobs:
       - uses: jdx/mise-action@v4
       - name: The frontend, embedded in the binaries
         run: pnpm install -C frontend --frozen-lockfile && pnpm run -C frontend build
-      - name: musl, and the arm64 cross toolchain
+      - name: The cross toolchains (musl.cc for arm64 musl, Debian's for arm64 gnu)
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends musl-tools curl
+          sudo apt-get install -y --no-install-recommends musl-tools curl gcc-aarch64-linux-gnu
           curl -fsSL https://musl.cc/aarch64-linux-musl-cross.tgz | tar -xz -C /usr/local
       - name: Build
         run: |
@@ -40,8 +42,15 @@ jobs:
           export AR_aarch64_unknown_linux_musl=aarch64-linux-musl-ar
           export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-musl-gcc
           cargo build --release --manifest-path backend/Cargo.toml --target aarch64-unknown-linux-musl
+          cargo build --release --manifest-path backend/Cargo.toml --target x86_64-unknown-linux-gnu
+          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
+          export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          cargo build --release --manifest-path backend/Cargo.toml --target aarch64-unknown-linux-gnu
           cp backend/target/x86_64-unknown-linux-musl/release/potoo potoo-linux-amd64
           cp backend/target/aarch64-unknown-linux-musl/release/potoo potoo-linux-arm64
+          cp backend/target/x86_64-unknown-linux-gnu/release/potoo potoo-linux-amd64-gnu
+          cp backend/target/aarch64-unknown-linux-gnu/release/potoo potoo-linux-arm64-gnu
       - uses: actions/upload-artifact@v4
         with:
           name: potoo-linux
@@ -70,7 +79,7 @@ jobs:
 
   # The release: the binaries attached, the image pushed with the
   # version tags (1.2.3, 1.2 and latest). The image is amd64, matching
-  # the Dockerfile; the binaries cover macOS, and both Linux ones.
+  # the Dockerfile; the binaries cover macOS, and both Linux flavors.
   publish:
     needs: [linux, macos]
     runs-on: ubuntu-latest
