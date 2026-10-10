@@ -30,7 +30,7 @@ run = "cargo build --release --manifest-path backend/Cargo.toml"
 depends = ["build:frontend"]
 
 [tasks."build:docker"]
-run = "docker build -t potoo ."
+run = "podman build --platform linux/amd64 -t potoo ."
 
 [tasks.check]
 depends = ["check:frontend", "check:backend"]

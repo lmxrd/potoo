@@ -71,7 +71,8 @@ jobs:
           if-no-files-found: error
 
   # The release: the binaries attached, the image pushed with the
-  # version tags (1.2.3, 1.2 and latest).
+  # version tags (1.2.3, 1.2 and latest). The image is amd64, matching
+  # the Dockerfile; the binaries cover both macOS ones and arm64 Linux.
   publish:
     needs: binaries
     runs-on: ubuntu-latest
@@ -111,7 +112,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: linux/amd64,linux/arm64
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha

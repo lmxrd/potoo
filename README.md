@@ -46,8 +46,8 @@ identity, and you keep your data.
 
 ### Docker
 
-The CI publishes an image for both architectures to the GitHub Container
-Registry, so running your own instance is one command:
+The CI publishes an amd64 image to the GitHub Container Registry, so
+running your own instance is one command:
 
 ```bash
 docker run -d --name potoo -p 8000:8000 -v potoo-data:/data ghcr.io/lmxrd/potoo
@@ -86,11 +86,8 @@ docker run -d --name potoo -p 8000:8000 -v potoo-data:/data potoo
 
 The image is Alpine holding a single static binary: the frontend and
 the database schema are embedded in it. The database and the GeoIP database
-live in the `/data` volume. For both architectures:
-
-```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/potoo --push .
-```
+live in the `/data` volume. Build it yourself with `mise run build:docker`
+(podman; the image is amd64, emulated on arm64 machines).
 
 Behind a reverse proxy, set `TRUST_PROXY=1` so the client IP is read from
 `X-Forwarded-For`, and terminate TLS there.
