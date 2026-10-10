@@ -189,8 +189,10 @@ export function useDateRange() {
         to: ".",
         search: (prev) => {
           const merged: DashboardSearch = { ...(prev as DashboardSearch), ...params };
-          // Presets and custom ranges replace each other, never stack.
-          if (merged.range) {
+          // Presets and custom ranges replace each other, never stack. The
+          // discriminator is what the new range carries: merged alone can
+          // still hold the stale `range` of a preset it is replacing.
+          if (params.range) {
             delete merged.from;
             delete merged.to;
           } else {

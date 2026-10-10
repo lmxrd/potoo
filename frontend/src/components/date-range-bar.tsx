@@ -54,7 +54,9 @@ export function DateRangeBar({
 
   const apply = () => {
     if (!canApply) return;
-    setDraft(null);
+    // The draft stays: clearing it here would show the old range for the
+    // moment before the navigation lands. The sync effect below clears it
+    // once the URL holds the new range.
     onRange({ preset: "custom", from: shown.from, to: shown.to });
   };
 
