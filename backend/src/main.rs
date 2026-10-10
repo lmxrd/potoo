@@ -7,6 +7,11 @@ use std::time::Duration;
 async fn main() {
     tracing_subscriber::fmt().init();
 
+    // The binary is built for musl (the Docker image is Alpine), so the
+    // TLS stack is ring rather than aws-lc; reqwest is built without a
+    // provider and uses this default one.
+    potoo::install_tls_provider();
+
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())

@@ -47,9 +47,9 @@ docker build -t potoo .
 docker run -d --name potoo -p 8000:8000 -v potoo-data:/data potoo
 ```
 
-The image is Debian slim holding a single binary: the frontend and the
-database schema are embedded in it. The database and the GeoIP database live in
-the `/data` volume. For both architectures:
+The image is Alpine holding a single static binary (musl): the frontend and
+the database schema are embedded in it. The database and the GeoIP database
+live in the `/data` volume. For both architectures:
 
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/potoo --push .

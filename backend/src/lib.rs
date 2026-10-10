@@ -35,6 +35,20 @@ pub fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// Install ring as the process TLS provider. reqwest is built with
+/// `rustls-no-provider` (aws-lc is painful on musl, which the Docker
+/// image builds for), so the provider must be installed before the
+/// first client is built. Safe to call more than once.
+pub fn install_tls_provider() {
+    use std::sync::Once;
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(|| {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+    });
+}
+
 /// Everything without its own cache policy answers with no-cache, like
 /// the API responses and the shell; the hashed files under /assets are
 /// immutable.

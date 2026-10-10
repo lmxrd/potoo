@@ -13,6 +13,7 @@ struct TestApp {
 }
 
 async fn spawn_app() -> TestApp {
+    potoo::install_tls_provider();
     let state = AppState {
         db: db::open(":memory:"),
         geo: Arc::new(geo::Geo::open("/nonexistent/country.mmdb", None).await),
