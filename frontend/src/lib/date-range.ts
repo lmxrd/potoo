@@ -41,10 +41,24 @@ function localMinute(utc: string): string | null {
   return Number.isNaN(time) ? null : localInput(new Date(time));
 }
 
-/** The stats query params of a range, or null when a custom range is invalid. */
+/**
+ * The query params of a range — the same ones the stats and the export
+ * endpoints take — or null when a custom range is invalid. Presets go as
+ * the duration they are (`range=P7D`); Today is a label the dashboard
+ * expands into the UTC-midnight-to-now window; custom ranges are ISO
+ * timestamps in UTC, minute precision.
+ */
 export function rangeQuery(range: DateRange): string | null {
+  if (range.preset === "today") {
+    const now = new Date();
+    const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    const from = midnight.toISOString().slice(0, 16);
+    // Not before midnight in practice, but the backend requires from < to.
+    const to = (midnight < now ? now : new Date(+midnight + 60_000)).toISOString().slice(0, 16);
+    return `from=${from}&to=${to}`;
+  }
   if (range.preset !== "custom") {
-    return `days=${range.preset === "today" ? "today" : PRESET_DAYS[range.preset]}`;
+    return `range=${range.preset}`;
   }
   const from = utcMinute(range.from);
   const to = utcMinute(range.to);

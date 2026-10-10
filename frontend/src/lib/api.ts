@@ -18,7 +18,7 @@ export type Bucket = "hour" | "day" | "week" | "month";
  * for several sites combined.
  */
 export type SiteStats = {
-  days: number | "today";
+  days: number;
   // Set only for explicit from/to ranges: the bucket the chart shows.
   bucket?: Bucket;
   pageviews: number;

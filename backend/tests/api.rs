@@ -177,7 +177,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::GET,
-            &format!("/api/sites/{site_id}/stats?range=today"),
+            &format!("/api/sites/{site_id}/stats?range=P1D"),
             Some(&session),
             None,
         )
@@ -327,10 +327,7 @@ async fn pixel_tracker_and_api_404() {
     // The no-JS pixel: a GIF that records a pageview from its referer.
     let response = app
         .client
-        .get(format!(
-            "{}/api/pixel?h=example.com&p=/page",
-            app.base
-        ))
+        .get(format!("{}/api/pixel?h=example.com&p=/page", app.base))
         .header("user-agent", UA)
         .send()
         .await

@@ -11,10 +11,9 @@ const MINUTE_MS: i64 = 60_000;
 /// The buckets a custom range's chart can use.
 pub type Bucket = &'static str;
 
-/// A preset range of days, or an explicit UTC range with minute precision.
+/// A rolling window of days, or an explicit UTC range with minute
+/// precision — the two forms every time-filtered endpoint accepts.
 pub enum StatsRange {
-    /// Today, as its 24 hours.
-    Today,
     /// The last `n` days, calendar aligned.
     Days(u32),
     /// An explicit range; the `to` minute is included.
@@ -29,9 +28,10 @@ pub enum StatsRange {
 ///
 /// - `range`: an ISO 8601 duration like `P7D`, `PT24H` or `P1Y` — a
 ///   rolling window ending now, rounded up to whole days (at least
-///   one) — or `today`, the calendar day so far;
+///   one);
 /// - or `from`/`to`: an explicit pair of ISO timestamps, YYYY-MM-DDTHH:MM
-///   in UTC, with the `to` minute included.
+///   in UTC, with the `to` minute included. The dashboard's "Today" view
+///   is this form: UTC midnight to now.
 pub fn parse_range(
     range: Option<&str>,
     from: Option<&str>,
@@ -57,12 +57,9 @@ pub fn parse_range(
     }
     match range {
         None => Ok(StatsRange::Days(7)),
-        Some("today") => Ok(StatsRange::Today),
         Some(range) => {
             let Some(millis) = parse_duration(range) else {
-                return Err(
-                    "range must be a duration like P7D or PT24H, or \"today\"".into(),
-                );
+                return Err("range must be a duration like P7D or PT24H".into());
             };
             // Durations are whole days, at least one: PT12H is a day.
             let days = ((millis + DAY_MS - 1) / DAY_MS).max(1);
@@ -152,7 +149,6 @@ fn parse_minute(raw: &str) -> Option<i64> {
 /// The range as the `days` field of the stats response.
 fn days_field(range: &StatsRange) -> serde_json::Value {
     match range {
-        StatsRange::Today => serde_json::json!("today"),
         StatsRange::Days(n) => serde_json::json!(n),
         StatsRange::FromTo { from, to } => {
             serde_json::json!(((*to - *from).num_milliseconds() + DAY_MS - 1) / DAY_MS)
@@ -172,7 +168,6 @@ struct Buckets {
 fn buckets(range: &StatsRange, now: DateTime<Utc>) -> Buckets {
     match range {
         StatsRange::Days(n) => preset_buckets(*n, now),
-        StatsRange::Today => preset_buckets_today(now),
         StatsRange::FromTo { from, to } => custom_buckets(*from, *to),
     }
 }
@@ -206,19 +201,6 @@ const DAY_SQL: &str = "date(created_at)";
 const WEEK_SQL: &str =
     "date(created_at, '-' || ((cast(strftime('%w', created_at) as integer) + 6) % 7) || ' days')";
 const MONTH_SQL: &str = "substr(created_at, 1, 7) || '-01'";
-
-/// Today, as its 24 hours.
-fn preset_buckets_today(now: DateTime<Utc>) -> Buckets {
-    let day_start = now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
-    let start = day_start.timestamp_millis();
-    Buckets {
-        keys: (0..24).map(|h| hour(start + h * HOUR_MS)).collect(),
-        since: format!("{}T00:00:00.000", date(start)),
-        until: None,
-        sql: HOUR_SQL,
-        bucket: None,
-    }
-}
 
 /// The last `n` days, calendar aligned: up to 30 days is one bucket per
 /// day, up to 90 is one per week (Mondays), a year is one per month.
@@ -727,10 +709,9 @@ mod tests {
             parse_range(None, None, None),
             Ok(StatsRange::Days(7))
         ));
-        assert!(matches!(
-            parse_range(Some("today"), None, None),
-            Ok(StatsRange::Today)
-        ));
+        // "Today" is the dashboard's label for a midnight-to-now window,
+        // sent as from/to; the backend has no named range.
+        assert!(parse_range(Some("today"), None, None).is_err());
         // Durations are rolling windows, rounded up to whole days.
         assert!(matches!(
             parse_range(Some("P30D"), None, None),

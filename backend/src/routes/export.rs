@@ -2,7 +2,7 @@ use crate::csv;
 use crate::error::HttpError;
 use crate::filter::filter_sql;
 use crate::routes::auth::AuthUser;
-use crate::routes::sites::{range_and_filter, site_ids, StatsQuery};
+use crate::routes::sites::{StatsQuery, range_and_filter, site_ids};
 use crate::state::AppState;
 use crate::stats::range_bounds;
 use axum::Router;

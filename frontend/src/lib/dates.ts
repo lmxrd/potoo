@@ -25,9 +25,9 @@ export function formatTime(time: string, format = "24h"): string {
  * the hour for hourly buckets, the month for a year, and "9 Oct" style
  * days otherwise.
  */
-export function chartLabel(day: string, range: number | "today", timeFormat = "24h"): string {
-  if (range === "today" || range === 1) return formatTime(day.slice(11, 16), timeFormat);
-  if (typeof range === "number" && range > 90) {
+export function chartLabel(day: string, range: number, timeFormat = "24h"): string {
+  if (range === 1) return formatTime(day.slice(11, 16), timeFormat);
+  if (range > 90) {
     const [, month, year] = day.split("-");
     return Number(month) === 1 ? `${MONTHS[0]} ${year.slice(2)}` : MONTHS[Number(month) - 1];
   }

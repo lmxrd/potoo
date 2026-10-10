@@ -23,7 +23,6 @@ pub fn write_csv(rows: &[Vec<String>]) -> String {
 /// The range of a stats view, as one CSV header line.
 pub fn range_line(range: &StatsRange) -> String {
     match range {
-        StatsRange::Today => "today".into(),
         StatsRange::Days(1) => "last 24 hours".into(),
         StatsRange::Days(n) => format!("last {n} days"),
         StatsRange::FromTo { from, to } => format!("{} to {}", minute(from), minute(to)),

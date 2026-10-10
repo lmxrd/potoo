@@ -1,7 +1,7 @@
 # Screenshots
 
 The README references these three files. Take them on a running instance
-(`deno task dev`, then browse the Vite URL), with the seeded test data:
+(`mise run dev`, then browse the Vite URL), with the seeded test data:
 
 1. `dashboard.png` — the overview at `/`: all sites selected, range "Last 7
    days", so the per-day chart with date labels shows a full week.

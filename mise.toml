@@ -50,3 +50,13 @@ run = "pnpm run -C frontend fix"
 
 [tasks.test]
 run = "cargo test --manifest-path backend/Cargo.toml"
+
+# A year of demo data for development. Wipes every hit — not the sites
+# or users — and creates the demo site blog.example.com when there is
+# none. Deterministic: seeding twice gives the same data.
+[tasks.seed]
+run = "cargo run --manifest-path backend/Cargo.toml --bin seed"
+
+# Remove the local data: the SQLite database and the GeoIP database.
+[tasks.clean]
+run = "rm -rf data"

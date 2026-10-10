@@ -1,8 +1,8 @@
 use crate::error::HttpError;
+use crate::filter;
 use crate::routes::auth::AuthUser;
 use crate::state::AppState;
 use crate::stats::{parse_range, stats_for};
-use crate::filter;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -230,4 +230,3 @@ async fn site_stats(
     value["site"] = json!({ "id": id, "hostname": hostname, "honor_dnt": honor_dnt });
     Ok(Json(value))
 }
-

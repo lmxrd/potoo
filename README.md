@@ -32,7 +32,7 @@ identity, and you keep your data.
 - **A snippet generator** on every site's page: a single script tag, with
   optional click tracking, outbound link tracking, and a no-JS pixel fallback.
   SPA navigation via `pushState` is tracked.
-- **CSV export** of all hits, filtered by sites and a date range.
+- **CSV export** of all hits, filtered like the dashboard view.
 - **Multiple users, any number of admins**, with role management, password
   resets, and per-user settings (email, password, date format).
 
@@ -81,24 +81,85 @@ Open `http://localhost:8000`; with no users yet, every page redirects to
 2. Open the site's page and copy the tracking snippet into your pages.
 3. Watch the dashboard.
 
-## Tracking
+## How tracking works
 
-The snippet generator produces a single script tag:
+When someone visits a page with your snippet in it, their browser tells potoo
+about the visit. Two public endpoints do that job — one for visitors whose
+browser runs JavaScript, one for everyone else:
+
+### `/tracker.js` — the script most visitors run
+
+The snippet generator on every site's page produces a single script tag:
 
 ```html
-<script async src="https://your-potoo.example/api/tracker"></script>
+<script async src="https://your-potoo.example/tracker.js"></script>
 ```
 
-Options, combined as needed:
+The script waits until the page has loaded, then sends one small message to
+potoo (a POST to `/api/collect`) containing only the site's hostname, the
+page's path, and — for the first pageview — the site the visitor came from. It
+does the same again when a single-page app navigates within the site, so those
+views are counted too. Options, combined as needed:
 
 | Option             | What it does                                               |
 | ------------------ | ---------------------------------------------------------- |
 | `data-clicks`      | Records clicks on elements with `data-potoo-click="label"` |
 | `data-outbound`    | Records clicks on links leaving your site                  |
-| The pixel fallback | A `<noscript>` image tag for visitors without JavaScript   |
+| `data-host`        | Reports a different hostname than `location.host`          |
+| The pixel fallback | Adds the `<noscript>` image tag below                      |
+
+### `/api/collect` — where the hits arrive
+
+The write endpoint of both the script and the pixel. On every hit, potoo
+derives what the dashboard needs and then **discards the rest**:
+
+- the IP address becomes a country (via the local GeoIP database) and is
+  thrown away;
+- the browser's user agent becomes the device class, browser family and
+  operating system, and is thrown away;
+- the page's query string and fragment are dropped (they often hold personal
+  data), and only the referring hostname is kept, never the full URL;
+- "unique visitor" is a salted, per-day, per-site hash of the IP and user
+  agent — so the same person counts once a day per site, but cannot be
+  followed across days, across sites, or linked back to an identity.
+
+### `/api/pixel` — visitors without JavaScript
+
+Some visitors have JavaScript off (or blocked). Browsers like that still
+download images, so the snippet's optional fallback is an invisible 1x1 image:
+
+```html
+<noscript><img src="https://your-potoo.example/api/pixel?h=example.com" alt=""></noscript>
+```
+
+Requesting the image is the visit: potoo records a pageview using what the
+request carries anyway (the query string's site and path, or the `Referer`
+header), then returns the transparent GIF. It counts pageviews only — no
+in-app navigation, no clicks.
 
 Visitors who ask not to be tracked (Do Not Track or Global Privacy Control) are
 ignored by default; each site can turn that off.
+
+## Ranges, filters and the export
+
+Every endpoint that filters by time — the stats of the overview, the stats of
+one site, and the export — takes the same query params:
+
+| Param   | What it is                                                                                     |
+| ------- | ---------------------------------------------------------------------------------------------- |
+| `range` | A rolling window ending now, as an ISO 8601 duration: `PT24H`, `P7D`, `P30D`, `P90D`, `P1Y`   |
+| `from`+`to` | Instead of a duration: an exact window, ISO timestamps in UTC with minute precision         |
+| `sites` | Comma-separated site ids; when absent, every site                                              |
+| `q`     | A filter over the dashboard's facets, e.g. `country==NO;path==/pricing`                        |
+
+The dashboard's "Today" view is a `from`/`to` pair: UTC midnight to now. The
+`q` filter is equality on the facets the dashboard shows, OR (`,`) within one
+facet and AND (`;`) across them.
+
+The export is `GET /api/export` with those params, and returns raw data only:
+one CSV row per recorded hit — site, timestamp, kind, path, name, referrer,
+country, device, browser, operating system — oldest first. It is the same set
+of rows the dashboard view is computed from, so what you see is what you get.
 
 ## Configuration
 
@@ -124,6 +185,8 @@ This site or product includes IP data from db-ip.com, licensed under CC BY 4.0.
 | `mise run check`        | Format, lint and type checks for backend and frontend                      |
 | `mise run fix`          | Applies the format and lint fixes                                          |
 | `mise run test`         | The backend end-to-end tests                                               |
+| `mise run seed`         | A year of demo data (wipes every hit; deterministic)                       |
+| `mise run clean`        | Removes the local data: the database and the GeoIP database               |
 
 ## Development
 
@@ -137,16 +200,16 @@ backend/src/geo.rs         country lookup + the weekly DB-IP download
 backend/src/stats.rs       ranges, chart buckets, the aggregations
 backend/src/filter.rs      the RSQL filter subset the dashboard uses
 backend/src/routes/        auth, users, sites, stats, export, collect
-frontend/src/routes/       dashboard, sites table, site page, export, users, settings
+backend/src/bin/seed.rs    a year of demo data, for development
+frontend/src/routes/      dashboard, sites table, site page, export, users, settings
 ```
 
 Checks: `mise run check` and `mise run test` cover format, lint and types for
 both projects, and the end-to-end tests of setup, users, collection and stats.
+For a dashboard with something to look at: `mise run seed`.
 
 ## Notes
 
 - The tracker accepts hits for registered sites but does not verify `Origin`, so
   a determined visitor can send spoofed hits. Acceptable for analytics, worth
   knowing.
-- The old Deno backend is kept in `backend-old/` for reference; it is not part
-  of the build.
