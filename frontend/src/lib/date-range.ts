@@ -5,8 +5,9 @@ import { formatDate, formatTime } from "./dates";
 
 /**
  * The preset ranges, as HTML duration strings: PT24H is the rolling last
- * 24 hours, P7D and friends the last N days, P1Y a year. `today` is a named
- * calendar range instead: since UTC midnight, not a rolling duration.
+ * 24 hours, P7D and friends the last N days, P1Y a year. `today` is not a
+ * range the URL or the API know: it is a button that fills the custom
+ * UTC-midnight-to-now window.
  */
 export type RangePreset = "today" | "PT24H" | "P7D" | "P30D" | "P90D" | "P1Y";
 
@@ -42,19 +43,28 @@ function localMinute(utc: string): string | null {
 }
 
 /**
+ * Today's window — UTC midnight to now — as the UTC minute strings the
+ * URL and the API use. The Today button fills this; the URL and the
+ * backend never see a named range.
+ */
+function todayWindow(): { from: string; to: string } {
+  const now = new Date();
+  const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const from = midnight.toISOString().slice(0, 16);
+  // Not before midnight in practice, but from must be before to.
+  const to = (midnight < now ? now : new Date(+midnight + 60_000)).toISOString().slice(0, 16);
+  return { from, to };
+}
+
+/**
  * The query params of a range — the same ones the stats and the export
  * endpoints take — or null when a custom range is invalid. Presets go as
- * the duration they are (`range=P7D`); Today is a label the dashboard
- * expands into the UTC-midnight-to-now window; custom ranges are ISO
- * timestamps in UTC, minute precision.
+ * the duration they are (`range=P7D`); custom ranges are ISO timestamps
+ * in UTC, minute precision.
  */
 export function rangeQuery(range: DateRange): string | null {
   if (range.preset === "today") {
-    const now = new Date();
-    const midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-    const from = midnight.toISOString().slice(0, 16);
-    // Not before midnight in practice, but the backend requires from < to.
-    const to = (midnight < now ? now : new Date(+midnight + 60_000)).toISOString().slice(0, 16);
+    const { from, to } = todayWindow();
     return `from=${from}&to=${to}`;
   }
   if (range.preset !== "custom") {
@@ -125,7 +135,8 @@ export function rangeSummary(range: DateRange, format = "YYYY-MM-DD", timeFormat
  * The dashboard settings kept in the URL, so a view can be shared and the
  * back button steps through changes: `?range=P7D` or `?from=..&to=..` for
  * the range (from/to in UTC, so a shared link is the same absolute window
- * in any timezone), `?sites=1,3` for the overview's site selection.
+ * in any timezone; the Today button writes from/to, never its name),
+ * `?sites=1,3` for the overview's site selection.
  */
 export type DashboardSearch = {
   range?: string;
@@ -135,12 +146,19 @@ export type DashboardSearch = {
   q?: string;
 };
 
+/**
+ * The presets the URL can hold. Today is not one of them: it writes its
+ * window as from/to, so a shared Today link is the exact window it was
+ * created in.
+ */
+const URL_PRESETS = RANGE_PRESETS.filter((preset) => preset.value !== "today");
+
 /** The routes' validateSearch: keep only well-formed dashboard params. */
 export function validateDashboardSearch(search: Record<string, unknown>): DashboardSearch {
   const out: DashboardSearch = {};
   if (
     typeof search.range === "string" &&
-    RANGE_PRESETS.some((preset) => preset.value === search.range)
+    URL_PRESETS.some((preset) => preset.value === search.range)
   ) {
     out.range = search.range;
   }
@@ -166,7 +184,7 @@ export function searchRange(search: DashboardSearch): DateRange {
   const from = search.from && localMinute(search.from);
   const to = search.to && localMinute(search.to);
   if (from && to && from < to) return { preset: "custom", from, to };
-  const preset = RANGE_PRESETS.find((option) => option.value === search.range)?.value;
+  const preset = URL_PRESETS.find((option) => option.value === search.range)?.value;
   if (preset !== undefined) return { preset };
   return { preset: "P7D" };
 }
@@ -176,8 +194,12 @@ export function parseSites(sites: string | undefined): Set<number> {
   return new Set((sites ?? "").split(",").filter(Boolean).map(Number));
 }
 
-/** The search params a range writes; presets as durations, custom as UTC. */
+/**
+ * The search params a range writes: presets as durations, Today and
+ * custom as UTC from/to. The URL never holds the name "today".
+ */
 function rangeParams(range: DateRange): DashboardSearch {
+  if (range.preset === "today") return todayWindow();
   if (range.preset !== "custom") return { range: range.preset };
   const from = utcMinute(range.from);
   const to = utcMinute(range.to);
