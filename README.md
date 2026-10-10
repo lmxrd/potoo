@@ -69,8 +69,7 @@ mise run build
 ```
 
 The task builds the frontend and compiles everything into one binary: the
-frontend is embedded in it. To run from source instead: `mise run start`; for
-development, `mise run dev` runs the backend and the Vite dev server together.
+frontend is embedded in it. To run from source instead: `mise run start`.
 
 ### First run
 
@@ -174,42 +173,13 @@ of rows the dashboard view is computed from, so what you see is what you get.
 
 This site or product includes IP data from db-ip.com, licensed under CC BY 4.0.
 
-## CLI tasks
-
-| Task                    | What it does                                                               |
-| ----------------------- | -------------------------------------------------------------------------- |
-| `mise run dev`          | Runs the backend and the frontend (Vite) together, with hot reload         |
-| `mise run start`        | Runs the server from source                                                |
-| `mise run build`        | Builds the frontend and compiles the backend binary                        |
-| `mise run build:docker` | Builds the Docker image                                                    |
-| `mise run check`        | Format, lint and type checks for backend and frontend                      |
-| `mise run fix`          | Applies the format and lint fixes                                          |
-| `mise run test`         | The backend end-to-end tests                                               |
-| `mise run seed`         | A year of demo data (wipes every hit; deterministic)                       |
-| `mise run clean`        | Removes the local data: the database and the GeoIP database               |
-
-## Development
-
-```
-backend/src/main.rs        entrypoint: env config, geo refresh, retention
-backend/src/lib.rs         the app: routes, cache headers, static serving
-backend/src/db.rs          the SQLite connection + schema, applied on startup
-backend/src/auth.rs        password hashing, sessions, the login throttle
-backend/src/visitor.rs     user agent parsing, client IP, visitor hashes
-backend/src/geo.rs         country lookup + the weekly DB-IP download
-backend/src/stats.rs       ranges, chart buckets, the aggregations
-backend/src/filter.rs      the RSQL filter subset the dashboard uses
-backend/src/routes/        auth, users, sites, stats, export, collect
-backend/src/bin/seed.rs    a year of demo data, for development
-frontend/src/routes/      dashboard, sites table, site page, export, users, settings
-```
-
-Checks: `mise run check` and `mise run test` cover format, lint and types for
-both projects, and the end-to-end tests of setup, users, collection and stats.
-For a dashboard with something to look at: `mise run seed`.
-
 ## Notes
 
 - The tracker accepts hits for registered sites but does not verify `Origin`, so
   a determined visitor can send spoofed hits. Acceptable for analytics, worth
   knowing.
+
+## Contributing
+
+Development setup, the task list, the code layout and the conventions a
+change must follow live in [CONTRIBUTING.md](CONTRIBUTING.md).
