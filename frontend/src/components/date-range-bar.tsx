@@ -81,7 +81,7 @@ export function DateRangeBar({
   const count = [...filters.values()].reduce((n, values) => n + values.size, 0);
 
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+    <div className="rounded-lg border border-line bg-bg p-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-1" role="group" aria-label="Date range">
           {RANGE_PRESETS.map((preset) => (
@@ -89,8 +89,8 @@ export function DateRangeBar({
               key={preset.label}
               className={`${chip} ${
                 !open && range.preset === preset.value
-                  ? "bg-slate-900 font-medium text-white"
-                  : "border border-slate-300 bg-white hover:bg-slate-100"
+                  ? "bg-accent font-medium text-accent-ink"
+                  : "border border-line-strong bg-card hover:bg-subtle"
               }`}
               onClick={() => {
                 // Explicit: the URL effect alone would miss the case where
@@ -106,8 +106,8 @@ export function DateRangeBar({
           <button
             className={`${chip} ${
               open
-                ? "bg-slate-900 font-medium text-white"
-                : "border border-slate-300 bg-white hover:bg-slate-100"
+                ? "bg-accent font-medium text-accent-ink"
+                : "border border-line-strong bg-card hover:bg-subtle"
             }`}
             onClick={() => {
               setOpen(true);
@@ -131,17 +131,17 @@ export function DateRangeBar({
           <input
             type="datetime-local"
             aria-label="Range start"
-            className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm sm:flex-none"
+            className="min-w-0 flex-1 rounded border border-line-strong px-2 py-1.5 text-sm sm:flex-none"
             value={shown.from}
             onChange={(e) => setDraft({ from: e.target.value, to: shown.to })}
           />
-          <span aria-hidden="true" className="text-slate-400">
+          <span aria-hidden="true" className="text-faint">
             &ndash;
           </span>
           <input
             type="datetime-local"
             aria-label="Range end"
-            className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1.5 text-sm sm:flex-none"
+            className="min-w-0 flex-1 rounded border border-line-strong px-2 py-1.5 text-sm sm:flex-none"
             value={shown.to}
             onChange={(e) => setDraft({ from: shown.from, to: e.target.value })}
           />
@@ -156,12 +156,12 @@ export function DateRangeBar({
           [...values].map((value) => (
             <span
               key={`${facet}:${value}`}
-              className="rounded bg-slate-900 px-2 py-0.5 text-xs text-white"
+              className="rounded bg-accent px-2 py-0.5 text-xs text-accent-ink"
             >
               {FACETS[facet]}: {facet === "country" ? countryName(value) : value}{" "}
               <button
                 aria-label={`Remove the ${FACETS[facet]} ${facet === "country" ? countryName(value) : value} filter`}
-                className="text-slate-300 hover:text-white"
+                className="text-accent-ink/70 hover:text-accent-ink"
                 onClick={() => removeFilter(facet, value)}
               >
                 &times;
@@ -170,12 +170,10 @@ export function DateRangeBar({
           )),
         )}
         {count === 0 ? (
-          <span className="text-xs text-slate-500">
-            Click any item of a breakdown to filter by it.
-          </span>
+          <span className="text-xs text-muted">Click any item of a breakdown to filter by it.</span>
         ) : (
           <button
-            className="text-xs text-slate-500 underline hover:text-slate-700"
+            className="text-xs text-muted underline hover:text-soft-ink"
             onClick={() => onFilters(new Map())}
           >
             Clear all
@@ -183,7 +181,7 @@ export function DateRangeBar({
         )}
       </div>
 
-      <p className="mt-2 text-xs text-slate-500">
+      <p className="mt-2 text-xs text-muted">
         {rangeSummary(range, dateFormat, timeFormat)}
         {stats &&
           ` \u00b7 ${stats.pageviews.toLocaleString()} page views \u00b7 ${stats.visitors.toLocaleString()} visitors`}

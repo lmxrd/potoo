@@ -12,14 +12,14 @@ export function SiteSelect({
 }) {
   return (
     <div className="flex flex-wrap gap-2 text-sm">
-      <label className="flex items-center gap-2 rounded border border-slate-300 bg-white px-3 py-1.5">
+      <label className="flex items-center gap-2 rounded border border-line-strong bg-card px-3 py-1.5">
         <input type="checkbox" checked={selected.size === 0} onChange={onClear} />
         All sites
       </label>
       {sites?.map((s) => (
         <label
           key={s.id}
-          className="flex items-center gap-2 rounded border border-slate-300 bg-white px-3 py-1.5"
+          className="flex items-center gap-2 rounded border border-line-strong bg-card px-3 py-1.5"
         >
           <input type="checkbox" checked={selected.has(s.id)} onChange={() => onToggle(s.id)} />
           {s.hostname}

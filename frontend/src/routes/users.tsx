@@ -41,13 +41,13 @@ function Users() {
       <h1 className="text-xl font-semibold">Users</h1>
       <ErrorText>{error}</ErrorText>
       <Card>
-        <ul className="divide-y divide-slate-200">
+        <ul className="divide-y divide-line">
           {users?.map((u) => (
             <li key={u.id} className="py-2">
               <div className="flex items-center justify-between">
                 <span>
                   {u.email}{" "}
-                  {u.is_admin === 1 && <span className="ml-2 text-xs text-slate-500">admin</span>}
+                  {u.is_admin === 1 && <span className="ml-2 text-xs text-muted">admin</span>}
                 </span>
                 <span className="flex gap-2">
                   <Button

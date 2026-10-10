@@ -33,6 +33,7 @@ pub struct User {
     pub is_admin: i64,
     pub date_format: String,
     pub time_format: String,
+    pub theme: String,
 }
 
 /// Hash a password with argon2id; the PHC string is what gets stored.
@@ -59,7 +60,7 @@ pub fn current_user(conn: &Connection, token: Option<&str>) -> Option<User> {
     let token = token?;
     let now = now_iso();
     conn.query_row(
-        "SELECT u.id, u.email, u.is_admin, u.date_format, u.time_format
+        "SELECT u.id, u.email, u.is_admin, u.date_format, u.time_format, u.theme
          FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = ?1 AND s.expires_at > ?2",
         params![sha256_hex(token), now],
@@ -70,6 +71,7 @@ pub fn current_user(conn: &Connection, token: Option<&str>) -> Option<User> {
                 is_admin: row.get(2)?,
                 date_format: row.get(3)?,
                 time_format: row.get(4)?,
+                theme: row.get(5)?,
             })
         },
     )

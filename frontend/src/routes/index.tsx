@@ -73,7 +73,7 @@ function Overview() {
           onToggleFilter={toggle}
         />
       ) : (
-        !statsError && <p className="text-slate-500">Loading…</p>
+        !statsError && <p className="text-muted">Loading…</p>
       )}
     </div>
   );

@@ -57,15 +57,15 @@ function SitesPage() {
       <Card>
         <table className="w-full text-sm">
           <thead>
-            <tr className="text-left text-slate-500">
+            <tr className="text-left text-muted">
               <th className="py-2 font-medium">Hostname</th>
               <th className="py-2 font-medium">Created</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-200">
+          <tbody className="divide-y divide-line">
             {sites?.length === 0 && (
               <tr>
-                <td colSpan={2} className="py-2 text-slate-500">
+                <td colSpan={2} className="py-2 text-muted">
                   No sites yet.
                 </td>
               </tr>
@@ -73,7 +73,7 @@ function SitesPage() {
             {sites?.map((s) => (
               <tr
                 key={s.id}
-                className="cursor-pointer hover:bg-slate-50"
+                className="cursor-pointer hover:bg-subtle"
                 onClick={() =>
                   navigate({
                     to: "/sites/$siteId",
@@ -82,7 +82,7 @@ function SitesPage() {
                 }
               >
                 <td className="py-2 font-medium">{s.hostname}</td>
-                <td className="py-2 text-slate-500">
+                <td className="py-2 text-muted">
                   {formatDate(s.created_at, session.user?.date_format ?? "YYYY-MM-DD")}
                 </td>
               </tr>
@@ -90,7 +90,7 @@ function SitesPage() {
           </tbody>
         </table>
       </Card>
-      <p className="text-xs text-slate-500">Each subdomain is its own site.</p>
+      <p className="text-xs text-muted">Each subdomain is its own site.</p>
     </div>
   );
 }

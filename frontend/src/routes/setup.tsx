@@ -7,7 +7,7 @@ function Setup() {
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Create the admin account</h1>
-      <p className="text-sm text-slate-600">
+      <p className="text-sm text-soft-ink">
         This is the first start. The admin can add sites and create all other users.
       </p>
       <CredentialsForm

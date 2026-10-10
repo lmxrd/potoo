@@ -6,6 +6,7 @@ export type User = {
   is_admin: number;
   date_format: string;
   time_format: string;
+  theme: string;
 };
 export type Session = { needsSetup: boolean; user: User | null };
 

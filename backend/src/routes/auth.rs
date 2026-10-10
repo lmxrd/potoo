@@ -63,6 +63,31 @@ fn require_admin(user: &AuthUser) -> Result<(), HttpError> {
     }
 }
 
+/// A theme is one small JSON object — {"base": "light" | "dark",
+/// "accent": "#rrggbb"} — the same form the presets send. Anything else
+/// is a 400; it is cosmetic, but it is still stored.
+fn validate_theme(raw: &str) -> Result<String, HttpError> {
+    let invalid = || HttpError::bad_request("Invalid theme");
+    let value: serde_json::Value = serde_json::from_str(raw).map_err(|_| invalid())?;
+    let base = value
+        .get("base")
+        .and_then(|v| v.as_str())
+        .ok_or_else(invalid)?;
+    if !matches!(base, "light" | "dark") {
+        return Err(invalid());
+    }
+    let accent = value
+        .get("accent")
+        .and_then(|v| v.as_str())
+        .ok_or_else(invalid)?
+        .to_ascii_lowercase();
+    let bytes = accent.as_bytes();
+    if bytes.len() != 7 || bytes[0] != b'#' || !bytes[1..].iter().all(|b| b.is_ascii_hexdigit()) {
+        return Err(invalid());
+    }
+    Ok(format!("{{\"base\":\"{base}\",\"accent\":\"{accent}\"}}"))
+}
+
 /// A valid hash to verify against when the user does not exist, so the
 /// response takes the same time either way.
 fn dummy_hash() -> &'static str {
@@ -282,9 +307,10 @@ async fn change_settings(
     struct Body {
         date_format: Option<String>,
         time_format: Option<String>,
+        theme: Option<String>,
     }
     let body = parse_body::<Body>(&body)?;
-    if body.date_format.is_none() && body.time_format.is_none() {
+    if body.date_format.is_none() && body.time_format.is_none() && body.theme.is_none() {
         return Err(HttpError::bad_request("A setting to change is required"));
     }
     if let Some(format) = &body.date_format
@@ -297,6 +323,7 @@ async fn change_settings(
     {
         return Err(HttpError::bad_request("Invalid setting"));
     }
+    let theme = body.theme.as_deref().map(validate_theme).transpose()?;
     let conn = state.db.lock().await;
     if let Some(format) = &body.date_format {
         conn.execute(
@@ -308,6 +335,12 @@ async fn change_settings(
         conn.execute(
             "UPDATE users SET time_format = ?1 WHERE id = ?2",
             params![format, user.0.id],
+        )?;
+    }
+    if let Some(theme) = theme {
+        conn.execute(
+            "UPDATE users SET theme = ?1 WHERE id = ?2",
+            params![theme, user.0.id],
         )?;
     }
     Ok(StatusCode::NO_CONTENT.into_response())

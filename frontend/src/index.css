@@ -1,1 +1,64 @@
 @import "tailwindcss";
+
+/*
+ * The theme. The app styles itself only through these semantic tokens,
+ * so a theme is nothing but their values. Each base defines the same
+ * set; --shade is the color hovers mix toward (black on light, white on
+ * dark). The accent and its ink are per-user and set at runtime by
+ * lib/theme.ts; the defaults keep the page presentable before it loads.
+ */
+:root,
+[data-theme="light"] {
+  --bg: #f8fafc;
+  --card: #ffffff;
+  --subtle: #f1f5f9;
+  --line: #e2e8f0;
+  --line-strong: #cbd5e1;
+  --ink: #0f172a;
+  --soft-ink: #334155;
+  --muted: #64748b;
+  --faint: #94a3b8;
+  --danger: #dc2626;
+  --ok: #059669;
+  --shade: #000000;
+}
+
+[data-theme="dark"] {
+  --bg: #0f172a;
+  --card: #1e293b;
+  --subtle: #334155;
+  --line: #334155;
+  --line-strong: #475569;
+  --ink: #f1f5f9;
+  --soft-ink: #cbd5e1;
+  --muted: #94a3b8;
+  --faint: #64748b;
+  --danger: #f87171;
+  --ok: #34d399;
+  --shade: #ffffff;
+}
+
+:root {
+  --accent: #0f172a;
+  --accent-ink: #ffffff;
+  --accent-hover: color-mix(in oklab, var(--accent) 85%, var(--shade));
+  --danger-hover: color-mix(in oklab, var(--danger) 85%, var(--shade));
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-subtle: var(--subtle);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-soft-ink: var(--soft-ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-danger: var(--danger);
+  --color-danger-hover: var(--danger-hover);
+  --color-ok: var(--ok);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-hover: var(--accent-hover);
+}

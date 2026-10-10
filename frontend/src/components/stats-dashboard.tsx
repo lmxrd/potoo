@@ -48,12 +48,12 @@ export function StatsDashboard({
                 }: ${d.pageviews}`}
               >
                 <div
-                  className="w-full rounded-t bg-slate-800"
+                  className="w-full rounded-t bg-accent"
                   style={{ height: `${(d.pageviews / maxDay) * 100}%` }}
                 />
               </div>
               {/* Thin the labels, so at most about 12 of them show. */}
-              <span className="h-3 text-[10px] text-slate-400">
+              <span className="h-3 text-[10px] text-faint">
                 {i % Math.max(1, Math.ceil(stats.byDay.length / 12)) === 0
                   ? label(d.day)
                   : "\u00a0"}

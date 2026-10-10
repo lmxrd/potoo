@@ -30,7 +30,7 @@ function SitePage() {
   const isAdmin = session.user?.is_admin === 1;
 
   if (error) return <ErrorText>{error}</ErrorText>;
-  if (!data) return <p className="text-slate-500">Loading…</p>;
+  if (!data) return <p className="text-muted">Loading…</p>;
 
   return (
     <div className="space-y-6">
@@ -78,7 +78,7 @@ function SitePage() {
             />
             Honor Do Not Track / Global Privacy Control
           </label>
-          <p className="mt-2 text-xs text-slate-500">
+          <p className="mt-2 text-xs text-muted">
             When enabled, visitors who ask not to be tracked are ignored.
           </p>
         </Card>
@@ -130,10 +130,10 @@ function Snippet({ hostname }: { hostname: string }) {
           No-JS pixel fallback
         </label>
       </div>
-      <pre className="overflow-x-auto rounded bg-slate-100 p-3 text-xs">
+      <pre className="overflow-x-auto rounded bg-subtle p-3 text-xs">
         {script + (pixel ? `\n${img}` : "")}
       </pre>
-      <p className="mt-2 text-xs text-slate-500">
+      <p className="mt-2 text-xs text-muted">
         No cookies or IP addresses are stored. Visitors are counted with a hash that rotates daily.
       </p>
     </Card>

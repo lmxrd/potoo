@@ -261,6 +261,39 @@ async fn setup_users_sites_collection_stats_and_exports() {
     assert_eq!(filtered.lines().count(), 2); // the header and the click
     assert!(filtered.contains("click,/a,signup"));
 
+    // The theme setting: stored as the JSON the presets send, and the
+    // session serves it back; anything malformed is a 400.
+    assert_eq!(
+        request(
+            &app,
+            Method::POST,
+            "/api/settings",
+            Some(&session),
+            Some(json!({ "theme": "{\"base\":\"dark\",\"accent\":\"#38BDF8\"}" })),
+        )
+        .await
+        .status(),
+        204
+    );
+    let with_theme =
+        json(request(&app, Method::GET, "/api/session", Some(&session), None).await).await;
+    assert_eq!(
+        with_theme["user"]["theme"],
+        json!("{\"base\":\"dark\",\"accent\":\"#38bdf8\"}")
+    );
+    assert_eq!(
+        request(
+            &app,
+            Method::POST,
+            "/api/settings",
+            Some(&session),
+            Some(json!({ "theme": "{\"base\":\"blue\"}" })),
+        )
+        .await
+        .status(),
+        400
+    );
+
     // Users: the last admin cannot be demoted or deleted.
     let users = json(request(&app, Method::GET, "/api/users", Some(&session), None).await).await;
     let admin_id = users[0]["id"].as_i64().unwrap();

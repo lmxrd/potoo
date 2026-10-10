@@ -24,10 +24,41 @@ pub fn open(path: &str) -> Db {
         .expect("cannot enable foreign keys");
     conn.execute_batch(SCHEMA)
         .unwrap_or_else(|e| panic!("cannot initialize schema: {e}"));
+    ensure_columns(&conn);
     Arc::new(Mutex::new(conn))
 }
 
-const SCHEMA: &str = r#"
+/// Columns the schema grew after databases already existed. Each runs
+/// when its column is missing, so an existing database keeps working.
+const ADDED_COLUMNS: &[(&str, &str, &str)] = &[(
+    "users",
+    "theme",
+    "ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT '{\"base\":\"light\",\"accent\":\"#0f172a\"}'",
+)];
+
+fn ensure_columns(conn: &Connection) {
+    for (table, column, alter) in ADDED_COLUMNS {
+        let present: bool = conn
+            .prepare(&format!("PRAGMA table_info({table})"))
+            .and_then(|mut stmt| {
+                let mut rows = stmt.query([])?;
+                let mut found = false;
+                while let Some(row) = rows.next()? {
+                    if row.get::<_, String>(1)? == *column {
+                        found = true;
+                    }
+                }
+                Ok(found)
+            })
+            .unwrap_or(false);
+        if !present {
+            conn.execute(alter, [])
+                .unwrap_or_else(|e| panic!("cannot add the missing column: {e}"));
+        }
+    }
+}
+
+const SCHEMA: &str = r##"
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT NOT NULL UNIQUE,
@@ -35,6 +66,7 @@ CREATE TABLE IF NOT EXISTS users (
   is_admin INTEGER NOT NULL DEFAULT 0,
   date_format TEXT NOT NULL DEFAULT 'YYYY-MM-DD',
   time_format TEXT NOT NULL DEFAULT '24h',
+  theme TEXT NOT NULL DEFAULT '{"base":"light","accent":"#0f172a"}',
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -65,4 +97,4 @@ CREATE TABLE IF NOT EXISTS hits (
 CREATE INDEX IF NOT EXISTS hits_site_time ON hits (site_id, created_at);
 CREATE TABLE IF NOT EXISTS salts (day TEXT PRIMARY KEY, salt TEXT NOT NULL);
 PRAGMA user_version = 1;
-"#;
+"##;

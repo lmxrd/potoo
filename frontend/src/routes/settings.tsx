@@ -6,6 +6,7 @@ import { ErrorText } from "../components/error-text";
 import { Input } from "../components/input";
 import { api } from "../lib/api";
 import { DATE_FORMATS, formatDate, formatTime } from "../lib/dates";
+import { THEMES, applyTheme, parseTheme, themeJson, type Theme } from "../lib/theme";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
 
@@ -18,11 +19,11 @@ function Settings() {
       <Card title="Account">
         <dl className="space-y-2 text-sm">
           <div className="flex justify-between gap-4">
-            <dt className="text-slate-500">Email</dt>
+            <dt className="text-muted">Email</dt>
             <dd>{user.email}</dd>
           </div>
           <div className="flex justify-between gap-4">
-            <dt className="text-slate-500">Role</dt>
+            <dt className="text-muted">Role</dt>
             <dd>{user.is_admin === 1 ? "Admin" : "User"}</dd>
           </div>
         </dl>
@@ -32,6 +33,9 @@ function Settings() {
       </Card>
       <Card title="Time format">
         <TimeFormat current={user.time_format} />
+      </Card>
+      <Card title="Theme">
+        <ThemePicker current={parseTheme(user.theme)} />
       </Card>
       <Card title="Change email">
         <ChangeEmail current={user.email} />
@@ -50,7 +54,7 @@ function DateFormat({ current }: { current: string }) {
   return (
     <div className="space-y-2">
       <select
-        className="rounded border border-slate-300 px-2 py-2 text-sm"
+        className="rounded border border-line-strong px-2 py-2 text-sm"
         value={value}
         onChange={async (e) => {
           const next = e.target.value;
@@ -72,7 +76,7 @@ function DateFormat({ current }: { current: string }) {
           </option>
         ))}
       </select>
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted">
         Dates across the app, for example {formatDate(new Date().toISOString(), value)}.
       </p>
       <ErrorText>{error}</ErrorText>
@@ -85,6 +89,92 @@ const TIME_FORMATS = [
   { value: "12h", label: "12 hours (2:30 PM)" },
 ];
 
+function sameTheme(a: Theme, b: Theme): boolean {
+  return a.base === b.base && a.accent.toLowerCase() === b.accent.toLowerCase();
+}
+
+/**
+ * The theme: the presets as swatches, and the two knobs (the base and
+ * the accent) for a custom one. Every choice previews live, and reverts
+ * when saving fails.
+ */
+function ThemePicker({ current }: { current: Theme }) {
+  const [error, setError] = useState<string>();
+  const router = useRouter();
+  const active = THEMES.find((preset) => sameTheme(preset.theme, current));
+
+  const save = async (next: Theme) => {
+    applyTheme(next);
+    setError(undefined);
+    try {
+      await api("/settings", { body: { theme: themeJson(next) } });
+      // The theme also lives in the session; refresh so navigation
+      // cannot reapply a stale one.
+      await router.invalidate();
+    } catch (err) {
+      applyTheme(current);
+      setError(err instanceof Error ? err.message : "Failed");
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-3 gap-2" role="group" aria-label="Theme presets">
+        {THEMES.map((preset) => (
+          <button
+            key={preset.label}
+            aria-pressed={active?.label === preset.label}
+            className={`rounded-lg border p-1.5 text-center ${
+              active?.label === preset.label ? "border-accent" : "border-line hover:bg-subtle"
+            }`}
+            onClick={() => save(preset.theme)}
+          >
+            <span
+              className="flex h-10 items-end overflow-hidden rounded border border-line p-1"
+              style={{ background: preset.theme.base === "dark" ? "#0f172a" : "#f8fafc" }}
+            >
+              <span
+                className="h-2.5 w-full rounded-sm"
+                style={{ background: preset.theme.accent }}
+              />
+            </span>
+            <span className="mt-1 block text-xs text-soft-ink">{preset.label}</span>
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center justify-between gap-4 border-t border-line pt-3 text-sm">
+        <label htmlFor="theme-base" className="text-muted">
+          Base
+        </label>
+        <select
+          id="theme-base"
+          className="rounded border border-line-strong bg-card px-2 py-1.5"
+          value={current.base}
+          onChange={(e) => save({ ...current, base: e.target.value as Theme["base"] })}
+        >
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+        <label htmlFor="theme-accent" className="text-muted">
+          Accent
+        </label>
+        <input
+          id="theme-accent"
+          type="color"
+          aria-label="Accent color"
+          className="h-9 w-14 cursor-pointer rounded border border-line-strong bg-card p-0.5"
+          value={current.accent}
+          // input previews live while dragging; change saves.
+          onInput={(e) => applyTheme({ ...current, accent: e.currentTarget.value })}
+          onChange={(e) => save({ ...current, accent: e.target.value })}
+        />
+      </div>
+      <p className="text-xs text-muted">Applies to the whole app, for your account.</p>
+      <ErrorText>{error}</ErrorText>
+    </div>
+  );
+}
+
 function TimeFormat({ current }: { current: string }) {
   const [value, setValue] = useState(current);
   const [error, setError] = useState<string>();
@@ -92,7 +182,7 @@ function TimeFormat({ current }: { current: string }) {
   return (
     <div className="space-y-2">
       <select
-        className="rounded border border-slate-300 px-2 py-2 text-sm"
+        className="rounded border border-line-strong px-2 py-2 text-sm"
         value={value}
         onChange={async (e) => {
           const next = e.target.value;
@@ -112,7 +202,7 @@ function TimeFormat({ current }: { current: string }) {
           </option>
         ))}
       </select>
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted">
         Times across the app, for example {formatTime("14:30", value)}.
       </p>
       <ErrorText>{error}</ErrorText>
@@ -150,7 +240,7 @@ function ChangeEmail({ current }: { current: string }) {
         onChange={(e) => setEmail(e.target.value)}
       />
       <ErrorText>{error}</ErrorText>
-      {saved && <p className="text-sm text-emerald-600">Email updated.</p>}
+      {saved && <p className="text-sm text-ok">Email updated.</p>}
       <Button type="submit">Update email</Button>
     </form>
   );
@@ -196,7 +286,7 @@ function ChangePassword() {
         onChange={(e) => setNext(e.target.value)}
       />
       <ErrorText>{error}</ErrorText>
-      {saved && <p className="text-sm text-emerald-600">Password updated.</p>}
+      {saved && <p className="text-sm text-ok">Password updated.</p>}
       <Button type="submit">Update password</Button>
     </form>
   );
