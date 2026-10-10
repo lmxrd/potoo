@@ -36,24 +36,58 @@ identity, and you keep your data.
 - **Multiple users, any number of admins**, with role management, password
   resets, and per-user settings (email, password, date format).
 
-![A site with its snippet](docs/screenshots/site.png)
+![A site's page: its snippet and settings](docs/screenshots/site.png)
+
+![The dashboard's stats](docs/screenshots/dashboard-stats.png)
+
+![More of the dashboard's stats](docs/screenshots/dashboard-stats-2.png)
 
 ## Self-hosting
 
 ### Docker
+
+The CI publishes an amd64 image to the GitHub Container Registry, so
+running your own instance is one command:
+
+```bash
+docker run -d --name potoo -p 8000:8000 -v potoo-data:/data ghcr.io/lmxrd/potoo
+```
+
+Or, as a `docker-compose.yml` — the database and the GeoIP database stay in
+the `./data` folder next to it, and the image's built-in healthcheck is all
+the supervision it needs:
+
+```yaml
+services:
+  potoo:
+    image: ghcr.io/lmxrd/potoo
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      # Behind a reverse proxy that sets X-Forwarded-For and terminates
+      # TLS; see the configuration table below for everything else.
+      TRUST_PROXY: "1"
+      # RETENTION_DAYS: "365"   # delete hits older than a year
+```
+
+```bash
+docker compose up -d
+```
+
+To build the image yourself:
 
 ```bash
 docker build -t potoo .
 docker run -d --name potoo -p 8000:8000 -v potoo-data:/data potoo
 ```
 
-The image is Alpine holding a single static binary (musl): the frontend and
+The image is Alpine holding a single static binary: the frontend and
 the database schema are embedded in it. The database and the GeoIP database
-live in the `/data` volume. For both architectures:
-
-```bash
-docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/potoo --push .
-```
+live in the `/data` volume. Build it yourself with `mise run build:docker`
+(podman; the image is amd64, emulated on arm64 machines).
 
 Behind a reverse proxy, set `TRUST_PROXY=1` so the client IP is read from
 `X-Forwarded-For`, and terminate TLS there.

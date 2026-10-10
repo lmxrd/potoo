@@ -28,3 +28,10 @@ tokio = { version = "1.53.2", features = ["full"] }
 tower-http = { version = "0.7.1", features = ["cors", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
+
+# Smaller, faster release binaries; the release workflow and the image
+# both build with this profile.
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1

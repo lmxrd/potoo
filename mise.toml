@@ -1,6 +1,12 @@
 [tools]
 pnpm = "latest"
-rust = "latest"
+# The host target comes with the toolchain; the release also builds the
+# static musl binary, so its std is installed for either architecture.
+rust = {
+  version = "1.99.0",
+  components = ["clippy", "llvm-tools", "rustfmt"],
+  targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"],
+}
 
 # Development: the Rust backend on :8000 (with the Vite proxy in front of
 # the frontend for /api), or the frontend dev server alone.
@@ -10,7 +16,14 @@ depends = ["dev:backend", "dev:frontend"]
 [tasks."dev:backend"]
 run = "cargo run --manifest-path backend/Cargo.toml"
 
+# The frontend's dependencies. Every frontend task depends on this, so a
+# fresh checkout (CI included) works; pnpm installs frozen when CI is set.
+[tasks."install:frontend"]
+run = "pnpm install -C frontend"
+sources = ["./frontend/package.json", "./frontend/node_modules"]
+
 [tasks."dev:frontend"]
+depends = ["install:frontend"]
 run = "pnpm run -C frontend dev"
 
 # Run the server against a built frontend. Depends on the build so a
@@ -23,22 +36,26 @@ run = "cargo run --release --manifest-path backend/Cargo.toml"
 depends = ["build:frontend", "build:backend"]
 
 [tasks."build:frontend"]
-run = "pnpm install -C frontend && pnpm run -C frontend build"
+depends = ["install:frontend"]
+run = "pnpm run -C frontend build"
 
 [tasks."build:backend"]
 run = "cargo build --release --manifest-path backend/Cargo.toml"
 depends = ["build:frontend"]
 
 [tasks."build:docker"]
-run = "docker build -t potoo ."
+run = "podman build -t potoo ."
 
 [tasks.check]
 depends = ["check:frontend", "check:backend"]
 
+# rust-embed needs frontend/dist to exist to compile, hence the build.
 [tasks."check:backend"]
+depends = ["build:frontend"]
 run = "cargo fmt --manifest-path backend/Cargo.toml --check && cargo clippy --manifest-path backend/Cargo.toml -- -D warnings"
 
 [tasks."check:frontend"]
+depends = ["install:frontend"]
 run = "pnpm run -C frontend check"
 
 [tasks.fix]
@@ -48,9 +65,11 @@ depends = ["fix:backend", "fix:frontend"]
 run = "cargo fmt --manifest-path backend/Cargo.toml"
 
 [tasks."fix:frontend"]
+depends = ["install:frontend"]
 run = "pnpm run -C frontend fix"
 
 [tasks.test]
+depends = ["build:frontend"]
 run = "cargo test --manifest-path backend/Cargo.toml"
 
 # A year of demo data for development. Wipes every hit — not the sites
