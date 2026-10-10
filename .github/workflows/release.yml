@@ -13,68 +13,75 @@ permissions:
   contents: read
 
 jobs:
-  # The binaries: static musl for both Linux architectures, both macOS
-  # ones from one runner (Xcode cross compiles). The frontend is built
-  # into each, like the image build does. The tools come from mise.toml,
-  # like everywhere else.
-  binaries:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            name: potoo-linux-amd64
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-musl
-            name: potoo-linux-arm64
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            name: potoo-macos-arm64
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            name: potoo-macos-amd64
-    runs-on: ${{ matrix.os }}
+  # The Linux binaries: static musl for both architectures, from one
+  # amd64 runner — the arm64 one cross compiles with the musl.cc
+  # toolchain. The frontend is built once and embedded in both, like the
+  # image build does. The tools come from mise.toml, like everywhere
+  # else.
+  linux:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.release.tag_name }}
       - uses: jdx/mise-action@v4
-      - name: The frontend, embedded in the binary
+      - name: The frontend, embedded in the binaries
         run: pnpm install -C frontend --frozen-lockfile && pnpm run -C frontend build
-      - name: musl, for the native x86_64 build
-        if: matrix.target == 'x86_64-unknown-linux-musl'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
-      - name: The musl cross toolchain, for the arm64 build
-        if: matrix.target == 'aarch64-unknown-linux-musl'
+      - name: musl, and the arm64 cross toolchain
         run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends musl-tools curl
           curl -fsSL https://musl.cc/aarch64-linux-musl-cross.tgz | tar -xz -C /usr/local
-          echo "/usr/local/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
       - name: Build
         run: |
           # mise installs rust through rustup; the toolchain's own
           # rustup — in the toolchain's root, next to rustc — adds the
-          # target.
-          export PATH="$(dirname "$(mise which rustc)"):$PATH"
-          rustup target add ${{ matrix.target }}
-          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
-            export CC_aarch64_unknown_linux_musl=aarch64-linux-musl-gcc
-            export AR_aarch64_unknown_linux_musl=aarch64-linux-musl-ar
-            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-musl-gcc
-          fi
-          cargo build --release --manifest-path backend/Cargo.toml --target ${{ matrix.target }}
-          cp backend/target/${{ matrix.target }}/release/potoo ${{ matrix.name }}
+          # targets.
+          export PATH="$(dirname "$(mise which rustc)"):/usr/local/aarch64-linux-musl-cross/bin:$PATH"
+          rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+          cargo build --release --manifest-path backend/Cargo.toml --target x86_64-unknown-linux-musl
+          export CC_aarch64_unknown_linux_musl=aarch64-linux-musl-gcc
+          export AR_aarch64_unknown_linux_musl=aarch64-linux-musl-ar
+          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-musl-gcc
+          cargo build --release --manifest-path backend/Cargo.toml --target aarch64-unknown-linux-musl
+          cp backend/target/x86_64-unknown-linux-musl/release/potoo potoo-linux-amd64
+          cp backend/target/aarch64-unknown-linux-musl/release/potoo potoo-linux-arm64
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
-          path: ${{ matrix.name }}
+          name: potoo-linux
+          path: potoo-linux-*
+          if-no-files-found: error
+
+  # The macOS binaries: both architectures from one runner, Xcode cross
+  # compiles.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: jdx/mise-action@v4
+      - name: The frontend, embedded in the binaries
+        run: pnpm install -C frontend --frozen-lockfile && pnpm run -C frontend build
+      - name: Build
+        run: |
+          export PATH="$(dirname "$(mise which rustc)"):$PATH"
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build --release --manifest-path backend/Cargo.toml --target aarch64-apple-darwin
+          cargo build --release --manifest-path backend/Cargo.toml --target x86_64-apple-darwin
+          cp backend/target/aarch64-apple-darwin/release/potoo potoo-macos-arm64
+          cp backend/target/x86_64-apple-darwin/release/potoo potoo-macos-amd64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: potoo-macos
+          path: potoo-macos-*
           if-no-files-found: error
 
   # The release: the binaries attached, the image pushed with the
   # version tags (1.2.3, 1.2 and latest). The image is amd64, matching
   # the Dockerfile; the binaries cover both macOS ones and arm64 Linux.
   publish:
-    needs: binaries
+    needs: [linux, macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
