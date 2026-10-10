@@ -61,7 +61,7 @@ function Overview() {
         timeFormat={session.user?.time_format}
         filters={filters}
         onFilters={setFilters}
-        exportUrl={`/api/stats.csv?${params}`}
+        exportUrl={`/api/export/stats?${params}`}
       />
       <ErrorText>{statsError}</ErrorText>
       {stats ? (

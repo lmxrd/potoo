@@ -8,16 +8,14 @@ rust = "latest"
 depends = ["dev:backend", "dev:frontend"]
 
 [tasks."dev:backend"]
-dir = "backend"
-run = "cargo run"
+run = "cargo run --manifest-path backend/Cargo.toml"
 
 [tasks."dev:frontend"]
 run = "pnpm run -C frontend dev"
 
 # Run the compiled backend against a built frontend.
 [tasks.start]
-dir = "backend"
-run = "cargo run --release"
+run = "cargo run --release --manifest-path backend/Cargo.toml"
 
 [tasks.build]
 depends = ["build:frontend", "build:backend"]
@@ -26,16 +24,17 @@ depends = ["build:frontend", "build:backend"]
 run = "pnpm install -C frontend && pnpm run -C frontend build"
 
 [tasks."build:backend"]
-dir = "backend"
-run = "cargo build --release"
+run = "cargo build --release --manifest-path backend/Cargo.toml"
 depends = ["build:frontend"]
+
+[tasks."build:docker"]
+run = "docker build -t potoo ."
 
 [tasks.check]
 depends = ["check:frontend", "check:backend"]
 
 [tasks."check:backend"]
-dir = "backend"
-run = "cargo fmt --check && cargo clippy -- -D warnings"
+run = "cargo fmt --manifest-path backend/Cargo.toml --check && cargo clippy --manifest-path backend/Cargo.toml -- -D warnings"
 
 [tasks."check:frontend"]
 run = "pnpm run -C frontend check"
@@ -44,12 +43,10 @@ run = "pnpm run -C frontend check"
 depends = ["fix:backend", "fix:frontend"]
 
 [tasks."fix:backend"]
-dir = "backend"
-run = "cargo fmt"
+run = "cargo fmt --manifest-path backend/Cargo.toml"
 
 [tasks."fix:frontend"]
 run = "pnpm run -C frontend fix"
 
 [tasks.test]
-dir = "backend"
-run = "cargo test"
+run = "cargo test --manifest-path backend/Cargo.toml"

@@ -5,3 +5,5 @@ frontend/dist
 frontend/node_modules
 node_modules
 potoo
+backend-old
+backend/target

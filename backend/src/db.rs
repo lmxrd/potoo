@@ -9,6 +9,13 @@ pub type Db = Arc<Mutex<Connection>>;
 /// Open the database and make sure the schema is current. The schema is
 /// idempotent, so this is also all the migration there is.
 pub fn open(path: &str) -> Db {
+    // The database's directory may not exist yet (a fresh clone, a new
+    // volume): create it.
+    if let Some(parent) = std::path::Path::new(path).parent() {
+        if !parent.as_os_str().is_empty() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+    }
     let conn =
         Connection::open(path).unwrap_or_else(|e| panic!("cannot open database at {path}: {e}"));
     conn.pragma_update(None, "journal_mode", "WAL").ok();

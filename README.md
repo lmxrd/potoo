@@ -47,9 +47,9 @@ docker build -t potoo .
 docker run -d --name potoo -p 8000:8000 -v potoo-data:/data potoo
 ```
 
-The image is Debian slim holding a single statically self-contained binary: the
-frontend and the database migrations are embedded in it. The database and the
-GeoIP database live in the `/data` volume. For both architectures:
+The image is Debian slim holding a single binary: the frontend and the
+database schema are embedded in it. The database and the GeoIP database live in
+the `/data` volume. For both architectures:
 
 ```bash
 docker buildx build --platform linux/amd64,linux/arm64 -t <registry>/potoo --push .
@@ -60,16 +60,17 @@ Behind a reverse proxy, set `TRUST_PROXY=1` so the client IP is read from
 
 ### A single binary
 
-With [Deno](https://deno.com) and [pnpm](https://pnpm.io) installed:
+With [mise](https://mise.jdx.dev) (or Rust and [pnpm](https://pnpm.io) directly)
+installed:
 
 ```bash
-deno task build
-./dist/potoo-<your platform>
+mise run build
+./backend/target/release/potoo
 ```
 
-The task builds the frontend and compiles everything into binaries for macOS,
-Linux, and both architectures in `dist/`. With just Deno you can also run from
-source: `deno task start`.
+The task builds the frontend and compiles everything into one binary: the
+frontend is embedded in it. To run from source instead: `mise run start`; for
+development, `mise run dev` runs the backend and the Vite dev server together.
 
 ### First run
 
@@ -85,7 +86,7 @@ Open `http://localhost:8000`; with no users yet, every page redirects to
 The snippet generator produces a single script tag:
 
 ```html
-<script async src="https://your-potoo.example/api/tracker.js"></script>
+<script async src="https://your-potoo.example/api/tracker"></script>
 ```
 
 Options, combined as needed:
@@ -107,7 +108,6 @@ ignored by default; each site can turn that off.
 | `DATABASE_PATH`  | `data/potoo.db`     | SQLite file                                                                                                                  |
 | `GEOIP_DB_PATH`  | `data/country.mmdb` | MaxMind-format country DB. Downloaded from DB-IP on boot when missing or older than a week, and refreshed weekly             |
 | `GEOIP_URL`      | unset               | Override the download URL, e.g. your own mirror. Empty string disables downloading; a missing file then leaves country empty |
-| `STATIC_DIR`     | `frontend/dist`     | Built frontend (only used when running from source)                                                                          |
 | `TRUST_PROXY`    | unset               | Set to `1` to read the client IP from `X-Forwarded-For` (behind a reverse proxy)                                             |
 | `RETENTION_DAYS` | unset               | Delete hits older than this                                                                                                  |
 
@@ -115,29 +115,32 @@ This site or product includes IP data from db-ip.com, licensed under CC BY 4.0.
 
 ## CLI tasks
 
-| Task                     | What it does                                                               |
-| ------------------------ | -------------------------------------------------------------------------- |
-| `deno task dev`          | Runs the backend (watch) and the frontend (Vite) together, with hot reload |
-| `deno task start`        | Runs the server from source                                                |
-| `deno task build`        | Builds the frontend and compiles binaries for every platform into `dist/`  |
-| `deno task build:docker` | Builds the Docker image                                                    |
-| `deno task check`        | Format, lint and type checks for backend and frontend                      |
-| `deno task fix`          | Applies the format and lint fixes                                          |
-| `deno task test`         | The backend end-to-end tests                                               |
+| Task                    | What it does                                                               |
+| ----------------------- | -------------------------------------------------------------------------- |
+| `mise run dev`          | Runs the backend and the frontend (Vite) together, with hot reload         |
+| `mise run start`        | Runs the server from source                                                |
+| `mise run build`        | Builds the frontend and compiles the backend binary                        |
+| `mise run build:docker` | Builds the Docker image                                                    |
+| `mise run check`        | Format, lint and type checks for backend and frontend                      |
+| `mise run fix`          | Applies the format and lint fixes                                          |
+| `mise run test`         | The backend end-to-end tests                                               |
 
 ## Development
 
 ```
-backend/main.ts           entrypoint: env config, geo refresh, retention
-backend/app.ts            Hono app: routes, cache headers, static serving
-backend/db.ts             query helpers + nessie migration runner
-backend/db/migrations/    nessie migrations, applied on startup
-backend/lib/              auth, sessions, visitor parsing, geo, stats, tracker.js
-backend/routes/           auth, users, sites, stats, export, collect
-frontend/src/routes/      dashboard, sites table, site page, export, users, settings
+backend/src/main.rs        entrypoint: env config, geo refresh, retention
+backend/src/lib.rs         the app: routes, cache headers, static serving
+backend/src/db.rs          the SQLite connection + schema, applied on startup
+backend/src/auth.rs        password hashing, sessions, the login throttle
+backend/src/visitor.rs     user agent parsing, client IP, visitor hashes
+backend/src/geo.rs         country lookup + the weekly DB-IP download
+backend/src/stats.rs       ranges, chart buckets, the aggregations
+backend/src/filter.rs      the RSQL filter subset the dashboard uses
+backend/src/routes/        auth, users, sites, stats, export, collect
+frontend/src/routes/       dashboard, sites table, site page, export, users, settings
 ```
 
-Checks: `deno task check` and `deno task test` cover format, lint and types for
+Checks: `mise run check` and `mise run test` cover format, lint and types for
 both projects, and the end-to-end tests of setup, users, collection and stats.
 
 ## Notes
@@ -145,5 +148,5 @@ both projects, and the end-to-end tests of setup, users, collection and stats.
 - The tracker accepts hits for registered sites but does not verify `Origin`, so
   a determined visitor can send spoofed hits. Acceptable for analytics, worth
   knowing.
-- Compiled binaries use the experimental QuickJS engine for their smaller size;
-  drop `--engine quickjs` from `compile:base` for V8.
+- The old Deno backend is kept in `backend-old/` for reference; it is not part
+  of the build.
