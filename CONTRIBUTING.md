@@ -22,7 +22,7 @@ backend).
 | Task                    | What it does                                                 |
 | ----------------------- | ------------------------------------------------------------ |
 | `mise run dev`          | Runs the backend and the frontend (Vite) together            |
-| `mise run start`        | Runs the server from source, against a built frontend         |
+| `mise run start`        | Builds, then runs the server (never a stale binary)            |
 | `mise run build`        | Builds the frontend and compiles the backend binary            |
 | `mise run build:docker` | Builds the Docker image                                       |
 | `mise run check`        | Format, lint and type checks for backend and frontend         |

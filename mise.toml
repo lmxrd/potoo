@@ -13,8 +13,10 @@ run = "cargo run --manifest-path backend/Cargo.toml"
 [tasks."dev:frontend"]
 run = "pnpm run -C frontend dev"
 
-# Run the compiled backend against a built frontend.
+# Run the server against a built frontend. Depends on the build so a
+# stale binary can never serve yesterday's code.
 [tasks.start]
+depends = ["build:backend"]
 run = "cargo run --release --manifest-path backend/Cargo.toml"
 
 [tasks.build]
