@@ -1,0 +1,123 @@
+name: Release
+
+# Publishing a release builds the binaries of the tagged commit, attaches
+# them to the release, and pushes the image with version tags to the
+# GitHub Container Registry.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  # The binaries: static musl for both Linux architectures, both macOS
+  # ones from one runner (Xcode cross compiles). The frontend is built
+  # into each, like the image build does.
+  binaries:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            name: potoo-linux-amd64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-musl
+            name: potoo-linux-arm64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            name: potoo-macos-arm64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            name: potoo-macos-amd64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+          key: ${{ matrix.target }}
+      - name: The frontend, embedded in the binary
+        run: pnpm install -C frontend --frozen-lockfile && pnpm run -C frontend build
+      - name: musl, for the native x86_64 build
+        if: matrix.target == 'x86_64-unknown-linux-musl'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      - name: The musl cross toolchain, for the arm64 build
+        if: matrix.target == 'aarch64-unknown-linux-musl'
+        run: |
+          curl -fsSL https://musl.cc/aarch64-linux-musl-cross.tgz | tar -xz -C /usr/local
+          echo "/usr/local/aarch64-linux-musl-cross/bin" >> "$GITHUB_PATH"
+      - name: Build
+        run: |
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-musl" ]; then
+            export CC_aarch64_unknown_linux_musl=aarch64-linux-musl-gcc
+            export AR_aarch64_unknown_linux_musl=aarch64-linux-musl-ar
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-musl-gcc
+          fi
+          cargo build --release --manifest-path backend/Cargo.toml --target ${{ matrix.target }}
+          cp backend/target/${{ matrix.target }}/release/potoo ${{ matrix.name }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}
+          if-no-files-found: error
+
+  # The release: the binaries attached, the image pushed with the
+  # version tags (1.2.3, 1.2 and latest).
+  publish:
+    needs: binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Attach the binaries to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+      - name: The image name and the version tags
+        id: tags
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          version="${TAG#v}"
+          major_minor="${version%.*}"
+          name="ghcr.io/${GITHUB_REPOSITORY,,}"
+          {
+            echo "images=$name"
+            echo "tags=$name:$version,$name:$major_minor,$name:latest"
+          } >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

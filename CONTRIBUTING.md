@@ -91,6 +91,20 @@ not a change we can take. Concretely:
 - **Comment the why, not the what** — the reasoning behind a decision
   is the part the code cannot show.
 
+## Releasing
+
+CI runs the checks on every pull request and push to main, and pushes
+the image of main to `ghcr.io/halvardssm/potoo` as `latest` and the
+commit sha. A release is a tag and a published GitHub release:
+
+1. Tag the commit: `git tag v1.2.3 && git push origin v1.2.3`.
+2. Create and publish the release on GitHub, with the same tag.
+
+The release workflow then attaches the binaries of the tagged commit to
+the release — static musl for both Linux architectures, and both macOS
+ones — and pushes the image as `1.2.3`, `1.2` and `latest`. The tag
+decides the version; the workflow strips the leading `v`.
+
 ## Submitting
 
 Small, described commits; one logical change each. The backend and the

@@ -66,5 +66,11 @@ ENV PORT=8000 \
     GEOIP_DB_PATH=/data/country.mmdb
 VOLUME /data
 EXPOSE 8000
+
+# The healthcheck: the backend answers /api/health with 200 OK. Shell
+# form, so $PORT expands; wget is busybox's.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -q -O /dev/null "http://127.0.0.1:$PORT/api/health" || exit 1
+
 USER potoo
 ENTRYPOINT ["/usr/local/bin/potoo"]

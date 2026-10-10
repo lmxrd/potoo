@@ -390,6 +390,11 @@ async fn pixel_tracker_and_api_404() {
     let js = response.text().await.unwrap();
     assert!(js.contains("new URL(\"api/collect\", s.src)"));
 
+    // Liveness, for healthchecks: 200 with an OK body.
+    let response = request(&app, Method::GET, "/api/health", None, None).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(response.text().await.unwrap(), "OK");
+
     // Unknown API paths answer with JSON, not the frontend.
     let response = request(&app, Method::GET, "/api/nope", None, None).await;
     assert_eq!(response.status(), 404);
