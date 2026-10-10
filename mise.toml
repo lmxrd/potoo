@@ -1,6 +1,18 @@
 [tools]
 pnpm = "latest"
-rust = "latest"
+# The targets the release workflow builds, plus the native one; mise
+# installs their std alongside the toolchain, in CI and locally.
+rust = {
+  version = "1.99.0",
+  components = ["clippy", "llvm-tools", "rustfmt"],
+  targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-musl",
+    "aarch64-unknown-linux-gnu",
+  ],
+}
 
 # Development: the Rust backend on :8000 (with the Vite proxy in front of
 # the frontend for /api), or the frontend dev server alone.

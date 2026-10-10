@@ -16,8 +16,8 @@ jobs:
   # The Linux binaries: static musl for both architectures, from one
   # amd64 runner — the arm64 one cross compiles with the musl.cc
   # toolchain. The frontend is built once and embedded in both, like the
-  # image build does. The tools come from mise.toml, like everywhere
-  # else.
+  # image build does. The tools — including both targets — come from
+  # mise.toml, like everywhere else.
   linux:
     runs-on: ubuntu-latest
     steps:
@@ -34,11 +34,7 @@ jobs:
           curl -fsSL https://musl.cc/aarch64-linux-musl-cross.tgz | tar -xz -C /usr/local
       - name: Build
         run: |
-          # mise installs rust through rustup; the toolchain's own
-          # rustup — in the toolchain's root, next to rustc — adds the
-          # targets.
-          export PATH="$(dirname "$(mise which rustc)"):/usr/local/aarch64-linux-musl-cross/bin:$PATH"
-          rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+          export PATH="/usr/local/aarch64-linux-musl-cross/bin:$PATH"
           cargo build --release --manifest-path backend/Cargo.toml --target x86_64-unknown-linux-musl
           export CC_aarch64_unknown_linux_musl=aarch64-linux-musl-gcc
           export AR_aarch64_unknown_linux_musl=aarch64-linux-musl-ar
@@ -65,8 +61,6 @@ jobs:
         run: pnpm install -C frontend --frozen-lockfile && pnpm run -C frontend build
       - name: Build
         run: |
-          export PATH="$(dirname "$(mise which rustc)"):$PATH"
-          rustup target add aarch64-apple-darwin x86_64-apple-darwin
           cargo build --release --manifest-path backend/Cargo.toml --target aarch64-apple-darwin
           cargo build --release --manifest-path backend/Cargo.toml --target x86_64-apple-darwin
           cp backend/target/aarch64-apple-darwin/release/potoo potoo-macos-arm64
