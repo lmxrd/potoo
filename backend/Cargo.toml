@@ -2,6 +2,8 @@
 name = "potoo"
 version = "0.1.0"
 edition = "2024"
+# `cargo run` without --bin: the server, not the seed.
+default-run = "potoo"
 
 [dependencies]
 argon2 = "0.6.0"
