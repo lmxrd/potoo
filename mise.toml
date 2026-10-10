@@ -1,0 +1,55 @@
+[tools]
+pnpm = "latest"
+rust = "latest"
+
+# Development: the Rust backend on :8000 (with the Vite proxy in front of
+# the frontend for /api), or the frontend dev server alone.
+[tasks.dev]
+depends = ["dev:backend", "dev:frontend"]
+
+[tasks."dev:backend"]
+dir = "backend"
+run = "cargo run"
+
+[tasks."dev:frontend"]
+run = "pnpm run -C frontend dev"
+
+# Run the compiled backend against a built frontend.
+[tasks.start]
+dir = "backend"
+run = "cargo run --release"
+
+[tasks.build]
+depends = ["build:frontend", "build:backend"]
+
+[tasks."build:frontend"]
+run = "pnpm install -C frontend && pnpm run -C frontend build"
+
+[tasks."build:backend"]
+dir = "backend"
+run = "cargo build --release"
+depends = ["build:frontend"]
+
+[tasks.check]
+depends = ["check:frontend", "check:backend"]
+
+[tasks."check:backend"]
+dir = "backend"
+run = "cargo fmt --check && cargo clippy -- -D warnings"
+
+[tasks."check:frontend"]
+run = "pnpm run -C frontend check"
+
+[tasks.fix]
+depends = ["fix:backend", "fix:frontend"]
+
+[tasks."fix:backend"]
+dir = "backend"
+run = "cargo fmt"
+
+[tasks."fix:frontend"]
+run = "pnpm run -C frontend fix"
+
+[tasks.test]
+dir = "backend"
+run = "cargo test"

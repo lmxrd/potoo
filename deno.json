@@ -13,52 +13,5 @@
     "@zod/zod": "jsr:@zod/zod@^4.6.5",
     "maxmind": "npm:maxmind@^5.0.0"
   },
-  "tasks": {
-    "dev": { "dependencies": ["dev:backend", "dev:frontend"] },
-    "dev:backend": "deno run -A --watch backend/main.ts",
-    "dev:frontend": "pnpm run -C frontend dev",
-    "start": "deno run -A backend/main.ts",
-    "seed": {
-      "dependencies": ["migrate"],
-      "command": "deno run -A jsr:@halvardm/nessie@3.0.0-rc.4/cli seed -c backend/nessie.config.ts"
-    },
-    "migrate": "deno run -A jsr:@halvardm/nessie@3.0.0-rc.4/cli migrate -c backend/nessie.config.ts",
-    "make:migration": "deno run -A jsr:@halvardm/nessie@3.0.0-rc.4/cli make:migration -c backend/nessie.config.ts",
-    "make:seed": "deno run -A jsr:@halvardm/nessie@3.0.0-rc.4/cli make:seed -c backend/nessie.config.ts",
-    "build": {
-      "dependencies": [
-        "build:backend:darwin:aarch",
-        "build:backend:darwin:x86",
-        "build:backend:linux:aarch",
-        "build:backend:linux:x86"
-      ]
-    },
-    "build:frontend": "pnpm install -C frontend && pnpm run -C frontend build",
-    "build:backend:darwin:aarch": {
-      "command": "deno task compile:base --target aarch64-apple-darwin --output dist/potoo-macos-arm backend/main.ts",
-      "dependencies": ["build:frontend"]
-    },
-    "build:backend:darwin:x86": {
-      "command": "deno task compile:base --target x86_64-apple-darwin --output dist/potoo-macos-x86 backend/main.ts",
-      "dependencies": ["build:frontend"]
-    },
-    "build:backend:linux:aarch": {
-      "command": "deno task compile:base --target aarch64-unknown-linux-gnu --output dist/potoo-linux-arm backend/main.ts",
-      "dependencies": ["build:frontend"]
-    },
-    "build:backend:linux:x86": {
-      "command": "deno task compile:base --target x86_64-unknown-linux-gnu --output dist/potoo-linux-x86 backend/main.ts",
-      "dependencies": ["build:frontend"]
-    },
-    "compile:base": "deno compile -A --engine quickjs --include backend/db/migrations --include frontend/dist",
-    "build:docker": "docker build -t potoo .",
-    "fix": { "dependencies": ["fix:frontend", "fix:backend"] },
-    "fix:frontend": "pnpm run -C frontend fix",
-    "fix:backend": "deno fmt && deno lint --fix",
-    "check": { "dependencies": ["check:frontend", "check:backend"] },
-    "check:frontend": "pnpm run -C frontend check",
-    "check:backend": "deno fmt --check && deno lint && deno check backend",
-    "test": "deno test --allow-net --allow-read --allow-write --allow-env backend/"
-  },
-  "exclude": ["frontend", "data"]
+  "exclude": ["frontend", "data", "backend"]
 }
