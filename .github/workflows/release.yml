@@ -1,21 +1,41 @@
 name: Release
 
-# Publishing a release builds, in parallel and natively on an amd64 and an
-# arm64 runner (no cross compiling, no emulation): the Linux binaries,
-# attached to the release, and the image, pushed to the GitHub Container
-# Registry as one multi-arch manifest. CI never pushes.
+# Every push to main updates the release PR (version bump and changelog,
+# from the conventional commits). Merging it creates the tag and the
+# GitHub release, and only then do the jobs below run: natively on an
+# amd64 and an arm64 runner (no cross compiling, no emulation) they build
+# the Linux binaries, attached to the release, and the image, pushed to
+# the GitHub Container Registry as one multi-arch manifest. CI never
+# pushes.
+#
+# Needs "Allow GitHub Actions to create and approve pull requests" in the
+# repository's Actions settings.
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
 
 permissions:
   contents: read
 
 jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+
   # musl binaries are static and run on any Linux, so they get the plain
   # names; the glibc (gnu) builds are suffixed -gnu.
   binaries:
+    needs: release-please
+    if: needs.release-please.outputs.created == 'true'
     strategy:
       matrix:
         include:
@@ -26,12 +46,15 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
       - uses: jdx/mise-action@v4
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
       - run: pnpm install -C frontend --frozen-lockfile && pnpm run -C frontend build
       - name: Build and attach
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag }}
         run: |
           mkdir dist
           for libc in musl gnu; do
@@ -40,10 +63,12 @@ jobs:
             cp "backend/target/$target/release/potoo" \
               "dist/potoo-linux-${{ matrix.arch }}$([ $libc = gnu ] && echo -gnu)"
           done
-          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          gh release upload "$TAG" dist/* --clobber
 
   # Each runner pushes its image by digest only; `manifest` tags them.
   image:
+    needs: release-please
+    if: needs.release-please.outputs.created == 'true'
     strategy:
       matrix:
         include:
@@ -55,6 +80,8 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
       - run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
@@ -81,10 +108,10 @@ jobs:
           path: digests/*
           if-no-files-found: error
 
-  # One tag, 1.2.3, 1.2 and latest (prereleases get only the exact
+  # The tags 1.2.3, 1.2 and latest (prereleases get only the exact
   # version), pointing at both images.
   manifest:
-    needs: image
+    needs: [release-please, image]
     runs-on: ubuntu-latest
     permissions:
       packages: write
@@ -98,9 +125,11 @@ jobs:
       - uses: docker/metadata-action@v5
         with:
           images: ${{ env.IMAGE }}
+          flavor: latest=false
           tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{version}},value=${{ needs.release-please.outputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.release-please.outputs.tag }}
+            type=raw,value=latest,enable=${{ !contains(needs.release-please.outputs.tag, '-') }}
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
