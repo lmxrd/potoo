@@ -42,6 +42,15 @@ identity, and you keep your data.
 
 ### Docker
 
+The CI publishes an image for both architectures to the GitHub Container
+Registry, so running your own instance is one command:
+
+```bash
+docker run -d --name potoo -p 8000:8000 -v potoo-data:/data ghcr.io/lmxrd/potoo
+```
+
+To build the image yourself:
+
 ```bash
 docker build -t potoo .
 docker run -d --name potoo -p 8000:8000 -v potoo-data:/data potoo
