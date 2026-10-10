@@ -57,31 +57,11 @@ jobs:
           path: potoo-linux-*
           if-no-files-found: error
 
-  # The macOS binary: arm64, from Xcode.
-  macos:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.release.tag_name }}
-      - uses: jdx/mise-action@v4
-      - name: The frontend, embedded in the binaries
-        run: pnpm install -C frontend --frozen-lockfile && pnpm run -C frontend build
-      - name: Build
-        run: |
-          cargo build --release --manifest-path backend/Cargo.toml --target aarch64-apple-darwin
-          cp backend/target/aarch64-apple-darwin/release/potoo potoo-macos-arm64
-      - uses: actions/upload-artifact@v4
-        with:
-          name: potoo-macos
-          path: potoo-macos-*
-          if-no-files-found: error
-
   # The release: the binaries attached, the image pushed with the
   # version tags (1.2.3, 1.2 and latest). The image is amd64, matching
-  # the Dockerfile; the binaries cover macOS, and both Linux flavors.
+  # the Dockerfile; the binaries are the four Linux ones.
   publish:
-    needs: [linux, macos]
+    needs: [linux]
     runs-on: ubuntu-latest
     permissions:
       contents: write
