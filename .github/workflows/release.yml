@@ -1,9 +1,9 @@
 name: Release
 
-# Publishing a release builds the binaries of the tagged commit, attaches
-# them to the release, and pushes the image with version tags to the
-# GitHub Container Registry. The registry is only written here; CI never
-# pushes.
+# Publishing a release builds, in parallel and natively on an amd64 and an
+# arm64 runner (no cross compiling, no emulation): the Linux binaries,
+# attached to the release, and the image, pushed to the GitHub Container
+# Registry as one multi-arch manifest. CI never pushes.
 
 on:
   release:
@@ -13,83 +13,49 @@ permissions:
   contents: read
 
 jobs:
-  # The Linux binaries: static musl for both architectures — the plain
-  # names, since those run on any Linux — and the glibc (GNU) builds of
-  # both for those who prefer them, suffixed -gnu. All from one amd64
-  # runner; the arm64 legs cross compile, musl with the musl.cc
-  # toolchain, gnu with Debian's cross gcc. The frontend is built once
-  # and embedded in all four, like the image build does. The tools —
-  # including every target — come from mise.toml, like everywhere else.
-  linux:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.release.tag_name }}
-      - uses: jdx/mise-action@v4
-      - name: The frontend, embedded in the binaries
-        run: pnpm install -C frontend --frozen-lockfile && pnpm run -C frontend build
-      - name: The cross toolchains (musl.cc for arm64 musl, Debian's for arm64 gnu)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends musl-tools curl gcc-aarch64-linux-gnu
-          curl -fsSL https://musl.cc/aarch64-linux-musl-cross.tgz | tar -xz -C /usr/local
-      - name: Build
-        run: |
-          export PATH="/usr/local/aarch64-linux-musl-cross/bin:$PATH"
-          cargo build --release --manifest-path backend/Cargo.toml --target x86_64-unknown-linux-musl
-          export CC_aarch64_unknown_linux_musl=aarch64-linux-musl-gcc
-          export AR_aarch64_unknown_linux_musl=aarch64-linux-musl-ar
-          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-musl-gcc
-          cargo build --release --manifest-path backend/Cargo.toml --target aarch64-unknown-linux-musl
-          cargo build --release --manifest-path backend/Cargo.toml --target x86_64-unknown-linux-gnu
-          export CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc
-          export AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar
-          export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
-          cargo build --release --manifest-path backend/Cargo.toml --target aarch64-unknown-linux-gnu
-          cp backend/target/x86_64-unknown-linux-musl/release/potoo potoo-linux-amd64
-          cp backend/target/aarch64-unknown-linux-musl/release/potoo potoo-linux-arm64
-          cp backend/target/x86_64-unknown-linux-gnu/release/potoo potoo-linux-amd64-gnu
-          cp backend/target/aarch64-unknown-linux-gnu/release/potoo potoo-linux-arm64-gnu
-      - uses: actions/upload-artifact@v4
-        with:
-          name: potoo-linux
-          path: potoo-linux-*
-          if-no-files-found: error
-
-  # The release: the binaries attached, the image pushed with the
-  # version tags (1.2.3, 1.2 and latest). The image is amd64, matching
-  # the Dockerfile; the binaries are the four Linux ones.
-  publish:
-    needs: [linux]
-    runs-on: ubuntu-latest
+  # musl binaries are static and run on any Linux, so they get the plain
+  # names; the glibc (gnu) builds are suffixed -gnu.
+  binaries:
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-latest, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v4
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
+      - run: pnpm install -C frontend --frozen-lockfile && pnpm run -C frontend build
+      - name: Build and attach
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir dist
+          for libc in musl gnu; do
+            target="$(uname -m)-unknown-linux-$libc"
+            cargo build --release --manifest-path backend/Cargo.toml --target "$target"
+            cp "backend/target/$target/release/potoo" \
+              "dist/potoo-linux-${{ matrix.arch }}$([ $libc = gnu ] && echo -gnu)"
+          done
+          gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+
+  # Each runner pushes its image by digest only; `manifest` tags them.
+  image:
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-latest, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
       packages: write
     steps:
       - uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.release.tag_name }}
-      - uses: actions/download-artifact@v5
-        with:
-          path: dist
-          merge-multiple: true
-      - name: Attach the binaries to the release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-      - name: The image name and the version tags
-        id: tags
-        env:
-          TAG: ${{ github.event.release.tag_name }}
-        run: |
-          version="${TAG#v}"
-          major_minor="${version%.*}"
-          name="ghcr.io/${GITHUB_REPOSITORY,,}"
-          {
-            echo "images=$name"
-            echo "tags=$name:$version,$name:$major_minor,$name:latest"
-          } >> "$GITHUB_OUTPUT"
+      - run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -97,10 +63,50 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
+        id: build
         with:
           context: .
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.tags.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          provenance: false
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,scope=${{ matrix.arch }},mode=max
+      - run: |
+          mkdir digests
+          touch "digests/${DIGEST#sha256:}"
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+
+  # One tag, 1.2.3, 1.2 and latest (prereleases get only the exact
+  # version), pointing at both images.
+  manifest:
+    needs: image
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    steps:
+      - run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: digests-*
+          path: digests
+          merge-multiple: true
+      - uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "$IMAGE@sha256:%s " $(ls digests))
