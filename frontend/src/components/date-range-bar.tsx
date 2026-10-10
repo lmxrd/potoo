@@ -3,6 +3,7 @@ import { IconDownload } from "@tabler/icons-react";
 import { Button } from "./button";
 import type { SiteStats } from "../lib/api";
 import { FACETS, type FacetFilters } from "../lib/filter";
+import { countryName } from "../lib/countries";
 import {
   RANGE_PRESETS,
   localInput,
@@ -157,9 +158,9 @@ export function DateRangeBar({
               key={`${facet}:${value}`}
               className="rounded bg-slate-900 px-2 py-0.5 text-xs text-white"
             >
-              {FACETS[facet]}: {value}{" "}
+              {FACETS[facet]}: {facet === "country" ? countryName(value) : value}{" "}
               <button
-                aria-label={`Remove the ${FACETS[facet]} ${value} filter`}
+                aria-label={`Remove the ${FACETS[facet]} ${facet === "country" ? countryName(value) : value} filter`}
                 className="text-slate-300 hover:text-white"
                 onClick={() => removeFilter(facet, value)}
               >

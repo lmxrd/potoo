@@ -3,6 +3,7 @@ import { BarList } from "./bar-list";
 import { bucketLabel, chartLabel, formatDate, formatTime } from "../lib/dates";
 import type { SiteStats } from "../lib/api";
 import type { FacetFilters } from "../lib/filter";
+import { countryName } from "../lib/countries";
 
 /** The dashboard content: totals, the chart and the breakdowns. */
 export function StatsDashboard({
@@ -85,6 +86,7 @@ export function StatsDashboard({
             }))}
             active={filters.get("country")}
             onToggle={(value) => onToggleFilter("country", value)}
+            format={countryName}
           />
         </Card>
         <Card title="Devices">
