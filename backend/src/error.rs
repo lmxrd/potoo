@@ -28,16 +28,19 @@ impl HttpError {
     }
 
     pub fn unauthorized() -> Self {
-        Self {
-            status: StatusCode::UNAUTHORIZED,
-            message: "Unauthorized".into(),
-        }
+        Self::from_status(StatusCode::UNAUTHORIZED)
     }
 
     pub fn forbidden() -> Self {
+        Self::from_status(StatusCode::FORBIDDEN)
+    }
+
+    /// An error that needs no more words than its status: the message is
+    /// the status's canonical reason.
+    fn from_status(status: StatusCode) -> Self {
         Self {
-            status: StatusCode::FORBIDDEN,
-            message: "Forbidden".into(),
+            status,
+            message: status.canonical_reason().unwrap_or("Error").to_string(),
         }
     }
 
