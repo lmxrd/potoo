@@ -196,14 +196,15 @@ of rows the dashboard view is computed from, so what you see is what you get.
 
 ## Configuration
 
-| Variable         | Default             | Purpose                                                                                                                      |
-| ---------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `PORT`           | `8000`              | HTTP port                                                                                                                    |
-| `DATABASE_PATH`  | `data/potoo.db`     | SQLite file                                                                                                                  |
-| `GEOIP_DB_PATH`  | `data/country.mmdb` | MaxMind-format country DB. Downloaded from DB-IP on boot when missing or older than a week, and refreshed weekly             |
-| `GEOIP_URL`      | unset               | Override the download URL, e.g. your own mirror. Empty string disables downloading; a missing file then leaves country empty |
-| `TRUST_PROXY`    | unset               | Set to `1` to read the client IP from `X-Forwarded-For` (behind a reverse proxy)                                             |
-| `RETENTION_DAYS` | unset               | Delete hits older than this                                                                                                  |
+| Variable             | Default             | Purpose                                                                                                                                     |
+| -------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`               | `8000`              | HTTP port                                                                                                                                   |
+| `DATABASE_PATH`      | `data/potoo.db`     | SQLite file                                                                                                                                 |
+| `SQLITE_SYNCHRONOUS` | `NORMAL`            | How hard SQLite syncs to disk: `NORMAL` is fast and safe (a power cut can lose the last few hits, never corrupt); `FULL` syncs every commit |
+| `GEOIP_DB_PATH`      | `data/country.mmdb` | MaxMind-format country DB. Downloaded from DB-IP on boot when missing or older than a week, and refreshed weekly                            |
+| `GEOIP_URL`          | unset               | Override the download URL, e.g. your own mirror. Empty string disables downloading; a missing file then leaves country empty                |
+| `TRUST_PROXY`        | unset               | Set to `1` to read the client IP from `X-Forwarded-For` (behind a reverse proxy)                                                            |
+| `RETENTION_DAYS`     | unset               | Delete hits older than this                                                                                                                 |
 
 This site or product includes IP data from db-ip.com, licensed under CC BY 4.0.
 

@@ -49,7 +49,7 @@ async fn export(
         params.extend(filter_params);
     }
 
-    let conn = state.db.lock().await;
+    let conn = state.db.read().await;
     // No table alias: the filter clause names its columns unqualified,
     // and every column it can name lives in hits alone.
     let sql = format!(

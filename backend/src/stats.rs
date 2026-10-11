@@ -515,7 +515,7 @@ pub async fn stats_for(
         rows.collect()
     }
 
-    let conn = db.lock().await;
+    let conn = db.read().await;
     let pv = "kind = 'pageview'";
 
     let totals = query_rows(

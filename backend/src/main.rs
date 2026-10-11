@@ -26,7 +26,10 @@ async fn main() {
         Err(_) => Some(geo::Geo::default_url()),
     };
 
-    let db = db::open(&db_path);
+    // How hard the database syncs to disk: OFF, NORMAL, FULL or EXTRA.
+    let synchronous =
+        std::env::var("SQLITE_SYNCHRONOUS").unwrap_or_else(|_| db::DEFAULT_SYNCHRONOUS.into());
+    let db = db::open_with(&db_path, &synchronous);
     let geo = Arc::new(geo::Geo::open(&geo_path, geo_url).await);
     let state = AppState {
         db: db.clone(),
