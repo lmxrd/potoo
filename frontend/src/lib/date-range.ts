@@ -165,8 +165,11 @@ export function validateDashboardSearch(search: Record<string, unknown>): Dashbo
   if (typeof search.to === "string" && MINUTE_ISO.test(search.to)) {
     out.to = search.to;
   }
-  if (typeof search.sites === "string" && /^\d+(,\d+)*$/.test(search.sites)) {
-    out.sites = search.sites;
+  // Hostnames, comma separated. The router parses a lone number in a URL
+  // (`?sites=1`, an old link by id) as a number: read it as the text it was.
+  const sites = typeof search.sites === "number" ? String(search.sites) : search.sites;
+  if (typeof sites === "string" && /^[a-z0-9.:-]+(,[a-z0-9.:-]+)*$/i.test(sites)) {
+    out.sites = sites;
   }
   // Only expressions the dashboard can express survive: unknown facets,
   // other operators, or OR across facets degrade to the unfiltered view.
@@ -186,9 +189,12 @@ export function searchRange(search: DashboardSearch): DateRange {
   return { preset: "P7D" };
 }
 
-/** The selected site ids of `?sites=1,3`; an empty set means every site. */
-export function parseSites(sites: string | undefined): Set<number> {
-  return new Set((sites ?? "").split(",").filter(Boolean).map(Number));
+/**
+ * The selected hostnames of `?sites=blog.example.com,shop.example.com`; an
+ * empty set means every site.
+ */
+export function parseSites(sites: string | undefined): Set<string> {
+  return new Set((sites ?? "").split(",").filter(Boolean));
 }
 
 /**

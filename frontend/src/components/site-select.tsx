@@ -6,8 +6,9 @@ export function SiteSelect({
   onClear,
 }: {
   sites: { id: number; hostname: string }[] | null | undefined;
-  selected: Set<number>;
-  onToggle: (id: number) => void;
+  /** The selected hostnames. */
+  selected: Set<string>;
+  onToggle: (hostname: string) => void;
   onClear: () => void;
 }) {
   return (
@@ -21,7 +22,11 @@ export function SiteSelect({
           key={s.id}
           className="flex items-center gap-2 rounded border border-line-strong bg-card px-3 py-1.5"
         >
-          <input type="checkbox" checked={selected.has(s.id)} onChange={() => onToggle(s.id)} />
+          <input
+            type="checkbox"
+            checked={selected.has(s.hostname)}
+            onChange={() => onToggle(s.hostname)}
+          />
           {s.hostname}
         </label>
       ))}

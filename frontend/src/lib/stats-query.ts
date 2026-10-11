@@ -7,8 +7,8 @@ export type StatsQuery = NonNullable<GetStatsData["query"]>;
 
 /**
  * The query of a dashboard view: its range (null for an invalid custom
- * one), the selected sites (a comma separated list, empty for all of
- * them) and the RSQL filter (empty for none).
+ * one), the selected sites (a comma separated list of hostnames, empty
+ * for all of them) and the RSQL filter (empty for none).
  */
 export function statsQuery(
   range: RangeQuery | null,

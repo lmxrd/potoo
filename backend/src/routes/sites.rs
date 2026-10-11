@@ -8,6 +8,7 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -23,7 +24,8 @@ pub fn router() -> OpenApiRouter<AppState> {
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct StatsQuery {
-    /// Comma separated site ids. Every site when absent.
+    /// Comma separated hostnames, e.g. `blog.example.com,shop.example.com`.
+    /// Every site when absent. An unknown hostname is a 400.
     pub sites: Option<String>,
     /// A rolling window ending now, as an ISO 8601 duration rounded up to
     /// whole days: `PT24H`, `P7D`, `P30D`, `P90D`, `P1Y`, ... (at most
@@ -40,15 +42,24 @@ pub struct StatsQuery {
     pub q: Option<String>,
 }
 
-/// The comma separated site ids a stats or export request selects, or
-/// every site's when there are none.
+/// The ids of the sites a stats or export request selects: the comma
+/// separated hostnames it names (case does not matter; an unknown one is a
+/// 400 that says which), or every site's when there are none.
 pub async fn site_ids(state: &AppState, sites: Option<&str>) -> Result<Vec<i64>, HttpError> {
-    if let Some(sites) = sites {
-        let ids = sites
-            .split(',')
-            .map(|id| id.parse::<i64>())
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| HttpError::bad_request("sites must be comma separated site ids"))?;
+    let hostnames: BTreeSet<String> = sites
+        .unwrap_or_default()
+        .split(',')
+        .map(|host| host.trim().to_lowercase())
+        .filter(|host| !host.is_empty())
+        .collect();
+    if !hostnames.is_empty() {
+        let mut ids = Vec::new();
+        for host in hostnames {
+            match state.db.site(&host).await? {
+                Some(site) => ids.push(site.id),
+                None => return Err(HttpError::bad_request(format!("Unknown site: {host}"))),
+            }
+        }
         return Ok(ids);
     }
     let ids = sqlx::query_scalar("SELECT id FROM sites")

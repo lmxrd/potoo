@@ -182,7 +182,7 @@ one site, and the export — takes the same query params:
 | ------- | ---------------------------------------------------------------------------------------------- |
 | `range` | A rolling window ending now, as an ISO 8601 duration: `PT24H`, `P7D`, `P30D`, `P90D`, `P1Y`   |
 | `from`+`to` | Instead of a duration: an exact window, ISO timestamps in UTC with minute precision         |
-| `sites` | Comma-separated site ids; when absent, every site                                              |
+| `sites` | Comma-separated hostnames, e.g. `blog.example.com,shop.example.com`; when absent, every site. An unknown hostname is a 400 |
 | `q`     | A filter over the dashboard's facets, e.g. `country==NO;path==/pricing`                        |
 
 The dashboard's "Today" view is a `from`/`to` pair: UTC midnight to now. The

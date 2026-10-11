@@ -30,12 +30,13 @@ function SitePage() {
   const { range, setRange, query } = useDateRange();
   const { filters, toggle, setFilters } = useDashboardFilters();
   const queryClient = useQueryClient();
-  const params = statsQuery(query, siteId, buildFilter(filters));
   const isAdmin = session.user?.is_admin;
 
   const { data: site, error: siteError } = useQuery(
     getSiteOptions({ path: { id: Number(siteId) } }),
   );
+  // The stats are asked for by hostname, so they wait for the site.
+  const params = site ? statsQuery(query, site.hostname, buildFilter(filters)) : null;
   // The previous numbers stay on screen while the next range loads.
   const { data: stats, error: statsError } = useQuery({
     ...getStatsOptions({ query: params ?? undefined }),

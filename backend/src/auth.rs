@@ -15,13 +15,7 @@ pub const COOKIE: &str = "potoo_session";
 const SESSION_DAYS: u64 = 30;
 
 /// The date formats a user can pick from, for displaying dates.
-pub const DATE_FORMATS: [&str; 5] = [
-    "YYYY-MM-DD",
-    "DD/MM/YYYY",
-    "MM/DD/YYYY",
-    "DD.MM.YYYY",
-    "D MMM YYYY",
-];
+pub const DATE_FORMATS: [&str; 4] = ["YYYY-MM-DD", "DD/MM/YYYY", "MM/DD/YYYY", "DD.MM.YYYY"];
 
 /// The time formats a user can pick from, for displaying times.
 pub const TIME_FORMATS: [&str; 2] = ["24h", "12h"];

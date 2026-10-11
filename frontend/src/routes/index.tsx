@@ -23,13 +23,13 @@ function Overview() {
   const { range, setRange, query } = useDateRange();
   const { filters, toggle, setFilters } = useDashboardFilters();
 
-  // The selected site ids; empty means every site. In the URL, so a view
+  // The selected hostnames; empty means every site. In the URL, so a view
   // can be shared.
   const selected = parseSites(search.sites);
-  const toggleSite = (id: number) => {
+  const toggleSite = (hostname: string) => {
     const next = new Set(selected);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
+    if (next.has(hostname)) next.delete(hostname);
+    else next.add(hostname);
     navigate({
       to: ".",
       search: (prev) => ({

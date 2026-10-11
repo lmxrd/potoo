@@ -158,7 +158,7 @@ pub struct ChangeEmail {
 /// The preferences to change; at least one is required.
 #[derive(Deserialize, ToSchema)]
 pub struct ChangeSettings {
-    /// One of `YYYY-MM-DD`, `DD/MM/YYYY`, `MM/DD/YYYY`, `DD.MM.YYYY`, `D MMM YYYY`.
+    /// One of `YYYY-MM-DD`, `DD/MM/YYYY`, `MM/DD/YYYY`, `DD.MM.YYYY`.
     pub date_format: Option<String>,
     /// `24h` or `12h`.
     pub time_format: Option<String>,

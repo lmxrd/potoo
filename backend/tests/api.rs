@@ -198,7 +198,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::GET,
-            &format!("/api/stats?sites={site_id}&range=P1D"),
+            "/api/stats?sites=Blog.Example.com&range=P1D",
             Some(&session),
             None,
         )
@@ -269,7 +269,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::GET,
-            &format!("/api/stats?sites={site_id}&q=path==/a"),
+            "/api/stats?sites=blog.example.com&q=path==/a",
             Some(&session),
             None,
         )
@@ -277,24 +277,27 @@ async fn setup_users_sites_collection_stats_and_exports() {
     )
     .await;
     assert_eq!(stats["pageviews"], json!(1));
+    // An unknown hostname is a 400 that names it, and one of several spoils
+    // the request; known ones are matched whatever their case.
+    let response = request(
+        &app,
+        Method::GET,
+        "/api/stats?sites=blog.example.com,Nope.example.com",
+        Some(&session),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), 400);
     assert_eq!(
-        request(
-            &app,
-            Method::GET,
-            "/api/stats?sites=abc",
-            Some(&session),
-            None
-        )
-        .await
-        .status(),
-        400
+        json(response).await["error"],
+        json!("Unknown site: nope.example.com")
     );
 
     // The export: raw rows only, filtered like the dashboard view.
     let export = request(
         &app,
         Method::GET,
-        &format!("/api/export?sites={site_id}&range=P1D"),
+        "/api/export?sites=blog.example.com&range=P1D",
         Some(&session),
         None,
     )
@@ -311,7 +314,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
     let filtered = request(
         &app,
         Method::GET,
-        &format!("/api/export?sites={site_id}&range=P1D&q=name==signup"),
+        "/api/export?sites=blog.example.com&range=P1D&q=name==signup",
         Some(&session),
         None,
     )
@@ -474,7 +477,7 @@ async fn bots_and_dnt_are_not_recorded() {
     let admin = json!({ "email": "a@example.com", "password": "correct horse battery" });
     let response = request(&app, Method::POST, "/api/auth/setup", None, Some(admin)).await;
     let session = cookie(&response);
-    let site = json(
+    json(
         request(
             &app,
             Method::POST,
@@ -485,7 +488,6 @@ async fn bots_and_dnt_are_not_recorded() {
         .await,
     )
     .await;
-    let site_id = site["id"].as_i64().unwrap();
 
     let bot = app
         .client
@@ -511,7 +513,7 @@ async fn bots_and_dnt_are_not_recorded() {
         request(
             &app,
             Method::GET,
-            &format!("/api/stats?sites={site_id}"),
+            "/api/stats?sites=example.com",
             Some(&session),
             None,
         )
