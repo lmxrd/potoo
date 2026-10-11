@@ -2,13 +2,21 @@ use crate::db::Db;
 use crate::filter::{FacetFilters, filter_sql};
 use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 use serde::Serialize;
+use utoipa::ToSchema;
 
 const DAY_MS: i64 = 86_400_000;
 const HOUR_MS: i64 = 3_600_000;
 const MINUTE_MS: i64 = 60_000;
 
-/// The buckets a custom range's chart can use.
-pub type Bucket = &'static str;
+/// The bucket a custom range's chart is aggregated over.
+#[derive(Serialize, ToSchema, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Bucket {
+    Hour,
+    Day,
+    Week,
+    Month,
+}
 
 /// A rolling window of days, or an explicit UTC range with minute
 /// precision — the two forms every time-filtered endpoint accepts.
@@ -146,12 +154,10 @@ fn parse_minute(raw: &str) -> Option<i64> {
 }
 
 /// The range as the `days` field of the stats response.
-fn days_field(range: &StatsRange) -> serde_json::Value {
+fn days_field(range: &StatsRange) -> i64 {
     match range {
-        StatsRange::Days(n) => serde_json::json!(n),
-        StatsRange::FromTo { from, to } => {
-            serde_json::json!(((*to - *from).num_milliseconds() + DAY_MS - 1) / DAY_MS)
-        }
+        StatsRange::Days(n) => i64::from(*n),
+        StatsRange::FromTo { from, to } => ((*to - *from).num_milliseconds() + DAY_MS - 1) / DAY_MS,
     }
 }
 
@@ -283,7 +289,7 @@ fn custom_buckets(from: DateTime<Utc>, to: DateTime<Utc>) -> Buckets {
         let first = start - start % HOUR_MS;
         let last = (end - 1) - (end - 1) % HOUR_MS;
         return Buckets {
-            bucket: Some("hour"),
+            bucket: Some(Bucket::Hour),
             keys: (0..=(last - first) / HOUR_MS)
                 .map(|i| hour(first + i * HOUR_MS))
                 .collect(),
@@ -296,7 +302,7 @@ fn custom_buckets(from: DateTime<Utc>, to: DateTime<Utc>) -> Buckets {
         let first = midnight(start);
         let last = midnight(end - 1);
         return Buckets {
-            bucket: Some("day"),
+            bucket: Some(Bucket::Day),
             keys: (0..=(last - first) / DAY_MS)
                 .map(|i| date(first + i * DAY_MS))
                 .collect(),
@@ -314,7 +320,7 @@ fn custom_buckets(from: DateTime<Utc>, to: DateTime<Utc>) -> Buckets {
         let first = monday(midnight(start));
         let last = monday(midnight(end - 1));
         return Buckets {
-            bucket: Some("week"),
+            bucket: Some(Bucket::Week),
             keys: (0..=(last - first) / (7 * DAY_MS))
                 .map(|i| date(first + i * 7 * DAY_MS))
                 .collect(),
@@ -335,7 +341,7 @@ fn custom_buckets(from: DateTime<Utc>, to: DateTime<Utc>) -> Buckets {
         (last.year() - first_dt.year()) * 12 + last.month() as i32 - first_dt.month() as i32 + 1;
     let first_month = first_dt.year() * 12 + first_dt.month() as i32 - 1;
     Buckets {
-        bucket: Some("month"),
+        bucket: Some(Bucket::Month),
         keys: (0..months)
             .map(|i| {
                 let m = first_month + i;
@@ -368,51 +374,51 @@ struct Count {
     visitors: i64,
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct DayRow {
     pub day: String,
     pub pageviews: i64,
     pub visitors: i64,
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct PathRow {
     pub path: String,
     pub pageviews: i64,
     pub visitors: i64,
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct CountryRow {
     pub country: String,
     pub visitors: i64,
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct DeviceRow {
     pub device: String,
     pub visitors: i64,
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct BrowserRow {
     pub browser: String,
     pub visitors: i64,
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct OsRow {
     pub os: String,
     pub visitors: i64,
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct ReferrerRow {
     pub referrer: String,
     pub pageviews: i64,
 }
 
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct ClickRow {
     pub name: String,
     pub clicks: i64,
@@ -420,9 +426,10 @@ pub struct ClickRow {
 
 /// The stats of one dashboard: the totals, and the breakdowns the
 /// dashboard shows, over a selected day range.
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 pub struct SiteStats {
-    pub days: serde_json::Value,
+    /// The length of the range in days (rounded up).
+    pub days: i64,
     /// Set only for explicit from/to ranges: the bucket the chart shows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bucket: Option<Bucket>,
@@ -672,7 +679,7 @@ mod tests {
         let from = Utc.with_ymd_and_hms(2026, 1, 1, 10, 30, 0).unwrap();
         let to = Utc.with_ymd_and_hms(2026, 1, 2, 12, 30, 0).unwrap();
         let buckets = custom_buckets(from, to);
-        assert_eq!(buckets.bucket, Some("hour"));
+        assert_eq!(buckets.bucket, Some(Bucket::Hour));
         assert_eq!(buckets.keys.first().unwrap(), "2026-01-01T10:00");
         assert_eq!(buckets.keys.last().unwrap(), "2026-01-02T12:00");
         assert_eq!(buckets.since, "2026-01-01T10:30:00.000Z");
@@ -681,7 +688,7 @@ mod tests {
         let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
         let to = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
         let buckets = custom_buckets(from, to);
-        assert_eq!(buckets.bucket, Some("day"));
+        assert_eq!(buckets.bucket, Some(Bucket::Day));
         assert_eq!(buckets.keys.len(), 32);
         assert_eq!(buckets.keys.first().unwrap(), "2026-01-01");
     }

@@ -1,21 +1,25 @@
+import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { Button } from "./button";
 import { ErrorText } from "./error-text";
 import { Input } from "./input";
-import { api } from "../lib/api";
+import { loginMutation, setupMutation } from "../client/@tanstack/react-query.gen";
+import { errorMessage } from "../lib/api";
 
 export function CredentialsForm({
-  endpoint,
+  kind,
   submit,
   onDone,
 }: {
-  endpoint: string;
+  kind: "login" | "setup";
   submit: string;
   onDone: () => void;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string>();
+  const login = useMutation(loginMutation());
+  const setup = useMutation(setupMutation());
   return (
     <form
       className="flex max-w-sm flex-col gap-3"
@@ -23,10 +27,10 @@ export function CredentialsForm({
         e.preventDefault();
         setError(undefined);
         try {
-          await api(endpoint, { body: { email, password } });
+          await (kind === "login" ? login : setup).mutateAsync({ body: { email, password } });
           onDone();
         } catch (err) {
-          setError(err instanceof Error ? err.message : "Something went wrong");
+          setError(errorMessage(err));
         }
       }}
     >

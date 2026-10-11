@@ -1,10 +1,16 @@
+import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { Button } from "../components/button";
 import { Card } from "../components/card";
 import { ErrorText } from "../components/error-text";
 import { Input } from "../components/input";
-import { api } from "../lib/api";
+import {
+  changeEmailMutation,
+  changePasswordMutation,
+  changeSettingsMutation,
+} from "../client/@tanstack/react-query.gen";
+import { errorMessage } from "../lib/api";
 import { DATE_FORMATS, formatDate, formatTime } from "../lib/dates";
 import { THEMES, applyTheme, parseTheme, themeJson, type Theme } from "../lib/theme";
 
@@ -24,7 +30,7 @@ function Settings() {
           </div>
           <div className="flex justify-between gap-4">
             <dt className="text-muted">Role</dt>
-            <dd>{user.is_admin === 1 ? "Admin" : "User"}</dd>
+            <dd>{user.is_admin ? "Admin" : "User"}</dd>
           </div>
         </dl>
       </Card>
@@ -51,6 +57,7 @@ function DateFormat({ current }: { current: string }) {
   const [value, setValue] = useState(current);
   const [error, setError] = useState<string>();
   const router = useRouter();
+  const change = useMutation(changeSettingsMutation());
   return (
     <div className="space-y-2">
       <select
@@ -61,12 +68,12 @@ function DateFormat({ current }: { current: string }) {
           setValue(next);
           setError(undefined);
           try {
-            await api("/settings", { body: { date_format: next } });
+            await change.mutateAsync({ body: { date_format: next } });
             // The format comes from the session; refresh it so the whole
             // app picks the new format up.
             await router.invalidate();
           } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed");
+            setError(errorMessage(err, "Failed"));
           }
         }}
       >
@@ -101,19 +108,20 @@ function sameTheme(a: Theme, b: Theme): boolean {
 function ThemePicker({ current }: { current: Theme }) {
   const [error, setError] = useState<string>();
   const router = useRouter();
+  const change = useMutation(changeSettingsMutation());
   const active = THEMES.find((preset) => sameTheme(preset.theme, current));
 
   const save = async (next: Theme) => {
     applyTheme(next);
     setError(undefined);
     try {
-      await api("/settings", { body: { theme: themeJson(next) } });
+      await change.mutateAsync({ body: { theme: themeJson(next) } });
       // The theme also lives in the session; refresh so navigation
       // cannot reapply a stale one.
       await router.invalidate();
     } catch (err) {
       applyTheme(current);
-      setError(err instanceof Error ? err.message : "Failed");
+      setError(errorMessage(err, "Failed"));
     }
   };
 
@@ -179,6 +187,7 @@ function TimeFormat({ current }: { current: string }) {
   const [value, setValue] = useState(current);
   const [error, setError] = useState<string>();
   const router = useRouter();
+  const change = useMutation(changeSettingsMutation());
   return (
     <div className="space-y-2">
       <select
@@ -189,10 +198,10 @@ function TimeFormat({ current }: { current: string }) {
           setValue(next);
           setError(undefined);
           try {
-            await api("/settings", { body: { time_format: next } });
+            await change.mutateAsync({ body: { time_format: next } });
             await router.invalidate();
           } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed");
+            setError(errorMessage(err, "Failed"));
           }
         }}
       >
@@ -215,6 +224,7 @@ function ChangeEmail({ current }: { current: string }) {
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const router = useRouter();
+  const changeEmail = useMutation(changeEmailMutation());
   return (
     <form
       className="flex flex-col gap-3"
@@ -223,12 +233,12 @@ function ChangeEmail({ current }: { current: string }) {
         setError(undefined);
         setSaved(false);
         try {
-          await api("/email", { body: { email } });
+          await changeEmail.mutateAsync({ body: { email } });
           setSaved(true);
           // The nav bar shows the email from the session; refresh it.
           await router.invalidate();
         } catch (err) {
-          setError(err instanceof Error ? err.message : "Something went wrong");
+          setError(errorMessage(err));
         }
       }}
     >
@@ -251,6 +261,7 @@ function ChangePassword() {
   const [next, setNext] = useState("");
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
+  const changePassword = useMutation(changePasswordMutation());
   return (
     <form
       className="flex flex-col gap-3"
@@ -259,14 +270,14 @@ function ChangePassword() {
         setError(undefined);
         setSaved(false);
         try {
-          await api("/password", {
+          await changePassword.mutateAsync({
             body: { current_password: current, new_password: next },
           });
           setCurrent("");
           setNext("");
           setSaved(true);
         } catch (err) {
-          setError(err instanceof Error ? err.message : "Something went wrong");
+          setError(errorMessage(err));
         }
       }}
     >

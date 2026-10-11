@@ -7,7 +7,7 @@ function Login() {
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Sign in</h1>
-      <CredentialsForm endpoint="/login" submit="Sign in" onDone={() => location.assign("/")} />
+      <CredentialsForm kind="login" submit="Sign in" onDone={() => location.assign("/")} />
     </div>
   );
 }

@@ -1,9 +1,17 @@
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use serde_json::json;
+use serde::Serialize;
+use utoipa::ToSchema;
 
-/// An error answered as `{"error": "..."}` with its status, the shape every
+/// The body of every error response: `{"error": "..."}`.
+#[derive(Serialize, ToSchema)]
+pub struct ErrorBody {
+    /// What went wrong, fit to show to a person.
+    pub error: String,
+}
+
+/// An error answered as an [`ErrorBody`] with its status, the shape every
 /// frontend call understands.
 #[derive(Debug)]
 pub struct HttpError {
@@ -43,7 +51,13 @@ impl HttpError {
 
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
-        (self.status, Json(json!({ "error": self.message }))).into_response()
+        (
+            self.status,
+            Json(ErrorBody {
+                error: self.message,
+            }),
+        )
+            .into_response()
     }
 }
 

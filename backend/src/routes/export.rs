@@ -1,5 +1,5 @@
 use crate::csv;
-use crate::error::HttpError;
+use crate::error::{ErrorBody, HttpError};
 use crate::filter::filter_sql;
 use crate::routes::auth::AuthUser;
 use crate::routes::sites::{StatsQuery, range_and_filter, site_ids};
@@ -19,7 +19,22 @@ pub fn router() -> Router<AppState> {
     Router::new().route("/export", get(export))
 }
 
-async fn export(
+#[utoipa::path(
+    get,
+    path = "/api/export",
+    tag = "Stats",
+    operation_id = "exportHits",
+    summary = "Export the hits of a dashboard view as CSV",
+    description = "Every recorded hit of the selected view, oldest first, one CSV row each: site, created_at, kind, path, name, referrer, country, device, browser, os. Takes the same parameters as the stats, so what you see is what you get. Sent as an attachment named potoo-export.csv.",
+    params(StatsQuery),
+    responses(
+        (status = 200, description = "The hits as CSV", body = String, content_type = "text/csv", headers(("content-disposition" = String, description = "attachment; filename=\"potoo-export.csv\""))),
+        (status = 400, description = "The request is invalid", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+pub async fn export(
     State(state): State<AppState>,
     _user: AuthUser,
     Query(query): Query<StatsQuery>,

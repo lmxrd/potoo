@@ -9,6 +9,7 @@ use sqlx::SqliteExecutor;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use utoipa::ToSchema;
 
 pub const COOKIE: &str = "potoo_session";
 const SESSION_DAYS: u64 = 30;
@@ -26,13 +27,16 @@ pub const DATE_FORMATS: [&str; 5] = [
 pub const TIME_FORMATS: [&str; 2] = ["24h", "12h"];
 
 /// The signed-in user, as the session endpoint returns them.
-#[derive(Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct User {
     pub id: i64,
     pub email: String,
-    pub is_admin: i64,
+    pub is_admin: bool,
+    /// One of the date formats of the settings, e.g. `YYYY-MM-DD`.
     pub date_format: String,
+    /// `24h` or `12h`.
     pub time_format: String,
+    /// A JSON object as text: `{"base":"light"|"dark","accent":"#rrggbb"}`.
     pub theme: String,
 }
 

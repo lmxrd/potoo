@@ -2,7 +2,7 @@ use crate::auth::{
     COOKIE, DATE_FORMATS, TIME_FORMATS, User, create_session, current_user, destroy_session,
     hash_password, verify_password,
 };
-use crate::error::HttpError;
+use crate::error::{ErrorBody, HttpError};
 use crate::state::AppState;
 use crate::visitor::client_ip;
 use axum::extract::{ConnectInfo, FromRequestParts, State};
@@ -16,6 +16,7 @@ use serde_json::json;
 use sqlx::SqliteExecutor;
 use std::net::SocketAddr;
 use std::sync::OnceLock;
+use utoipa::ToSchema;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -57,7 +58,7 @@ impl FromRequestParts<AppState> for AuthUser {
 }
 
 fn require_admin(user: &AuthUser) -> Result<(), HttpError> {
-    if user.0.is_admin == 1 {
+    if user.0.is_admin {
         Ok(())
     } else {
         Err(HttpError::forbidden())
@@ -140,6 +141,69 @@ fn validate_password(raw: &str) -> Result<String, HttpError> {
     }
 }
 
+/// The session and first-run state; the frontend routes every page by it.
+#[derive(Serialize, ToSchema)]
+pub struct Session {
+    /// True while there are no users at all: the next step is `/setup`.
+    #[serde(rename = "needsSetup")]
+    pub needs_setup: bool,
+    /// The signed-in user, if any.
+    pub user: Option<User>,
+}
+
+/// A new email address for the signed-in user.
+#[derive(Deserialize, ToSchema)]
+pub struct ChangeEmail {
+    pub email: String,
+}
+
+/// The preferences to change; at least one is required.
+#[derive(Deserialize, ToSchema)]
+pub struct ChangeSettings {
+    /// One of `YYYY-MM-DD`, `DD/MM/YYYY`, `MM/DD/YYYY`, `DD.MM.YYYY`, `D MMM YYYY`.
+    pub date_format: Option<String>,
+    /// `24h` or `12h`.
+    pub time_format: Option<String>,
+    /// A JSON object as text: `{"base":"light"|"dark","accent":"#rrggbb"}`.
+    pub theme: Option<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ChangePassword {
+    pub current_password: String,
+    /// 10 to 200 characters.
+    pub new_password: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct CreateUser {
+    pub email: String,
+    /// 10 to 200 characters.
+    pub password: String,
+    #[serde(default)]
+    pub is_admin: bool,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ChangeRole {
+    pub is_admin: bool,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct ResetPassword {
+    /// 10 to 200 characters.
+    pub new_password: String,
+}
+
+/// One user in the list of users.
+#[derive(Serialize, sqlx::FromRow, ToSchema)]
+pub struct UserRow {
+    pub id: i64,
+    pub email: String,
+    pub is_admin: bool,
+    pub created_at: String,
+}
+
 async fn has_users(state: &AppState) -> Result<bool, HttpError> {
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(state.db.reader())
@@ -155,27 +219,54 @@ async fn admin_count<'e>(db: impl SqliteExecutor<'e>) -> Result<i64, HttpError> 
 }
 
 // Session + first-run state. The frontend uses this to route every page.
-async fn session(
+#[utoipa::path(
+    get,
+    path = "/api/session",
+    tag = "Auth",
+    operation_id = "getSession",
+    summary = "The session and the first-run state",
+    description = "Whether the first admin still has to be created, and who is signed in (null when nobody is).",
+    responses(
+        (status = 200, description = "The session", body = Session),
+    ),
+)]
+pub async fn session(
     State(state): State<AppState>,
     jar: CookieJar,
-) -> Result<Json<serde_json::Value>, HttpError> {
+) -> Result<Json<Session>, HttpError> {
     let needs_setup = !has_users(&state).await?;
     let user = if needs_setup {
         None
     } else {
         current_user(state.db.reader(), jar.get(COOKIE).map(|c| c.value())).await
     };
-    Ok(Json(json!({ "needsSetup": needs_setup, "user": user })))
+    Ok(Json(Session { needs_setup, user }))
 }
 
-#[derive(Deserialize)]
-struct Credentials {
-    email: String,
-    password: String,
+/// An email and a password, to sign in or to create the first admin.
+#[derive(Deserialize, ToSchema)]
+pub struct Credentials {
+    pub email: String,
+    /// 10 to 200 characters when creating an account.
+    pub password: String,
 }
 
 // Creates the admin. Only possible while there are no users at all.
-async fn setup(
+#[utoipa::path(
+    post,
+    path = "/api/setup",
+    tag = "Auth",
+    operation_id = "setup",
+    summary = "Create the first admin",
+    description = "Only possible while there are no users. Signs the new admin in: the session cookie is set.",
+    request_body(content = Credentials, content_type = "application/json"),
+    responses(
+        (status = 201, description = "The admin was created and signed in"),
+        (status = 400, description = "The request is invalid", body = ErrorBody),
+        (status = 409, description = "Conflict", body = ErrorBody),
+    ),
+)]
+pub async fn setup(
     State(state): State<AppState>,
     jar: CookieJar,
     headers: HeaderMap,
@@ -208,7 +299,21 @@ async fn setup(
     Ok((StatusCode::CREATED, jar).into_response())
 }
 
-async fn login(
+#[utoipa::path(
+    post,
+    path = "/api/login",
+    tag = "Auth",
+    operation_id = "login",
+    summary = "Sign in",
+    description = "Sets the session cookie. After five failed attempts for one IP and email within 15 minutes the pair is locked out (429, with a Retry-After header).",
+    request_body(content = Credentials, content_type = "application/json"),
+    responses(
+        (status = 204, description = "Signed in"),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 429, description = "Too many attempts, try again later", body = ErrorBody),
+    ),
+)]
+pub async fn login(
     State(state): State<AppState>,
     jar: CookieJar,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -262,22 +367,43 @@ async fn login(
     Ok((StatusCode::NO_CONTENT, jar).into_response())
 }
 
-async fn logout(State(state): State<AppState>, jar: CookieJar) -> Result<Response, HttpError> {
+#[utoipa::path(
+    post,
+    path = "/api/logout",
+    tag = "Auth",
+    operation_id = "logout",
+    summary = "Sign out",
+    responses(
+        (status = 204, description = "Signed out; the session cookie is cleared"),
+    ),
+)]
+pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> Result<Response, HttpError> {
     let jar = destroy_session(state.db.writer(), jar).await?;
     Ok((StatusCode::NO_CONTENT, jar).into_response())
 }
 
 // Change the signed-in user's own email.
-async fn change_email(
+#[utoipa::path(
+    post,
+    path = "/api/email",
+    tag = "Account",
+    operation_id = "changeEmail",
+    summary = "Change your own email",
+    request_body(content = ChangeEmail, content_type = "application/json"),
+    responses(
+        (status = 204, description = "Changed"),
+        (status = 400, description = "The request is invalid", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 409, description = "Conflict", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+pub async fn change_email(
     State(state): State<AppState>,
     user: AuthUser,
     body: String,
 ) -> Result<Response, HttpError> {
-    #[derive(Deserialize)]
-    struct Body {
-        email: String,
-    }
-    let body = parse_body::<Body>(&body)?;
+    let body = parse_body::<ChangeEmail>(&body)?;
     let email = validate_email(&body.email)?;
     let mut tx = state.db.writer().begin().await?;
     let taken: Option<i64> =
@@ -302,18 +428,27 @@ async fn change_email(
 }
 
 // Change the signed-in user's own preferences.
-async fn change_settings(
+#[utoipa::path(
+    post,
+    path = "/api/settings",
+    tag = "Account",
+    operation_id = "changeSettings",
+    summary = "Change your own preferences",
+    description = "The date format, the time format and the theme. Each one that is sent changes, or none does.",
+    request_body(content = ChangeSettings, content_type = "application/json"),
+    responses(
+        (status = 204, description = "Changed"),
+        (status = 400, description = "The request is invalid", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+pub async fn change_settings(
     State(state): State<AppState>,
     user: AuthUser,
     body: String,
 ) -> Result<Response, HttpError> {
-    #[derive(Deserialize)]
-    struct Body {
-        date_format: Option<String>,
-        time_format: Option<String>,
-        theme: Option<String>,
-    }
-    let body = parse_body::<Body>(&body)?;
+    let body = parse_body::<ChangeSettings>(&body)?;
     if body.date_format.is_none() && body.time_format.is_none() && body.theme.is_none() {
         return Err(HttpError::bad_request("A setting to change is required"));
     }
@@ -356,17 +491,26 @@ async fn change_settings(
 }
 
 // Change the signed-in user's own password.
-async fn change_password(
+#[utoipa::path(
+    post,
+    path = "/api/password",
+    tag = "Account",
+    operation_id = "changePassword",
+    summary = "Change your own password",
+    request_body(content = ChangePassword, content_type = "application/json"),
+    responses(
+        (status = 204, description = "Changed"),
+        (status = 400, description = "The request is invalid", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+pub async fn change_password(
     State(state): State<AppState>,
     user: AuthUser,
     body: String,
 ) -> Result<Response, HttpError> {
-    #[derive(Deserialize)]
-    struct Body {
-        current_password: String,
-        new_password: String,
-    }
-    let body = parse_body::<Body>(&body)?;
+    let body = parse_body::<ChangePassword>(&body)?;
     if body.current_password.len() > 200 {
         return Err(HttpError::bad_request("Invalid password"));
     }
@@ -398,39 +542,54 @@ async fn change_password(
 }
 
 // Users: admin only. Everyone created here can be an admin or not.
-async fn list_users(
+#[utoipa::path(
+    get,
+    path = "/api/users",
+    tag = "Users",
+    operation_id = "listUsers",
+    summary = "List the users",
+    responses(
+        (status = 200, description = "All users, by id", body = Vec<UserRow>),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 403, description = "Admin only", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+pub async fn list_users(
     State(state): State<AppState>,
     user: AuthUser,
-) -> Result<Json<serde_json::Value>, HttpError> {
+) -> Result<Json<Vec<UserRow>>, HttpError> {
     require_admin(&user)?;
-    #[derive(Serialize, sqlx::FromRow)]
-    struct UserRow {
-        id: i64,
-        email: String,
-        is_admin: i64,
-        created_at: String,
-    }
     let rows: Vec<UserRow> =
         sqlx::query_as("SELECT id, email, is_admin, created_at FROM users ORDER BY id")
             .fetch_all(state.db.reader())
             .await?;
-    Ok(Json(json!(rows)))
+    Ok(Json(rows))
 }
 
-async fn create_user(
+#[utoipa::path(
+    post,
+    path = "/api/users",
+    tag = "Users",
+    operation_id = "createUser",
+    summary = "Create a user",
+    request_body(content = CreateUser, content_type = "application/json"),
+    responses(
+        (status = 201, description = "Created"),
+        (status = 400, description = "The request is invalid", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 403, description = "Admin only", body = ErrorBody),
+        (status = 409, description = "Conflict", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+pub async fn create_user(
     State(state): State<AppState>,
     user: AuthUser,
     body: String,
 ) -> Result<Response, HttpError> {
     require_admin(&user)?;
-    #[derive(Deserialize)]
-    struct Body {
-        email: String,
-        password: String,
-        #[serde(default)]
-        is_admin: bool,
-    }
-    let body = parse_body::<Body>(&body)?;
+    let body = parse_body::<CreateUser>(&body)?;
     let email = validate_email(&body.email)?;
     let password = validate_password(&body.password)?;
     let password_hash = hash_password(&password);
@@ -457,18 +616,33 @@ async fn create_user(
 
 // Change the role of a user. The last admin cannot be demoted, so the
 // app always has at least one admin left.
-async fn change_role(
+#[utoipa::path(
+    patch,
+    path = "/api/users/{id}",
+    tag = "Users",
+    operation_id = "changeUserRole",
+    summary = "Change the role of a user",
+    description = "The last admin cannot be demoted.",
+    params(("id" = i64, Path, description = "The user id")),
+    request_body(content = ChangeRole, content_type = "application/json"),
+    responses(
+        (status = 204, description = "Changed"),
+        (status = 400, description = "The request is invalid", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 403, description = "Admin only", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
+        (status = 409, description = "Conflict", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+pub async fn change_role(
     State(state): State<AppState>,
     user: AuthUser,
     axum::extract::Path(id): axum::extract::Path<i64>,
     body: String,
 ) -> Result<Response, HttpError> {
     require_admin(&user)?;
-    #[derive(Deserialize)]
-    struct Body {
-        is_admin: bool,
-    }
-    let body = parse_body::<Body>(&body)?;
+    let body = parse_body::<ChangeRole>(&body)?;
     let mut tx = state.db.writer().begin().await?;
     let target: Option<i64> = sqlx::query_scalar("SELECT is_admin FROM users WHERE id = ?1")
         .bind(id)
@@ -495,7 +669,23 @@ async fn change_role(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-async fn delete_user(
+#[utoipa::path(
+    delete,
+    path = "/api/users/{id}",
+    tag = "Users",
+    operation_id = "deleteUser",
+    summary = "Delete a user",
+    description = "The last admin cannot be deleted. Deleting a user that does not exist is not an error.",
+    params(("id" = i64, Path, description = "The user id")),
+    responses(
+        (status = 204, description = "Deleted"),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 403, description = "Admin only", body = ErrorBody),
+        (status = 409, description = "Conflict", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+pub async fn delete_user(
     State(state): State<AppState>,
     user: AuthUser,
     axum::extract::Path(id): axum::extract::Path<i64>,
@@ -525,18 +715,31 @@ async fn delete_user(
 
 // Admin sets a new password for a regular user. The admin account is
 // excluded here, like deletion: admins change their own via /password.
-async fn reset_password(
+#[utoipa::path(
+    post,
+    path = "/api/users/{id}/password",
+    tag = "Users",
+    operation_id = "resetUserPassword",
+    summary = "Set a new password for a user",
+    params(("id" = i64, Path, description = "The user id")),
+    request_body(content = ResetPassword, content_type = "application/json"),
+    responses(
+        (status = 204, description = "Changed"),
+        (status = 400, description = "The request is invalid", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 403, description = "Admin only", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+pub async fn reset_password(
     State(state): State<AppState>,
     user: AuthUser,
     axum::extract::Path(id): axum::extract::Path<i64>,
     body: String,
 ) -> Result<Response, HttpError> {
     require_admin(&user)?;
-    #[derive(Deserialize)]
-    struct Body {
-        new_password: String,
-    }
-    let body = parse_body::<Body>(&body)?;
+    let body = parse_body::<ResetPassword>(&body)?;
     let password = validate_password(&body.new_password)?;
     let updated = sqlx::query("UPDATE users SET password_hash = ?1 WHERE id = ?2")
         .bind(hash_password(&password))

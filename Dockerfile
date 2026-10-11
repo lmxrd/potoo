@@ -1,19 +1,37 @@
-# The image has three stages: the frontend build, the cargo build of the
-# binary (which embeds the frontend), and the runtime, which is Alpine
-# with just the static binary.
+# The image has four stages: the OpenAPI spec, the frontend build (which
+# generates its API client from the spec), the cargo build of the binary
+# (which embeds the frontend), and the runtime, which is Alpine with just
+# the static binary.
 #
 # Build:   mise run build:docker — for the architecture of the machine,
 # natively, so an Apple Silicon Mac gets arm64 without emulation. The
 # release builds amd64 and arm64 on native runners.
 
-# The frontend: Vite builds it, and rust-embed embeds the result.
+# The OpenAPI spec: the frontend's API client is generated from it, so the
+# backend builds first, without the frontend (--features spec) and only far
+# enough to write the spec. It shares the cargo caches with the compile
+# stage.
+FROM rust:1.99-slim AS spec
+WORKDIR /app/backend
+COPY backend/Cargo.toml backend/Cargo.lock ./
+COPY backend/build.rs ./
+COPY backend/migrations migrations/
+COPY backend/src src/
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/app/backend/target \
+    cargo run --features spec --bin openapi -- /openapi.json
+
+# The frontend: the client is generated from the spec, Vite builds the
+# app, and rust-embed embeds the result.
 FROM node:24-bookworm-slim AS frontend
 WORKDIR /app
-COPY frontend/package.json frontend/pnpm-lock.yaml ./
+COPY frontend/package.json frontend/pnpm-lock.yaml frontend/.pnpmfile.cjs ./
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     corepack enable && pnpm install --frozen-lockfile
 COPY frontend/ .
-RUN pnpm build
+COPY --from=spec /openapi.json /openapi.json
+ENV OPENAPI_SPEC=/openapi.json
+RUN pnpm run gen:api && pnpm run build
 
 # The compile: a single static binary (musl) with the frontend embedded.
 # musl-tools provides the C toolchain for the C parts (sqlite, ring).

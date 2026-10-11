@@ -27,6 +27,17 @@ async fn not_found() -> (StatusCode, Json<serde_json::Value>) {
 }
 
 /// Liveness: 200 OK, for the Docker healthcheck and load balancers.
-async fn health() -> &'static str {
+#[utoipa::path(
+    get,
+    path = "/api/health",
+    tag = "System",
+    operation_id = "getHealth",
+    summary = "Liveness",
+    description = "200 OK, for the Docker healthcheck and load balancers.",
+    responses(
+        (status = 200, description = "The server is up", body = String, content_type = "text/plain"),
+    ),
+)]
+pub async fn health() -> &'static str {
     "OK"
 }

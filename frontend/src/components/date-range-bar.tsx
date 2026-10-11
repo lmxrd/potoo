@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { IconDownload } from "@tabler/icons-react";
 import { Button } from "./button";
-import type { SiteStats } from "../lib/api";
+import type { SiteStats } from "../client";
 import { FACETS, type FacetFilters } from "../lib/filter";
 import { countryName } from "../lib/countries";
 import {
@@ -41,7 +41,8 @@ export function DateRangeBar({
   timeFormat?: string;
   filters: FacetFilters;
   onFilters: (filters: FacetFilters) => void;
-  exportUrl: string;
+  /** Where the view downloads as CSV; none while the range is invalid. */
+  exportUrl?: string;
 }) {
   const window = rangeWindow(range);
   const applied = {

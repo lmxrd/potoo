@@ -1,30 +1,41 @@
-use crate::error::HttpError;
+use crate::error::{ErrorBody, HttpError};
 use crate::filter;
 use crate::routes::auth::AuthUser;
 use crate::state::AppState;
-use crate::stats::{parse_range, stats_for};
-use axum::extract::{Path, Query, State};
+use crate::stats::parse_range;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch};
+use axum::routing::get;
 use axum::{Json, Router};
-use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use utoipa::{IntoParams, ToSchema};
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/", get(list).post(create))
-        .route("/{id}", patch(update).delete(delete))
-        .route("/{id}/stats", get(site_stats))
+        .route("/{id}", get(get_site).patch(update).delete(delete))
 }
 
-#[derive(Deserialize)]
+/// What the stats and the export are computed over. All parameters are
+/// optional: without any, every site over the last 7 days.
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct StatsQuery {
+    /// Comma separated site ids. Every site when absent.
     pub sites: Option<String>,
+    /// A rolling window ending now, as an ISO 8601 duration rounded up to
+    /// whole days: `PT24H`, `P7D`, `P30D`, `P90D`, `P1Y`, ... (at most
+    /// 365 days). Default `P7D`. Ignored when `from` and `to` are given.
     pub range: Option<String>,
+    /// The start of an exact window, `YYYY-MM-DDTHH:MM` in UTC. Needs `to`.
     pub from: Option<String>,
+    /// The end of an exact window (that minute included), `YYYY-MM-DDTHH:MM`
+    /// in UTC. Needs `from`; the window spans at most 730 days.
     pub to: Option<String>,
+    /// A filter over the facets (path, country, device, browser, os,
+    /// referrer, name): equality, OR (`,`) within a facet and AND (`;`)
+    /// across facets, e.g. `country==NO;path==/pricing`.
     pub q: Option<String>,
 }
 
@@ -61,22 +72,46 @@ pub fn range_and_filter(
     Ok((range, filters))
 }
 
-async fn list(
+/// A registered site.
+#[derive(Serialize, sqlx::FromRow, ToSchema)]
+pub struct SiteRow {
+    pub id: i64,
+    pub hostname: String,
+    /// Whether hits from visitors who send Do Not Track (or Global Privacy
+    /// Control) are ignored.
+    pub honor_dnt: bool,
+    pub created_at: String,
+}
+
+/// The site that was just created.
+#[derive(Serialize, ToSchema)]
+pub struct CreatedSite {
+    pub id: i64,
+    pub hostname: String,
+    pub honor_dnt: bool,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/sites",
+    tag = "Sites",
+    operation_id = "listSites",
+    summary = "List the sites",
+    responses(
+        (status = 200, description = "All sites, by hostname", body = Vec<SiteRow>),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+pub async fn list(
     State(state): State<AppState>,
     _user: AuthUser,
-) -> Result<Json<serde_json::Value>, HttpError> {
-    #[derive(Serialize, sqlx::FromRow)]
-    struct SiteRow {
-        id: i64,
-        hostname: String,
-        honor_dnt: i64,
-        created_at: String,
-    }
+) -> Result<Json<Vec<SiteRow>>, HttpError> {
     let rows: Vec<SiteRow> =
         sqlx::query_as("SELECT id, hostname, honor_dnt, created_at FROM sites ORDER BY hostname")
             .fetch_all(state.db.reader())
             .await?;
-    Ok(Json(json!(rows)))
+    Ok(Json(rows))
 }
 
 /// Expected a hostname such as example.com or blog.example.com.
@@ -111,23 +146,43 @@ fn validate_hostname(raw: &str) -> Result<String, HttpError> {
     Ok(host)
 }
 
-#[derive(Deserialize)]
-struct SiteInput {
-    hostname: String,
+/// A site to register.
+#[derive(Deserialize, ToSchema)]
+pub struct SiteInput {
+    /// A hostname such as `example.com` or `blog.example.com`, with an
+    /// optional port. Every subdomain is its own site.
+    pub hostname: String,
+    /// Ignore visitors who ask not to be tracked. Default true.
     #[serde(default = "default_true")]
-    honor_dnt: bool,
+    pub honor_dnt: bool,
 }
 
 fn default_true() -> bool {
     true
 }
 
-async fn create(
+#[utoipa::path(
+    post,
+    path = "/api/sites",
+    tag = "Sites",
+    operation_id = "createSite",
+    summary = "Register a site",
+    request_body(content = SiteInput, content_type = "application/json"),
+    responses(
+        (status = 201, description = "The site was registered", body = CreatedSite),
+        (status = 400, description = "The request is invalid", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 403, description = "Admin only", body = ErrorBody),
+        (status = 409, description = "Conflict", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+pub async fn create(
     State(state): State<AppState>,
     user: AuthUser,
     body: String,
 ) -> Result<Response, HttpError> {
-    if user.0.is_admin != 1 {
+    if !user.0.is_admin {
         return Err(HttpError::forbidden());
     }
     let input: SiteInput =
@@ -153,27 +208,44 @@ async fn create(
     tx.commit().await?;
     Ok((
         StatusCode::CREATED,
-        Json(json!({
-            "id": id,
-            "hostname": hostname,
-            "honor_dnt": input.honor_dnt as i64,
-        })),
+        Json(CreatedSite {
+            id,
+            hostname,
+            honor_dnt: input.honor_dnt,
+        }),
     )
         .into_response())
 }
 
-#[derive(Deserialize)]
-struct DntInput {
-    honor_dnt: bool,
+#[derive(Deserialize, ToSchema)]
+pub struct DntInput {
+    pub honor_dnt: bool,
 }
 
-async fn update(
+#[utoipa::path(
+    patch,
+    path = "/api/sites/{id}",
+    tag = "Sites",
+    operation_id = "updateSite",
+    summary = "Change a site's settings",
+    description = "Whether Do Not Track is honored. Changing a site that does not exist is not an error.",
+    params(("id" = i64, Path, description = "The site id")),
+    request_body(content = DntInput, content_type = "application/json"),
+    responses(
+        (status = 204, description = "Changed"),
+        (status = 400, description = "The request is invalid", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 403, description = "Admin only", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+pub async fn update(
     State(state): State<AppState>,
     user: AuthUser,
     Path(id): Path<i64>,
     body: String,
 ) -> Result<Response, HttpError> {
-    if user.0.is_admin != 1 {
+    if !user.0.is_admin {
         return Err(HttpError::forbidden());
     }
     let input: DntInput =
@@ -188,12 +260,26 @@ async fn update(
 }
 
 // Deleting a site deletes all of its hits.
-async fn delete(
+#[utoipa::path(
+    delete,
+    path = "/api/sites/{id}",
+    tag = "Sites",
+    operation_id = "deleteSite",
+    summary = "Delete a site and all of its hits",
+    params(("id" = i64, Path, description = "The site id")),
+    responses(
+        (status = 204, description = "Deleted"),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 403, description = "Admin only", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+pub async fn delete(
     State(state): State<AppState>,
     user: AuthUser,
     Path(id): Path<i64>,
 ) -> Result<Response, HttpError> {
-    if user.0.is_admin != 1 {
+    if !user.0.is_admin {
         return Err(HttpError::forbidden());
     }
     sqlx::query("DELETE FROM sites WHERE id = ?1")
@@ -204,27 +290,32 @@ async fn delete(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-async fn site_stats(
+#[utoipa::path(
+    get,
+    path = "/api/sites/{id}",
+    tag = "Sites",
+    operation_id = "getSite",
+    summary = "One site",
+    params(("id" = i64, Path, description = "The site id")),
+    responses(
+        (status = 200, description = "The site", body = SiteRow),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 404, description = "Not found", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+pub async fn get_site(
     State(state): State<AppState>,
     _user: AuthUser,
     Path(id): Path<i64>,
-    Query(query): Query<StatsQuery>,
-) -> Result<Json<serde_json::Value>, HttpError> {
-    let (range, filters) = range_and_filter(&query)?;
-    let site: Option<(i64, String, i64)> =
-        sqlx::query_as("SELECT id, hostname, honor_dnt FROM sites WHERE id = ?1")
+) -> Result<Json<SiteRow>, HttpError> {
+    let site: Option<SiteRow> =
+        sqlx::query_as("SELECT id, hostname, honor_dnt, created_at FROM sites WHERE id = ?1")
             .bind(id)
             .fetch_optional(state.db.reader())
             .await?;
-    let Some((id, hostname, honor_dnt)) = site else {
-        return Err(HttpError {
-            status: StatusCode::NOT_FOUND,
-            message: "Not found".into(),
-        });
-    };
-    state.ingest.flush().await;
-    let stats = stats_for(&state.db, &[id], &range, &filters, Utc::now()).await?;
-    let mut value = serde_json::to_value(&stats).unwrap();
-    value["site"] = json!({ "id": id, "hostname": hostname, "honor_dnt": honor_dnt });
-    Ok(Json(value))
+    site.map(Json).ok_or(HttpError {
+        status: StatusCode::NOT_FOUND,
+        message: "Not found".into(),
+    })
 }

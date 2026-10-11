@@ -62,17 +62,14 @@ function todayWindow(): { from: string; to: string } {
  * the duration they are (`range=P7D`); custom ranges are ISO timestamps
  * in UTC, minute precision.
  */
-export function rangeQuery(range: DateRange): string | null {
-  if (range.preset === "today") {
-    const { from, to } = todayWindow();
-    return `from=${from}&to=${to}`;
-  }
-  if (range.preset !== "custom") {
-    return `range=${range.preset}`;
-  }
+export type RangeQuery = { range: string } | { from: string; to: string };
+
+export function rangeQuery(range: DateRange): RangeQuery | null {
+  if (range.preset === "today") return todayWindow();
+  if (range.preset !== "custom") return { range: range.preset };
   const from = utcMinute(range.from);
   const to = utcMinute(range.to);
-  return from && to && from < to ? `from=${from}&to=${to}` : null;
+  return from && to && from < to ? { from, to } : null;
 }
 
 /**

@@ -174,12 +174,12 @@ async fn setup_users_sites_collection_stats_and_exports() {
         204
     );
 
-    // One site's dashboard.
+    // One site's dashboard: the stats of that site alone.
     let stats = json(
         request(
             &app,
             Method::GET,
-            &format!("/api/sites/{site_id}/stats?range=P1D"),
+            &format!("/api/stats?sites={site_id}&range=P1D"),
             Some(&session),
             None,
         )
@@ -192,7 +192,47 @@ async fn setup_users_sites_collection_stats_and_exports() {
     assert_eq!(stats["browsers"][0]["browser"], json!("Safari"));
     assert_eq!(stats["os"][0]["os"], json!("iOS"));
     assert_eq!(stats["clicks"][0], json!({ "name": "signup", "clicks": 1 }));
-    assert_eq!(stats["site"]["honor_dnt"], json!(1));
+    assert_eq!(stats["days"], json!(1));
+
+    // The site itself: flags are booleans; an unknown site is a 404.
+    let site = json(
+        request(
+            &app,
+            Method::GET,
+            &format!("/api/sites/{site_id}"),
+            Some(&session),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(site["hostname"], json!("blog.example.com"));
+    assert_eq!(site["honor_dnt"], json!(true));
+    assert_eq!(
+        request(&app, Method::GET, "/api/sites/999999", Some(&session), None)
+            .await
+            .status(),
+        404
+    );
+    assert_eq!(
+        request(&app, Method::GET, "/api/sites/1", None, None)
+            .await
+            .status(),
+        401
+    );
+    // The per-site stats endpoint is gone: /api/stats takes `sites`.
+    assert_eq!(
+        request(
+            &app,
+            Method::GET,
+            &format!("/api/sites/{site_id}/stats"),
+            Some(&session),
+            None
+        )
+        .await
+        .status(),
+        404
+    );
 
     // DNT: honored by default, and the admin can turn that off.
     let response = app
@@ -299,6 +339,8 @@ async fn setup_users_sites_collection_stats_and_exports() {
     // Users: the last admin cannot be demoted or deleted.
     let users = json(request(&app, Method::GET, "/api/users", Some(&session), None).await).await;
     let admin_id = users[0]["id"].as_i64().unwrap();
+    assert_eq!(users[0]["is_admin"], json!(true));
+    assert_eq!(users[1]["is_admin"], json!(false));
     let user_id = users[1]["id"].as_i64().unwrap();
     let response = app
         .client
@@ -446,7 +488,7 @@ async fn bots_and_dnt_are_not_recorded() {
         request(
             &app,
             Method::GET,
-            &format!("/api/sites/{site_id}/stats"),
+            &format!("/api/stats?sites={site_id}"),
             Some(&session),
             None,
         )

@@ -5,6 +5,7 @@ pub mod error;
 pub mod filter;
 pub mod geo;
 pub mod ingest;
+pub mod openapi;
 pub mod profile;
 pub mod routes;
 pub mod state;
@@ -24,6 +25,10 @@ use state::AppState;
 /// debug builds, so a dev server needs no rebuild).
 #[derive(RustEmbed)]
 #[folder = "../frontend/dist"]
+// The spec build (the `openapi` binary) happens before the frontend is
+// built, because the frontend is generated from the spec: it must compile
+// without `frontend/dist`. No other build may, or it would embed nothing.
+#[cfg_attr(feature = "spec", allow_missing = true)]
 struct Dist;
 
 /// The whole app: the /api routes, then the embedded frontend with the

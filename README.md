@@ -218,6 +218,13 @@ hits still queued — the last few milliseconds — and, with the default
 `SQLITE_SYNCHRONOUS=NORMAL`, the last few commits. Past a queue of 20,000
 waiting hits the tracker answers `503` instead of buffering more.
 
+## The API
+
+Every endpoint is described in an OpenAPI 3.1 document, generated from the code
+rather than hosted: `mise run gen:spec` writes it to
+`backend/target/specs/openapi.json`. The dashboard's API client is generated from
+it, and you can load it into any OpenAPI viewer or client generator.
+
 ## Notes
 
 - The tracker accepts hits for registered sites but does not verify `Origin`, so

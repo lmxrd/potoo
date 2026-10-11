@@ -1,25 +1,26 @@
 import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import {
+  createSiteMutation,
+  listSitesOptions,
+  listSitesQueryKey,
+} from "../client/@tanstack/react-query.gen";
 import { Button } from "../components/button";
 import { Card } from "../components/card";
 import { ErrorText } from "../components/error-text";
 import { Input } from "../components/input";
-import { api, useApi } from "../lib/api";
+import { errorMessage } from "../lib/api";
 import { formatDate } from "../lib/dates";
-
-type Site = {
-  id: number;
-  hostname: string;
-  honor_dnt: number;
-  created_at: string;
-};
 
 export const Route = createFileRoute("/sites")({ component: SitesPage });
 
 function SitesPage() {
   const { session } = Route.useRouteContext();
-  const isAdmin = session.user?.is_admin === 1;
-  const { data: sites, error, reload } = useApi<Site[]>("/sites");
+  const isAdmin = session.user?.is_admin;
+  const { data: sites, error } = useQuery(listSitesOptions());
+  const queryClient = useQueryClient();
+  const createSite = useMutation(createSiteMutation());
   const navigate = useNavigate();
   const [hostname, setHostname] = useState("");
   const [formError, setFormError] = useState<string>();
@@ -27,7 +28,7 @@ function SitesPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Sites</h1>
-      <ErrorText>{error}</ErrorText>
+      <ErrorText>{error && errorMessage(error)}</ErrorText>
       {isAdmin && (
         <form
           className="flex gap-2"
@@ -35,11 +36,11 @@ function SitesPage() {
             e.preventDefault();
             setFormError(undefined);
             try {
-              await api("/sites", { body: { hostname } });
+              await createSite.mutateAsync({ body: { hostname } });
               setHostname("");
-              reload();
+              await queryClient.invalidateQueries({ queryKey: listSitesQueryKey() });
             } catch (err) {
-              setFormError(err instanceof Error ? err.message : "Failed");
+              setFormError(errorMessage(err, "Failed"));
             }
           }}
         >

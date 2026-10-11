@@ -3,3 +3,5 @@ dist
 data
 potoo
 .DS_Store
+frontend/src/client
+frontend/openapi-ts-error-*.log

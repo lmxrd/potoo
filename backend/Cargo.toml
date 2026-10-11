@@ -31,15 +31,27 @@ tokio = { version = "1.53.2", features = ["full"] }
 tower-http = { version = "0.7.1", features = ["cors", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
+# The OpenAPI spec (see src/openapi.rs): derives on the request and response
+# types and a path annotation on every handler; the spec is written to a file
+# by the `openapi` binary, never served.
+utoipa = "6.0.0"
 # Profiling only, never in a production build (see the profiling feature).
 pprof = { version = "0.15.0", optional = true, features = ["flamegraph"] }
 
 [features]
+# Builds without frontend/dist, for the `openapi` binary only (never ship it):
+# the frontend client is generated from the spec, so the spec comes first.
+spec = []
 # A CPU profile of the running server: sampled while it runs, written as a
 # flamegraph (PROFILE_FLAMEGRAPH=<path>) when it is stopped with SIGINT or
 # SIGTERM, and per-phase timers of the hit path printed every 5 seconds.
 # Off by default; build with `--features profiling --profile profiling`.
 profiling = ["dep:pprof"]
+
+[[bin]]
+name = "openapi"
+path = "src/bin/openapi.rs"
+required-features = ["spec"]
 
 # Smaller, faster release binaries; the release workflow and the image
 # both build with this profile.

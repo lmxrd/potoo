@@ -1,12 +1,21 @@
 import { useState } from "react";
-import { createRootRoute, Link, Outlet, redirect, useNavigate } from "@tanstack/react-router";
-import { api, type Session, type User } from "../lib/api";
+import { useMutation, type QueryClient } from "@tanstack/react-query";
+import {
+  createRootRouteWithContext,
+  Link,
+  Outlet,
+  redirect,
+  useNavigate,
+} from "@tanstack/react-router";
+import type { User } from "../client";
+import { getSessionOptions, logoutMutation } from "../client/@tanstack/react-query.gen";
 import { applyTheme, parseTheme } from "../lib/theme";
 
-export const Route = createRootRoute({
+export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   // Every page goes through here: first-run → /setup, signed-out → /login.
-  beforeLoad: async ({ location }) => {
-    const session = await api<Session>("/session");
+  beforeLoad: async ({ location, context }) => {
+    // Always fresh: the session changes with settings and sign-ins.
+    const session = await context.queryClient.fetchQuery(getSessionOptions());
     // The theme applies before anything renders, so there is no flash of
     // the default palette.
     applyTheme(parseTheme(session.user?.theme));
@@ -53,6 +62,7 @@ function Root() {
 function UserMenu({ user }: { user: User }) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const logout = useMutation(logoutMutation());
   const close = () => setOpen(false);
   const item = "block w-full px-4 py-2 text-left text-sm text-soft-ink hover:bg-subtle";
   return (
@@ -81,7 +91,7 @@ function UserMenu({ user }: { user: User }) {
             <Link to="/settings" className={item} onClick={close}>
               Settings
             </Link>
-            {user.is_admin === 1 && (
+            {user.is_admin && (
               <Link to="/users" className={item} onClick={close}>
                 Admin settings
               </Link>
@@ -91,7 +101,7 @@ function UserMenu({ user }: { user: User }) {
               className={item}
               onClick={async () => {
                 close();
-                await api("/logout", { method: "POST", body: {} });
+                await logout.mutateAsync({});
                 await navigate({ to: "/login", reloadDocument: true });
               }}
             >

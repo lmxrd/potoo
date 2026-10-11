@@ -10,11 +10,7 @@ function Setup() {
       <p className="text-sm text-soft-ink">
         This is the first start. The admin can add sites and create all other users.
       </p>
-      <CredentialsForm
-        endpoint="/setup"
-        submit="Create admin"
-        onDone={() => location.assign("/")}
-      />
+      <CredentialsForm kind="setup" submit="Create admin" onDone={() => location.assign("/")} />
     </div>
   );
 }

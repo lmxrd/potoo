@@ -50,7 +50,8 @@ jobs:
           ref: ${{ needs.release-please.outputs.tag }}
       - uses: jdx/mise-action@v4
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends musl-tools
-      - run: pnpm install -C frontend --frozen-lockfile && pnpm run -C frontend build
+      # The frontend builds from the OpenAPI spec the backend writes first.
+      - run: mise run build:frontend
       - name: Build and attach
         env:
           GH_TOKEN: ${{ github.token }}

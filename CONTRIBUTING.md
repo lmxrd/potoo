@@ -23,6 +23,8 @@ backend).
 | -------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `mise run dev`             | Runs the backend and the frontend (Vite) together                                                              |
 | `mise run start`           | Builds, then runs the server (never a stale binary)                                                            |
+| `mise run gen:spec`        | Writes the OpenAPI spec to `backend/target/specs/openapi.json`                                                 |
+| `mise run gen:client`      | Generates the frontend API client from the spec (`frontend/src/client`, not committed)                         |
 | `mise run build`           | Builds the frontend and compiles the backend binary                                                            |
 | `mise run build:docker`    | Builds the Docker image (podman), natively for your machine                                                    |
 | `mise run build:profiling` | The image with per-phase timers and an opt-in CPU flamegraph (never published)                                 |
@@ -43,6 +45,15 @@ against an in-memory database: setup, login and its throttle, users and
 the last-admin rules, sites, collection (bots and Do-Not-Track
 included), the stats with a filter, and the export.
 
+## The API and its spec
+
+Every endpoint is documented in code: a `#[utoipa::path]` on the handler, named
+request and response structs with `ToSchema`, and an entry in `paths(...)` in
+`backend/src/openapi.rs` (a test there lists the expected endpoints). The spec
+is written to `backend/target/specs/openapi.json` by `mise run gen:spec` and is
+not served. The frontend's client is generated from it (`mise run gen:client`)
+with hey-api, and uses TanStack Query and zod; it is not committed.
+
 ## Changing the schema
 
 Add a new numbered file to `backend/migrations/` (`0002_what_it_does.sql`).
@@ -62,6 +73,8 @@ backend/src/error.rs       HttpError, answered as {"error": "..."}
 backend/src/db.rs          the SQLite pools (one writer, read-only readers), caches, migrations on startup
 backend/src/ingest.rs      the hit queue and the batched writer
 backend/src/profile.rs     per-phase timers, compiled in only with the profiling feature
+backend/src/openapi.rs     the OpenAPI document: the list of documented handlers
+backend/src/bin/openapi.rs writes the spec to a file (`mise run gen:spec`)
 backend/migrations/        the schema, one numbered SQL file per change (sqlx migrations)
 backend/src/auth.rs        password hashing, sessions, the login throttle
 backend/src/visitor.rs     user agent parsing, client IP, visitor hashes
@@ -78,7 +91,8 @@ backend/tests/api.rs       the end-to-end tests
 scripts/                   the load test script and its generator image
 frontend/src/routes/       dashboard, sites table, site page, users, settings
 frontend/src/components/   the shared UI pieces
-frontend/src/lib/          the API client, ranges, filters, date formatting
+frontend/src/client/       the generated API client (hey-api; gitignored, never edited)
+frontend/src/lib/          error messages, ranges, filters, date formatting
 ```
 
 ## The rules a change must keep

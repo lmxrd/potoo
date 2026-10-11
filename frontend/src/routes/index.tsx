@@ -1,13 +1,14 @@
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { getStatsOptions, listSitesOptions } from "../client/@tanstack/react-query.gen";
 import { DateRangeBar } from "../components/date-range-bar";
 import { ErrorText } from "../components/error-text";
 import { SiteSelect } from "../components/site-select";
 import { StatsDashboard } from "../components/stats-dashboard";
-import { useApi, type SiteStats } from "../lib/api";
+import { errorMessage } from "../lib/api";
+import { exportHref, statsQuery } from "../lib/stats-query";
 import { buildFilter, useDashboardFilters } from "../lib/filter";
 import { parseSites, useDateRange, validateDashboardSearch } from "../lib/date-range";
-
-type Site = { id: number; hostname: string; honor_dnt: number };
 
 export const Route = createFileRoute("/")({
   validateSearch: validateDashboardSearch,
@@ -18,7 +19,7 @@ function Overview() {
   const { session } = Route.useRouteContext();
   const search = Route.useSearch();
   const navigate = useNavigate();
-  const { data: sites, error: sitesError } = useApi<Site[]>("/sites");
+  const { data: sites, error: sitesError } = useQuery(listSitesOptions());
   const { range, setRange, query } = useDateRange();
   const { filters, toggle, setFilters } = useDashboardFilters();
 
@@ -41,16 +42,18 @@ function Overview() {
 
   const included = [...selected].join(",");
   const rsql = buildFilter(filters);
-  const params = `${query}${included ? `&sites=${included}` : ""}${
-    rsql ? `&q=${encodeURIComponent(rsql)}` : ""
-  }`;
-  const statsPath = `/stats?${params}`;
-  const { data: stats, error: statsError } = useApi<SiteStats>(statsPath);
+  const params = statsQuery(query, included, rsql);
+  // The previous numbers stay on screen while the next range loads.
+  const { data: stats, error: statsError } = useQuery({
+    ...getStatsOptions({ query: params ?? undefined }),
+    enabled: params !== null,
+    placeholderData: keepPreviousData,
+  });
 
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Overview</h1>
-      <ErrorText>{sitesError}</ErrorText>
+      <ErrorText>{sitesError && errorMessage(sitesError)}</ErrorText>
       <SiteSelect sites={sites} selected={selected} onToggle={toggleSite} onClear={clear} />
 
       <DateRangeBar
@@ -61,9 +64,9 @@ function Overview() {
         timeFormat={session.user?.time_format}
         filters={filters}
         onFilters={setFilters}
-        exportUrl={`/api/export?${params}`}
+        exportUrl={params ? exportHref(params) : undefined}
       />
-      <ErrorText>{statsError}</ErrorText>
+      <ErrorText>{statsError && errorMessage(statsError)}</ErrorText>
       {stats ? (
         <StatsDashboard
           stats={stats}

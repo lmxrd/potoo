@@ -31,8 +31,35 @@ run = "pnpm install -C frontend"
 sources = ["frontend/package.json", "frontend/pnpm-lock.yaml"]
 outputs = ["frontend/node_modules/.modules.yaml"]
 
+# The OpenAPI spec, written by the backend without the frontend embedded
+# (--features spec): the frontend's API client is generated from it, so the
+# spec comes first. The frontend tasks below depend on it.
+[tasks."gen:spec"]
+run = "cargo run --manifest-path backend/Cargo.toml --features spec --bin openapi -- backend/target/specs/openapi.json"
+sources = [
+  "backend/src/**/*",
+  "backend/migrations/**/*",
+  "backend/Cargo.toml",
+  "backend/Cargo.lock",
+  "backend/build.rs",
+]
+outputs = ["backend/target/specs/openapi.json"]
+
+# The frontend's API client, generated from the spec (not committed). One
+# task, so that tasks running side by side never generate it twice at once.
+[tasks."gen:client"]
+depends = ["install:frontend", "gen:spec"]
+run = "pnpm run -C frontend gen:api"
+sources = [
+  "backend/target/specs/openapi.json",
+  "frontend/openapi-ts.config.ts",
+  "frontend/.pnpmfile.cjs",
+  "frontend/pnpm-lock.yaml",
+]
+outputs = ["frontend/src/client/index.ts"]
+
 [tasks."dev:frontend"]
-depends = ["install:frontend"]
+depends = ["install:frontend", "gen:client"]
 run = "pnpm run -C frontend dev"
 
 # Run the server against a built frontend. Depends on the build so a
@@ -45,7 +72,7 @@ run = "cargo run --release --manifest-path backend/Cargo.toml"
 depends = ["build:frontend", "build:backend"]
 
 [tasks."build:frontend"]
-depends = ["install:frontend"]
+depends = ["install:frontend", "gen:client"]
 run = "pnpm run -C frontend build"
 sources = [
   "frontend/src/**/*",
@@ -84,10 +111,14 @@ depends = ["check:frontend", "check:backend"]
 # rust-embed needs frontend/dist to exist to compile, hence the build.
 [tasks."check:backend"]
 depends = ["build:frontend"]
-run = "cargo fmt --manifest-path backend/Cargo.toml --check && cargo clippy --manifest-path backend/Cargo.toml -- -D warnings"
+run = """
+cargo fmt --manifest-path backend/Cargo.toml --check \
+  && cargo clippy --manifest-path backend/Cargo.toml -- -D warnings \
+  && cargo clippy --manifest-path backend/Cargo.toml --features spec --all-targets -- -D warnings
+"""
 
 [tasks."check:frontend"]
-depends = ["install:frontend"]
+depends = ["install:frontend", "gen:client"]
 run = "pnpm run -C frontend check"
 
 [tasks.fix]

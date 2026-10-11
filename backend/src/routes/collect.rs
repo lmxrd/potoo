@@ -1,4 +1,4 @@
-use crate::error::HttpError;
+use crate::error::{ErrorBody, HttpError};
 use crate::ingest::NewHit;
 use crate::profile::{Phase, timed};
 use crate::state::AppState;
@@ -13,6 +13,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
+use utoipa::ToSchema;
 
 pub fn router() -> Router<AppState> {
     // The tracker sends text/plain via sendBeacon, so no CORS preflight
@@ -144,23 +145,44 @@ async fn record(
     })
 }
 
+/// One hit, as the tracker script sends it.
+#[derive(Deserialize, ToSchema)]
+pub struct CollectBody {
+    /// `pageview` or `click`; a hit of any other type is ignored.
+    #[serde(rename = "type")]
+    #[schema(example = "pageview")]
+    pub kind: String,
+    /// The site's hostname; the `Origin` header is used when it is absent.
+    pub host: Option<String>,
+    /// The page's path. Its query string and fragment are dropped.
+    pub path: Option<String>,
+    /// The label of a click.
+    pub name: Option<String>,
+    /// Where the visitor came from. Only the hostname is kept.
+    pub referrer: Option<String>,
+}
+
 // The beacon endpoint of /api/collect, hit by the tracker script.
-async fn collect_post(
+#[utoipa::path(
+    post,
+    path = "/api/collect",
+    tag = "Tracking",
+    operation_id = "collectHit",
+    summary = "Record a hit (the tracker script)",
+    description = "Sent by /tracker.js with sendBeacon: the body is a JSON object sent as text/plain, so that no CORS preflight is needed. Answers 204 for every well-formed request, also for hits that are ignored (bots, Do Not Track, unknown sites). The hit is queued and written within milliseconds; with 20,000 hits waiting the answer is 503.",
+    request_body(content = CollectBody, content_type = "text/plain"),
+    responses(
+        (status = 204, description = "The hit was accepted, or ignored"),
+        (status = 503, description = "Too many hits queued, try again", body = ErrorBody),
+    ),
+)]
+pub async fn collect_post(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: String,
 ) -> Result<Response, HttpError> {
-    #[derive(Deserialize)]
-    struct Body {
-        #[serde(rename = "type")]
-        kind: String,
-        host: Option<String>,
-        path: Option<String>,
-        name: Option<String>,
-        referrer: Option<String>,
-    }
-    if let Ok(hit) = serde_json::from_str::<Body>(&body) {
+    if let Ok(hit) = serde_json::from_str::<CollectBody>(&body) {
         let kind = match hit.kind.as_str() {
             "pageview" => Kind::Pageview,
             "click" => Kind::Click,
@@ -188,7 +210,20 @@ async fn collect_post(
 
 // No-JS fallback: <img src=".../api/pixel?h=example.com&p=/page">.
 // Without `p`/`h`, the Referer header is used when the browser sends it.
-async fn collect_pixel(
+#[utoipa::path(
+    get,
+    path = "/api/pixel",
+    tag = "Tracking",
+    operation_id = "getPixel",
+    summary = "Record a pageview (the no-JS pixel)",
+    description = "A transparent 1x1 GIF; requesting it is the visit. Without h and p the site and the path come from the Referer header. Counts pageviews only.",
+    params(("h" = Option<String>, Query, description = "The site's hostname"), ("p" = Option<String>, Query, description = "The page's path"), ("r" = Option<String>, Query, description = "The referrer")),
+    responses(
+        (status = 200, description = "The GIF", body = String, content_type = "image/gif"),
+        (status = 503, description = "Too many hits queued, try again", body = ErrorBody),
+    ),
+)]
+pub async fn collect_pixel(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
@@ -227,7 +262,18 @@ async fn collect_pixel(
         .into_response())
 }
 
-async fn tracker() -> Response {
+#[utoipa::path(
+    get,
+    path = "/tracker.js",
+    tag = "Tracking",
+    operation_id = "getTrackerScript",
+    summary = "The tracker script",
+    description = "The cookie-less script a site includes with a single script tag. Options are data attributes on the tag: data-clicks, data-outbound, data-host.",
+    responses(
+        (status = 200, description = "The script", body = String, content_type = "text/javascript"),
+    ),
+)]
+pub async fn tracker() -> Response {
     (
         StatusCode::OK,
         [

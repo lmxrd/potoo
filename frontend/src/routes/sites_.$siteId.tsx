@@ -1,17 +1,22 @@
 import { useState } from "react";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import {
+  deleteSiteMutation,
+  getSiteOptions,
+  getSiteQueryKey,
+  getStatsOptions,
+  updateSiteMutation,
+} from "../client/@tanstack/react-query.gen";
 import { Button } from "../components/button";
 import { Card } from "../components/card";
 import { DateRangeBar } from "../components/date-range-bar";
 import { ErrorText } from "../components/error-text";
 import { StatsDashboard } from "../components/stats-dashboard";
-import { api, useApi, type SiteStats } from "../lib/api";
+import { errorMessage } from "../lib/api";
+import { exportHref, statsQuery } from "../lib/stats-query";
 import { buildFilter, useDashboardFilters } from "../lib/filter";
 import { useDateRange, validateDashboardSearch } from "../lib/date-range";
-
-type Stats = SiteStats & {
-  site: { id: number; hostname: string; honor_dnt: number };
-};
 
 export const Route = createFileRoute("/sites_/$siteId")({
   validateSearch: validateDashboardSearch,
@@ -24,56 +29,73 @@ function SitePage() {
   const navigate = useNavigate();
   const { range, setRange, query } = useDateRange();
   const { filters, toggle, setFilters } = useDashboardFilters();
-  const rsql = buildFilter(filters);
-  const params = `${query}${rsql ? `&q=${encodeURIComponent(rsql)}` : ""}`;
-  const { data, error, reload } = useApi<Stats>(`/sites/${siteId}/stats?${params}`);
-  const isAdmin = session.user?.is_admin === 1;
+  const queryClient = useQueryClient();
+  const params = statsQuery(query, siteId, buildFilter(filters));
+  const isAdmin = session.user?.is_admin;
 
-  if (error) return <ErrorText>{error}</ErrorText>;
-  if (!data) return <p className="text-muted">Loading…</p>;
+  const { data: site, error: siteError } = useQuery(
+    getSiteOptions({ path: { id: Number(siteId) } }),
+  );
+  // The previous numbers stay on screen while the next range loads.
+  const { data: stats, error: statsError } = useQuery({
+    ...getStatsOptions({ query: params ?? undefined }),
+    enabled: params !== null,
+    placeholderData: keepPreviousData,
+  });
+  const updateSite = useMutation(updateSiteMutation());
+  const deleteSite = useMutation(deleteSiteMutation());
+  const reloadSite = () =>
+    queryClient.invalidateQueries({ queryKey: getSiteQueryKey({ path: { id: Number(siteId) } }) });
+
+  if (siteError) return <ErrorText>{errorMessage(siteError)}</ErrorText>;
+  if (!site) return <p className="text-muted">Loading…</p>;
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">{data.site.hostname}</h1>
+      <h1 className="text-xl font-semibold">{site.hostname}</h1>
 
       <DateRangeBar
         range={range}
         onRange={setRange}
-        stats={data}
+        stats={stats}
         dateFormat={session.user?.date_format}
         timeFormat={session.user?.time_format}
         filters={filters}
         onFilters={setFilters}
-        exportUrl={`/api/export?sites=${siteId}&${params}`}
+        exportUrl={params ? exportHref(params) : undefined}
       />
 
-      <StatsDashboard
-        stats={data}
-        dateFormat={session.user?.date_format}
-        timeFormat={session.user?.time_format}
-        filters={filters}
-        onToggleFilter={toggle}
-      />
+      <ErrorText>{statsError && errorMessage(statsError)}</ErrorText>
+      {stats ? (
+        <StatsDashboard
+          stats={stats}
+          dateFormat={session.user?.date_format}
+          timeFormat={session.user?.time_format}
+          filters={filters}
+          onToggleFilter={toggle}
+        />
+      ) : (
+        !statsError && <p className="text-muted">Loading…</p>
+      )}
 
-      <Snippet hostname={data.site.hostname} />
+      <Snippet hostname={site.hostname} />
 
       {isAdmin && (
         <Card title="Site settings">
           <label className="flex items-center gap-2 text-sm">
             <input
               type="checkbox"
-              checked={data.site.honor_dnt === 1}
+              checked={site.honor_dnt}
               onChange={async (e) => {
-                const honorDnt = e.target.checked;
                 try {
-                  await api(`/sites/${siteId}`, {
-                    method: "PATCH",
-                    body: { honor_dnt: honorDnt },
+                  await updateSite.mutateAsync({
+                    path: { id: Number(siteId) },
+                    body: { honor_dnt: e.target.checked },
                   });
-                  reload();
                 } catch {
-                  reload();
+                  // Not saved: the reload below shows what the server has.
                 }
+                await reloadSite();
               }}
             />
             Honor Do Not Track / Global Privacy Control
@@ -88,8 +110,8 @@ function SitePage() {
         <Button
           variant="danger"
           onClick={async () => {
-            if (confirm(`Delete ${data.site.hostname} and all its data?`)) {
-              await api(`/sites/${siteId}`, { method: "DELETE" });
+            if (confirm(`Delete ${site.hostname} and all its data?`)) {
+              await deleteSite.mutateAsync({ path: { id: Number(siteId) } });
               await navigate({ to: "/" });
             }
           }}

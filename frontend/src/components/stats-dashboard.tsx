@@ -1,7 +1,7 @@
 import { Card } from "./card";
 import { BarList } from "./bar-list";
 import { bucketLabel, chartLabel, formatDate, formatTime } from "../lib/dates";
-import type { SiteStats } from "../lib/api";
+import type { SiteStats } from "../client";
 import type { FacetFilters } from "../lib/filter";
 import { countryName } from "../lib/countries";
 
