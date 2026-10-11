@@ -67,7 +67,8 @@ existed adopt it unchanged.
 
 ```
 backend/src/main.rs        entrypoint: env config, geo refresh, retention, graceful stop
-backend/src/lib.rs         the app: routes, cache headers, static serving
+backend/src/lib.rs         the app: the API routes plus the frontend, and the TLS provider
+backend/src/frontend.rs    the embedded frontend: static files, cache headers, the SPA fallback
 backend/src/state.rs       the shared AppState
 backend/src/error.rs       HttpError, answered as {"error": "..."}
 backend/src/db.rs          the SQLite pools (one writer, read-only readers), caches, migrations on startup

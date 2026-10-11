@@ -9,7 +9,7 @@ use tokio::sync::RwLock;
 
 /// Refresh the GeoIP database weekly, and download one when the file is
 /// older than that (a missing file counts as stale).
-pub const REFRESH_PERIOD: Duration = Duration::from_secs(7 * 86_400);
+pub const REFRESH_PERIOD: Duration = Duration::from_hours(24 * 7);
 
 /// Country lookup from a local MaxMind-format database, downloaded from
 /// DB-IP when missing or stale. Lookups themselves are always local.
