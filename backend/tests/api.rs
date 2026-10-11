@@ -18,7 +18,7 @@ async fn spawn_app() -> TestApp {
     let state = AppState {
         ingest: potoo::ingest::Ingest::spawn(db.clone()).0,
         db,
-        geo: Arc::new(geo::Geo::open("/nonexistent/country.mmdb", None).await),
+        geo: Arc::new(geo::Geo::open("/nonexistent/country.mmdb", geo::Source::Disabled).await),
         trust_proxy: true,
         throttle: Arc::new(auth::LoginThrottle::default()),
     };

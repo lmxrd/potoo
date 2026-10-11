@@ -20,10 +20,10 @@ async fn main() {
     let geo_path = std::env::var("GEOIP_DB_PATH").unwrap_or_else(|_| "data/country.mmdb".into());
     // Set GEOIP_URL to another URL, or to an empty string to never
     // download anything.
-    let geo_url = match std::env::var("GEOIP_URL") {
-        Ok(url) if url.is_empty() => None,
-        Ok(url) => Some(url),
-        Err(_) => Some(geo::Geo::default_url()),
+    let geo_source = match std::env::var("GEOIP_URL") {
+        Ok(url) if url.is_empty() => geo::Source::Disabled,
+        Ok(url) => geo::Source::Url(url),
+        Err(_) => geo::Source::DbIp,
     };
 
     // How hard the database syncs to disk: OFF, NORMAL, FULL or EXTRA.
@@ -31,7 +31,7 @@ async fn main() {
         std::env::var("SQLITE_SYNCHRONOUS").unwrap_or_else(|_| db::DEFAULT_SYNCHRONOUS.into());
     let db = db::open_with(&db_path, &synchronous).await;
     let (ingest, writer) = potoo::ingest::Ingest::spawn(db.clone());
-    let geo = Arc::new(geo::Geo::open(&geo_path, geo_url).await);
+    let geo = Arc::new(geo::Geo::open(&geo_path, geo_source).await);
     let state = AppState {
         db: db.clone(),
         ingest,
