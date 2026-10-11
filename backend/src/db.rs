@@ -183,30 +183,9 @@ pub async fn open_with(path: &str, synchronous: &str) -> Db {
     })
 }
 
-/// Apply the migrations. A database from before migrations existed has the
-/// tables of the first one and no history of it: its statements are all
-/// idempotent, so it adopts them unchanged — except that a very old one
-/// lacks the `theme` column, which the first migration now includes.
+/// Apply the migrations, in order; sqlx records their history in
+/// `_sqlx_migrations`.
 async fn migrate(pool: &SqlitePool) {
-    let count = |sql: &'static str| async move {
-        sqlx::query_scalar::<_, i64>(sql)
-            .fetch_one(pool)
-            .await
-            .unwrap_or_else(|e| panic!("cannot inspect the database: {e}"))
-    };
-    let legacy = count("SELECT COUNT(*) FROM sqlite_master WHERE name = 'users'").await > 0
-        && count("SELECT COUNT(*) FROM sqlite_master WHERE name = '_sqlx_migrations'").await == 0;
-    if legacy
-        && count("SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'theme'").await == 0
-    {
-        sqlx::query(
-            "ALTER TABLE users ADD COLUMN theme TEXT NOT NULL
-             DEFAULT '{\"base\":\"light\",\"accent\":\"#0f172a\"}'",
-        )
-        .execute(pool)
-        .await
-        .unwrap_or_else(|e| panic!("cannot add the missing column: {e}"));
-    }
     sqlx::migrate!("./migrations")
         .run(pool)
         .await
@@ -299,52 +278,5 @@ mod tests {
             .await
             .unwrap();
         assert!(db.site("nope.com").await.unwrap().is_some());
-    }
-
-    #[tokio::test]
-    async fn a_database_from_before_migrations_is_adopted() {
-        let dir = std::env::temp_dir().join(format!("potoo-legacy-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("legacy.db");
-        // What an old build left behind: users without a theme, a row in it.
-        let options = SqliteConnectOptions::new()
-            .filename(&path)
-            .create_if_missing(true);
-        let old = SqlitePool::connect_with(options).await.unwrap();
-        sqlx::query(
-            "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE,
-               password_hash TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0,
-               date_format TEXT NOT NULL DEFAULT 'YYYY-MM-DD', time_format TEXT NOT NULL DEFAULT '24h',
-               created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))",
-        )
-        .execute(&old)
-        .await
-        .unwrap();
-        sqlx::query("INSERT INTO users (email, password_hash) VALUES ('a@b.co', 'x')")
-            .execute(&old)
-            .await
-            .unwrap();
-        old.close().await;
-
-        let db = open(path.to_str().unwrap()).await;
-        let theme: String = sqlx::query_scalar("SELECT theme FROM users")
-            .fetch_one(db.reader())
-            .await
-            .unwrap();
-        assert!(theme.contains("light"));
-        // The other tables arrived, and the history is recorded.
-        let hits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM hits")
-            .fetch_one(db.reader())
-            .await
-            .unwrap();
-        assert_eq!(hits, 0);
-        let applied: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
-            .fetch_one(db.reader())
-            .await
-            .unwrap();
-        assert_eq!(applied, 1);
-        db.close().await;
-        let _ = std::fs::remove_dir_all(dir);
     }
 }

@@ -1,6 +1,5 @@
--- The schema as it was before migrations existed. Every statement is
--- idempotent, so a database created by an earlier build adopts this one
--- unchanged. Later changes go in new files; never edit one that shipped.
+-- The initial schema. Later changes go in new files; never edit one
+-- that shipped.
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   email TEXT NOT NULL UNIQUE,
