@@ -365,12 +365,10 @@ fn custom_buckets(from: DateTime<Utc>, to: DateTime<Utc>) -> Buckets {
     }
 }
 
-/// One row of a breakdown.
-#[derive(Serialize, sqlx::FromRow)]
+/// The totals of one aggregation.
+#[derive(sqlx::FromRow)]
 struct Count {
-    #[serde(rename = "pageviews")]
     pageviews: i64,
-    #[serde(rename = "visitors")]
     visitors: i64,
 }
 

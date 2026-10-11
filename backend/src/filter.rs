@@ -79,18 +79,16 @@ pub fn parse_filter_param(raw: Option<&str>) -> Result<FacetFilters, String> {
 }
 
 /// A character scanner over the filter.
-struct Input<'a> {
+struct Input {
     chars: Vec<char>,
     pos: usize,
-    _lifetime: std::marker::PhantomData<&'a ()>,
 }
 
-impl<'a> Input<'a> {
-    fn new(s: &'a str) -> Self {
+impl Input {
+    fn new(s: &str) -> Self {
         Input {
             chars: s.chars().collect(),
             pos: 0,
-            _lifetime: std::marker::PhantomData,
         }
     }
 
