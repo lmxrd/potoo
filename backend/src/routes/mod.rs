@@ -14,13 +14,14 @@ pub mod stats;
 /// Every /api route, with the JSON 404 for unknown paths. The routes are
 /// registered together with their `#[utoipa::path]` annotations, so the
 /// OpenAPI document is made of exactly what is routed: the paths in the
-/// annotations are relative to /api.
+/// annotations are relative to their module's nest, and the nests below
+/// are the namespaces under /api.
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(health))
         .merge(collect::router())
-        .merge(export::router())
-        .merge(auth::router())
+        .nest("/auth", auth::router())
+        .nest("/export", export::router())
         .nest("/sites", sites::router())
         .nest("/stats", stats::router())
         .fallback(not_found)

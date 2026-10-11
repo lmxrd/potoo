@@ -21,7 +21,7 @@ pub fn router() -> OpenApiRouter<AppState> {
 
 #[utoipa::path(
     get,
-    path = "/export",
+    path = "/",
     tag = "Stats",
     operation_id = "exportHits",
     summary = "Export the hits of a dashboard view as CSV",

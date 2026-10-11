@@ -85,17 +85,30 @@ async fn setup_users_sites_collection_stats_and_exports() {
     let admin = json!({ "email": "a@example.com", "password": "correct horse battery" });
 
     // First run: no users yet, every page redirects to setup.
-    let session = json(request(&app, Method::GET, "/api/session", None, None).await).await;
+    let session = json(request(&app, Method::GET, "/api/auth/session", None, None).await).await;
     assert_eq!(session["needsSetup"], json!(true));
     assert_eq!(session["user"], json!(null));
 
-    let response = request(&app, Method::POST, "/api/setup", None, Some(admin.clone())).await;
+    let response = request(
+        &app,
+        Method::POST,
+        "/api/auth/setup",
+        None,
+        Some(admin.clone()),
+    )
+    .await;
     assert_eq!(response.status(), 201);
     let session = cookie(&response);
     assert_eq!(
-        request(&app, Method::POST, "/api/setup", None, Some(admin.clone()))
-            .await
-            .status(),
+        request(
+            &app,
+            Method::POST,
+            "/api/auth/setup",
+            None,
+            Some(admin.clone())
+        )
+        .await
+        .status(),
         409
     );
 
@@ -104,7 +117,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::POST,
-            "/api/login",
+            "/api/auth/login",
             None,
             Some(json!({ "email": "a@example.com", "password": "wrong password" })),
         )
@@ -113,9 +126,15 @@ async fn setup_users_sites_collection_stats_and_exports() {
         401
     );
     assert_eq!(
-        request(&app, Method::POST, "/api/login", None, Some(admin.clone()))
-            .await
-            .status(),
+        request(
+            &app,
+            Method::POST,
+            "/api/auth/login",
+            None,
+            Some(admin.clone())
+        )
+        .await
+        .status(),
         204
     );
 
@@ -124,7 +143,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::POST,
-            "/api/users",
+            "/api/auth/users",
             Some(&session),
             Some(json!({ "email": "u@example.com", "password": "another long pass" })),
         )
@@ -309,7 +328,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::POST,
-            "/api/settings",
+            "/api/auth/settings",
             Some(&session),
             Some(json!({ "theme": "{\"base\":\"dark\",\"accent\":\"#38BDF8\"}" })),
         )
@@ -318,7 +337,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         204
     );
     let with_theme =
-        json(request(&app, Method::GET, "/api/session", Some(&session), None).await).await;
+        json(request(&app, Method::GET, "/api/auth/session", Some(&session), None).await).await;
     assert_eq!(
         with_theme["user"]["theme"],
         json!("{\"base\":\"dark\",\"accent\":\"#38bdf8\"}")
@@ -327,7 +346,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::POST,
-            "/api/settings",
+            "/api/auth/settings",
             Some(&session),
             Some(json!({ "theme": "{\"base\":\"blue\"}" })),
         )
@@ -337,14 +356,18 @@ async fn setup_users_sites_collection_stats_and_exports() {
     );
 
     // Users: the last admin cannot be demoted or deleted.
-    let users = json(request(&app, Method::GET, "/api/users", Some(&session), None).await).await;
+    let users =
+        json(request(&app, Method::GET, "/api/auth/users", Some(&session), None).await).await;
     let admin_id = users[0]["id"].as_i64().unwrap();
     assert_eq!(users[0]["is_admin"], json!(true));
     assert_eq!(users[1]["is_admin"], json!(false));
     let user_id = users[1]["id"].as_i64().unwrap();
     let response = app
         .client
-        .request(Method::PATCH, format!("{}/api/users/{admin_id}", app.base))
+        .request(
+            Method::PATCH,
+            format!("{}/api/auth/users/{admin_id}", app.base),
+        )
         .header("cookie", &session)
         .json(&json!({ "is_admin": false }))
         .send()
@@ -355,7 +378,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::DELETE,
-            &format!("/api/users/{admin_id}"),
+            &format!("/api/auth/users/{admin_id}"),
             Some(&session),
             None
         )
@@ -367,7 +390,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::DELETE,
-            &format!("/api/users/{user_id}"),
+            &format!("/api/auth/users/{user_id}"),
             Some(&session),
             None
         )
@@ -381,7 +404,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::POST,
-            "/api/logout",
+            "/api/auth/logout",
             Some(&session),
             Some(json!({}))
         )
@@ -449,7 +472,7 @@ async fn pixel_tracker_and_api_404() {
 async fn bots_and_dnt_are_not_recorded() {
     let app = spawn_app().await;
     let admin = json!({ "email": "a@example.com", "password": "correct horse battery" });
-    let response = request(&app, Method::POST, "/api/setup", None, Some(admin)).await;
+    let response = request(&app, Method::POST, "/api/auth/setup", None, Some(admin)).await;
     let session = cookie(&response);
     let site = json(
         request(

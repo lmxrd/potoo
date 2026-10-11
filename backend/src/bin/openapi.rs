@@ -3,13 +3,11 @@
 //! generator. Built with `--features spec`; see `mise run gen:spec`.
 
 fn main() {
-    let path = std::env::args()
-        .nth(1)
-        .unwrap_or_else(|| "target/specs/openapi.json".into());
+    let path = "target/specs/openapi.json";
     if let Some(parent) = std::path::Path::new(&path).parent() {
         std::fs::create_dir_all(parent).unwrap_or_else(|e| panic!("cannot create {parent:?}: {e}"));
     }
-    std::fs::write(&path, potoo::openapi::spec_json())
+    std::fs::write(path, potoo::openapi::spec_json())
         .unwrap_or_else(|e| panic!("cannot write {path}: {e}"));
     println!("wrote {path}");
 }

@@ -19,7 +19,8 @@ depends = ["dev:backend", "dev:frontend"]
 # The backend needs frontend/dist to exist to compile, even in debug.
 [tasks."dev:backend"]
 depends = ["build:frontend"]
-run = "cargo run --manifest-path backend/Cargo.toml"
+run = "cargo run"
+dir = "{{ config_root }}/backend"
 
 # Tasks with sources and outputs are skipped when the outputs are newer
 # than the sources.
@@ -27,75 +28,78 @@ run = "cargo run --manifest-path backend/Cargo.toml"
 # The frontend's dependencies. Every frontend task depends on this, so a
 # fresh checkout (CI included) works; pnpm installs frozen when CI is set.
 [tasks."install:frontend"]
-run = "pnpm install -C frontend"
-sources = ["frontend/package.json", "frontend/pnpm-lock.yaml"]
-outputs = ["frontend/node_modules/.modules.yaml"]
+run = "pnpm install"
+sources = ["package.json", "pnpm-lock.yaml"]
+outputs = ["node_modules/.pnpm/lock.yaml"]
+dir = "{{ config_root }}/frontend"
 
 # The OpenAPI spec, written by the backend without the frontend embedded
 # (--features spec): the frontend's API client is generated from it, so the
 # spec comes first. The frontend tasks below depend on it.
 [tasks."gen:spec"]
-run = "cargo run --manifest-path backend/Cargo.toml --features spec --bin openapi -- backend/target/specs/openapi.json"
+run = "cargo run --features spec --bin openapi"
 sources = [
-  "backend/src/**/*",
-  "backend/migrations/**/*",
-  "backend/Cargo.toml",
-  "backend/Cargo.lock",
-  "backend/build.rs",
+  "src/**/*",
+  "migrations/**/*",
+  "Cargo.toml",
+  "Cargo.lock",
+  "build.rs",
 ]
-outputs = ["backend/target/specs/openapi.json"]
+outputs = ["target/specs/openapi.json"]
+dir = "{{ config_root }}/backend"
 
 # The frontend's API client, generated from the spec (not committed). One
 # task, so that tasks running side by side never generate it twice at once.
 [tasks."gen:client"]
 depends = ["install:frontend", "gen:spec"]
-run = "pnpm run -C frontend gen:api"
+run = "pnpm run gen:api"
 sources = [
-  "backend/target/specs/openapi.json",
-  "frontend/openapi-ts.config.ts",
-  "frontend/.pnpmfile.cjs",
-  "frontend/pnpm-lock.yaml",
+  "../backend/target/specs/openapi.json",
+  "openapi-ts.config.ts",
 ]
-outputs = ["frontend/src/client/index.ts"]
+dir = "{{ config_root }}/frontend"
 
 [tasks."dev:frontend"]
 depends = ["install:frontend", "gen:client"]
-run = "pnpm run -C frontend dev"
+run = "pnpm run dev"
+dir = "{{ config_root }}/frontend"
 
 # Run the server against a built frontend. Depends on the build so a
 # stale binary can never serve yesterday's code.
 [tasks.start]
 depends = ["build:backend"]
-run = "cargo run --release --manifest-path backend/Cargo.toml"
+run = "cargo run --release"
+dir = "{{ config_root }}/backend"
 
 [tasks.build]
-depends = ["build:frontend", "build:backend"]
+depends = ["build:backend"]
 
 [tasks."build:frontend"]
 depends = ["install:frontend", "gen:client"]
-run = "pnpm run -C frontend build"
+run = "pnpm run build"
 sources = [
-  "frontend/src/**/*",
-  "frontend/index.html",
-  "frontend/vite.config.ts",
-  "frontend/tsconfig.json",
-  "frontend/package.json",
-  "frontend/pnpm-lock.yaml",
+  "src/**/*",
+  "index.html",
+  "vite.config.ts",
+  "tsconfig.json",
+  "package.json",
+  "pnpm-lock.yaml",
 ]
-outputs = ["frontend/dist/index.html"]
+dir = "{{ config_root }}/frontend"
 
 [tasks."build:backend"]
 depends = ["build:frontend"]
-run = "cargo build --release --manifest-path backend/Cargo.toml"
+run = "cargo build --release"
 sources = [
-  "backend/src/**/*",
-  "backend/migrations/**/*",
-  "backend/Cargo.toml",
-  "backend/Cargo.lock",
-  "backend/build.rs",
-  "frontend/dist/**/*",
+  "src/**/*",
+  "migrations/**/*",
+  "Cargo.toml",
+  "Cargo.lock",
+  "build.rs",
+  "../frontend/dist/**/*",
 ]
-outputs = ["backend/target/release/potoo"]
+outputs = ["target/release/potoo"]
+dir = "{{ config_root }}/backend"
 
 [tasks."build:docker"]
 run = "podman build -t potoo ."
@@ -112,29 +116,34 @@ depends = ["check:frontend", "check:backend"]
 [tasks."check:backend"]
 depends = ["build:frontend"]
 run = """
-cargo fmt --manifest-path backend/Cargo.toml --check \
-  && cargo clippy --manifest-path backend/Cargo.toml -- -D warnings \
-  && cargo clippy --manifest-path backend/Cargo.toml --features spec --all-targets -- -D warnings
+cargo fmt --check \
+  && cargo clippy -- -D warnings \
+  && cargo clippy --features spec --all-targets -- -D warnings
 """
+dir = "{{ config_root }}/backend"
 
 [tasks."check:frontend"]
 depends = ["install:frontend", "gen:client"]
-run = "pnpm run -C frontend check"
+run = "pnpm run check"
+dir = "{{ config_root }}/frontend"
 
 [tasks.fix]
 depends = ["fix:backend", "fix:frontend"]
 
 [tasks."fix:backend"]
-run = "cargo fmt --manifest-path backend/Cargo.toml"
+run = "cargo fmt"
+dir = "{{ config_root }}/backend"
 
 [tasks."fix:frontend"]
 depends = ["install:frontend"]
-run = "pnpm run -C frontend fix"
+run = "pnpm run fix"
+dir = "{{ config_root }}/frontend"
 
 [tasks.test]
 depends = ["build:frontend"]
-run = "cargo test --manifest-path backend/Cargo.toml"
-sources = ["backend/src/**/*", "backend/tests/**/*", "backend/migrations/**/*", "backend/Cargo.toml", "backend/Cargo.lock"]
+run = "cargo test"
+sources = ["src/**/*", "tests/**/*", "migrations/**/*", "Cargo.toml", "Cargo.lock"]
+dir = "{{ config_root }}/backend"
 
 # Write load against the production image in a 2 CPU, 2 GB container; see
 # scripts/loadtest.sh for the settings (CPUS, MEMORY, RATES, DURATION).
@@ -146,7 +155,8 @@ run = "scripts/loadtest.sh"
 # none. Deterministic: seeding twice gives the same data.
 [tasks.seed]
 depends = ["build:frontend"]
-run = "cargo run --manifest-path backend/Cargo.toml --bin seed"
+run = "cargo run --bin seed"
+dir = "{{ config_root }}/backend"
 
 # Remove the local data: the SQLite database and the GeoIP database.
 [tasks.clean]
