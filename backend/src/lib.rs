@@ -31,12 +31,20 @@ use state::AppState;
 #[cfg_attr(feature = "spec", allow_missing = true)]
 struct Dist;
 
-/// The whole app: the /api routes, then the embedded frontend with the
-/// SPA fallback.
-pub fn app(state: AppState) -> Router {
-    Router::new()
+/// Every route of the API with its OpenAPI document: the tracker script at
+/// the root, and everything else under /api. The app serves the routes; the
+/// `openapi` binary writes the document (`openapi::spec`).
+pub fn api() -> utoipa_axum::router::OpenApiRouter<AppState> {
+    utoipa_axum::router::OpenApiRouter::with_openapi(openapi::base())
         .merge(routes::collect::tracker_router())
         .nest("/api", routes::router())
+}
+
+/// The whole app: the API routes, then the embedded frontend with the
+/// SPA fallback.
+pub fn app(state: AppState) -> Router {
+    let (router, _spec) = api().split_for_parts();
+    router
         .fallback(static_handler)
         .layer(middleware::from_fn(no_cache))
         .layer(tower_http::trace::TraceLayer::new_for_http())

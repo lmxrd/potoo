@@ -1,8 +1,9 @@
+use crate::error::ErrorBody;
 use crate::state::AppState;
+use axum::Json;
 use axum::http::StatusCode;
-use axum::routing::get;
-use axum::{Json, Router};
-use serde_json::json;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 pub mod auth;
 pub mod collect;
@@ -10,10 +11,13 @@ pub mod export;
 pub mod sites;
 pub mod stats;
 
-/// Every /api route, with the JSON 404 for unknown paths.
-pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/health", get(health))
+/// Every /api route, with the JSON 404 for unknown paths. The routes are
+/// registered together with their `#[utoipa::path]` annotations, so the
+/// OpenAPI document is made of exactly what is routed: the paths in the
+/// annotations are relative to /api.
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(health))
         .merge(collect::router())
         .merge(export::router())
         .merge(auth::router())
@@ -22,14 +26,19 @@ pub fn router() -> Router<AppState> {
         .fallback(not_found)
 }
 
-async fn not_found() -> (StatusCode, Json<serde_json::Value>) {
-    (StatusCode::NOT_FOUND, Json(json!({ "error": "Not found" })))
+async fn not_found() -> (StatusCode, Json<ErrorBody>) {
+    (
+        StatusCode::NOT_FOUND,
+        Json(ErrorBody {
+            error: "Not found".into(),
+        }),
+    )
 }
 
 /// Liveness: 200 OK, for the Docker healthcheck and load balancers.
 #[utoipa::path(
     get,
-    path = "/api/health",
+    path = "/health",
     tag = "System",
     operation_id = "getHealth",
     summary = "Liveness",
@@ -38,6 +47,6 @@ async fn not_found() -> (StatusCode, Json<serde_json::Value>) {
         (status = 200, description = "The server is up", body = String, content_type = "text/plain"),
     ),
 )]
-pub async fn health() -> &'static str {
+async fn health() -> &'static str {
     "OK"
 }

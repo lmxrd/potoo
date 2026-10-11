@@ -48,9 +48,9 @@ included), the stats with a filter, and the export.
 ## The API and its spec
 
 Every endpoint is documented in code: a `#[utoipa::path]` on the handler, named
-request and response structs with `ToSchema`, and an entry in `paths(...)` in
-`backend/src/openapi.rs` (a test there lists the expected endpoints). The spec
-is written to `backend/target/specs/openapi.json` by `mise run gen:spec` and is
+request and response structs with `ToSchema`, and the handler registered with
+`routes!` on its module's `OpenApiRouter` (utoipa-axum), which is both the route
+and the spec entry, so the two cannot drift. The spec is written to `backend/target/specs/openapi.json` by `mise run gen:spec` and is
 not served. The frontend's client is generated from it (`mise run gen:client`)
 with hey-api, and uses TanStack Query and zod; it is not committed.
 
@@ -73,7 +73,7 @@ backend/src/error.rs       HttpError, answered as {"error": "..."}
 backend/src/db.rs          the SQLite pools (one writer, read-only readers), caches, migrations on startup
 backend/src/ingest.rs      the hit queue and the batched writer
 backend/src/profile.rs     per-phase timers, compiled in only with the profiling feature
-backend/src/openapi.rs     the OpenAPI document: the list of documented handlers
+backend/src/openapi.rs     the OpenAPI document: title, tags, the cookie scheme (paths come from the routers)
 backend/src/bin/openapi.rs writes the spec to a file (`mise run gen:spec`)
 backend/migrations/        the schema, one numbered SQL file per change (sqlx migrations)
 backend/src/auth.rs        password hashing, sessions, the login throttle

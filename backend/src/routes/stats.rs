@@ -3,19 +3,20 @@ use crate::routes::auth::AuthUser;
 use crate::routes::sites::{StatsQuery, range_and_filter, site_ids};
 use crate::state::AppState;
 use crate::stats::{SiteStats, stats_for};
+use axum::Json;
 use axum::extract::{Query, State};
-use axum::routing::get;
-use axum::{Json, Router};
 use chrono::Utc;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
-pub fn router() -> Router<AppState> {
-    Router::new().route("/", get(stats))
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(stats))
 }
 
 // The aggregated numbers of one dashboard view, across sites.
 #[utoipa::path(
     get,
-    path = "/api/stats",
+    path = "/",
     tag = "Stats",
     operation_id = "getStats",
     summary = "The numbers of a dashboard view",
@@ -28,7 +29,7 @@ pub fn router() -> Router<AppState> {
     ),
     security(("session" = [])),
 )]
-pub async fn stats(
+async fn stats(
     State(state): State<AppState>,
     _user: AuthUser,
     Query(query): Query<StatsQuery>,

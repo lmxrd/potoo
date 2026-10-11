@@ -3,18 +3,19 @@ use crate::filter;
 use crate::routes::auth::AuthUser;
 use crate::state::AppState;
 use crate::stats::parse_range;
+use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
-use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
-pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/", get(list).post(create))
-        .route("/{id}", get(get_site).patch(update).delete(delete))
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(list, create))
+        .routes(routes!(get_site, update, delete))
 }
 
 /// What the stats and the export are computed over. All parameters are
@@ -93,7 +94,7 @@ pub struct CreatedSite {
 
 #[utoipa::path(
     get,
-    path = "/api/sites",
+    path = "/",
     tag = "Sites",
     operation_id = "listSites",
     summary = "List the sites",
@@ -103,7 +104,7 @@ pub struct CreatedSite {
     ),
     security(("session" = [])),
 )]
-pub async fn list(
+async fn list(
     State(state): State<AppState>,
     _user: AuthUser,
 ) -> Result<Json<Vec<SiteRow>>, HttpError> {
@@ -163,7 +164,7 @@ fn default_true() -> bool {
 
 #[utoipa::path(
     post,
-    path = "/api/sites",
+    path = "/",
     tag = "Sites",
     operation_id = "createSite",
     summary = "Register a site",
@@ -177,7 +178,7 @@ fn default_true() -> bool {
     ),
     security(("session" = [])),
 )]
-pub async fn create(
+async fn create(
     State(state): State<AppState>,
     user: AuthUser,
     body: String,
@@ -224,7 +225,7 @@ pub struct DntInput {
 
 #[utoipa::path(
     patch,
-    path = "/api/sites/{id}",
+    path = "/{id}",
     tag = "Sites",
     operation_id = "updateSite",
     summary = "Change a site's settings",
@@ -239,7 +240,7 @@ pub struct DntInput {
     ),
     security(("session" = [])),
 )]
-pub async fn update(
+async fn update(
     State(state): State<AppState>,
     user: AuthUser,
     Path(id): Path<i64>,
@@ -262,7 +263,7 @@ pub async fn update(
 // Deleting a site deletes all of its hits.
 #[utoipa::path(
     delete,
-    path = "/api/sites/{id}",
+    path = "/{id}",
     tag = "Sites",
     operation_id = "deleteSite",
     summary = "Delete a site and all of its hits",
@@ -274,7 +275,7 @@ pub async fn update(
     ),
     security(("session" = [])),
 )]
-pub async fn delete(
+async fn delete(
     State(state): State<AppState>,
     user: AuthUser,
     Path(id): Path<i64>,
@@ -292,7 +293,7 @@ pub async fn delete(
 
 #[utoipa::path(
     get,
-    path = "/api/sites/{id}",
+    path = "/{id}",
     tag = "Sites",
     operation_id = "getSite",
     summary = "One site",
@@ -304,7 +305,7 @@ pub async fn delete(
     ),
     security(("session" = [])),
 )]
-pub async fn get_site(
+async fn get_site(
     State(state): State<AppState>,
     _user: AuthUser,
     Path(id): Path<i64>,

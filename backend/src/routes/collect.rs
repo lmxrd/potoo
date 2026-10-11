@@ -4,31 +4,31 @@ use crate::profile::{Phase, timed};
 use crate::state::AppState;
 use crate::tracker::{GIF, TRACKER_JS};
 use crate::visitor::{client_ip, parse_browser, parse_device, parse_os, visitor_hash};
-use axum::Router;
 use axum::extract::{ConnectInfo, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use tower_http::cors::CorsLayer;
 use utoipa::ToSchema;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
-pub fn router() -> Router<AppState> {
+pub fn router() -> OpenApiRouter<AppState> {
     // The tracker sends text/plain via sendBeacon, so no CORS preflight
     // is needed; the wildcard keeps the pixel usable anywhere.
-    Router::new()
-        .route("/collect", post(collect_post))
-        .route("/pixel", get(collect_pixel))
+    OpenApiRouter::new()
+        .routes(routes!(collect_post))
+        .routes(routes!(collect_pixel))
         .layer(CorsLayer::permissive())
 }
 
 /// The tracker script, a static file served at /tracker.js with its
 /// ending. It belongs at the root: it is the one thing other people's
 /// pages load, not part of the dashboard's API.
-pub fn tracker_router() -> Router<AppState> {
-    Router::new().route("/tracker.js", get(tracker))
+pub fn tracker_router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(tracker))
 }
 
 /// The host part of a URL or bare hostname, lowercased.
@@ -165,7 +165,7 @@ pub struct CollectBody {
 // The beacon endpoint of /api/collect, hit by the tracker script.
 #[utoipa::path(
     post,
-    path = "/api/collect",
+    path = "/collect",
     tag = "Tracking",
     operation_id = "collectHit",
     summary = "Record a hit (the tracker script)",
@@ -176,7 +176,7 @@ pub struct CollectBody {
         (status = 503, description = "Too many hits queued, try again", body = ErrorBody),
     ),
 )]
-pub async fn collect_post(
+async fn collect_post(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
@@ -212,7 +212,7 @@ pub async fn collect_post(
 // Without `p`/`h`, the Referer header is used when the browser sends it.
 #[utoipa::path(
     get,
-    path = "/api/pixel",
+    path = "/pixel",
     tag = "Tracking",
     operation_id = "getPixel",
     summary = "Record a pageview (the no-JS pixel)",
@@ -223,7 +223,7 @@ pub async fn collect_post(
         (status = 503, description = "Too many hits queued, try again", body = ErrorBody),
     ),
 )]
-pub async fn collect_pixel(
+async fn collect_pixel(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
@@ -273,7 +273,7 @@ pub async fn collect_pixel(
         (status = 200, description = "The script", body = String, content_type = "text/javascript"),
     ),
 )]
-pub async fn tracker() -> Response {
+async fn tracker() -> Response {
     (
         StatusCode::OK,
         [

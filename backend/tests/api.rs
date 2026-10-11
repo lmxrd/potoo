@@ -497,3 +497,33 @@ async fn bots_and_dnt_are_not_recorded() {
     .await;
     assert_eq!(stats["pageviews"], json!(0));
 }
+
+/// The spec is made of the routes, so every documented operation must be
+/// served: a request to it is never the JSON 404 of an unknown route, and
+/// never a 405 (the path exists, but not for that method).
+#[tokio::test]
+async fn every_documented_operation_is_routed() {
+    let app = spawn_app().await;
+    let spec: Value = serde_json::from_str(&potoo::openapi::spec_json()).unwrap();
+    let mut checked = 0;
+    for (path, item) in spec["paths"].as_object().unwrap() {
+        for method in item.as_object().unwrap().keys() {
+            let url = path.replace("{id}", "1");
+            let response = request(
+                &app,
+                Method::from_bytes(method.to_uppercase().as_bytes()).unwrap(),
+                &url,
+                None,
+                None,
+            )
+            .await;
+            let status = response.status().as_u16();
+            assert_ne!(status, 405, "{method} {path} is documented but not routed");
+            if !path.contains('{') {
+                assert_ne!(status, 404, "{method} {path} is documented but not routed");
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked >= 23, "only {checked} operations documented");
+}

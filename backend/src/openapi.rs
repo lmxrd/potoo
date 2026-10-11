@@ -1,11 +1,12 @@
 //! The OpenAPI description of the API, written to a file by the `openapi`
 //! binary (`mise run gen:spec`) and never served: the frontend's client is
-//! generated from it. Every handler carries its own `#[utoipa::path]`;
-//! this file only lists them. A new endpoint is added to `paths(...)`
-//! below, or it is missing from the spec (the test at the bottom fails).
+//! generated from it. The paths come from the router itself: every handler
+//! is registered with `routes!` next to its `#[utoipa::path]` (see
+//! `routes/`), so a routed endpoint is documented and a documented one is
+//! routed. This file holds the rest: the title, the tags and the cookie
+//! the dashboard endpoints are secured with.
 
 use crate::auth::COOKIE;
-use crate::routes::{auth, collect, export, sites, stats};
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
@@ -16,31 +17,6 @@ use utoipa::{Modify, OpenApi};
         description = "The API of Potoo, a small, privacy-friendly, self-hosted web analytics tool. \
             The dashboard endpoints need the session cookie from /api/login (or /api/setup); the \
             tracking endpoints are public.",
-    ),
-    paths(
-        auth::session,
-        auth::setup,
-        auth::login,
-        auth::logout,
-        auth::change_email,
-        auth::change_settings,
-        auth::change_password,
-        auth::list_users,
-        auth::create_user,
-        auth::change_role,
-        auth::delete_user,
-        auth::reset_password,
-        sites::list,
-        sites::get_site,
-        sites::create,
-        sites::update,
-        sites::delete,
-        stats::stats,
-        export::export,
-        collect::collect_post,
-        collect::collect_pixel,
-        collect::tracker,
-        crate::routes::health,
     ),
     tags(
         (name = "Auth", description = "Signing in and out, and the first-run setup"),
@@ -70,11 +46,19 @@ impl Modify for SessionCookie {
     }
 }
 
+/// The document without paths: what the router starts from.
+pub fn base() -> utoipa::openapi::OpenApi {
+    ApiDoc::openapi()
+}
+
+/// The complete document: the base plus every routed endpoint.
+pub fn spec() -> utoipa::openapi::OpenApi {
+    crate::api().split_for_parts().1
+}
+
 /// The spec as pretty printed JSON.
 pub fn spec_json() -> String {
-    ApiDoc::openapi()
-        .to_pretty_json()
-        .expect("the spec serializes")
+    spec().to_pretty_json().expect("the spec serializes")
 }
 
 #[cfg(test)]
@@ -91,45 +75,6 @@ mod tests {
             }
         }
         found
-    }
-
-    #[test]
-    fn every_endpoint_is_documented() {
-        // The routes of the app. Adding or removing an endpoint means
-        // changing this list and `paths(...)` above.
-        let expected: BTreeSet<(&str, &str)> = [
-            ("GET", "/api/health"),
-            ("POST", "/api/collect"),
-            ("GET", "/api/pixel"),
-            ("GET", "/tracker.js"),
-            ("GET", "/api/export"),
-            ("GET", "/api/stats"),
-            ("GET", "/api/session"),
-            ("POST", "/api/setup"),
-            ("POST", "/api/login"),
-            ("POST", "/api/logout"),
-            ("POST", "/api/email"),
-            ("POST", "/api/settings"),
-            ("POST", "/api/password"),
-            ("GET", "/api/users"),
-            ("POST", "/api/users"),
-            ("PATCH", "/api/users/{id}"),
-            ("DELETE", "/api/users/{id}"),
-            ("POST", "/api/users/{id}/password"),
-            ("GET", "/api/sites"),
-            ("POST", "/api/sites"),
-            ("GET", "/api/sites/{id}"),
-            ("PATCH", "/api/sites/{id}"),
-            ("DELETE", "/api/sites/{id}"),
-        ]
-        .into_iter()
-        .collect();
-        let documented = operations();
-        let documented: BTreeSet<(&str, &str)> = documented
-            .iter()
-            .map(|(method, path, _)| (method.as_str(), path.as_str()))
-            .collect();
-        assert_eq!(documented, expected);
     }
 
     #[test]
@@ -151,7 +96,6 @@ mod tests {
         for (method, path, op) in operations() {
             let public = ["Auth", "Tracking", "System"].contains(&op["tags"][0].as_str().unwrap());
             let secured = op["security"].is_array();
-            // Auth is public as a tag, except nothing in it needs a session.
             assert_eq!(!public, secured, "{method} {path}");
         }
     }

@@ -37,6 +37,7 @@ tracing-subscriber = "0.3.23"
 utoipa = "6.0.0"
 # Profiling only, never in a production build (see the profiling feature).
 pprof = { version = "0.15.0", optional = true, features = ["flamegraph"] }
+utoipa-axum = "0.3.0"
 
 [features]
 # Builds without frontend/dist, for the `openapi` binary only (never ship it):

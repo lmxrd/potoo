@@ -5,11 +5,10 @@ use crate::auth::{
 use crate::error::{ErrorBody, HttpError};
 use crate::state::AppState;
 use crate::visitor::client_ip;
+use axum::Json;
 use axum::extract::{ConnectInfo, FromRequestParts, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use axum::{Json, Router};
 use axum_extra::extract::CookieJar;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -17,22 +16,21 @@ use sqlx::SqliteExecutor;
 use std::net::SocketAddr;
 use std::sync::OnceLock;
 use utoipa::ToSchema;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
-pub fn router() -> Router<AppState> {
-    Router::new()
-        .route("/session", get(session))
-        .route("/setup", post(setup))
-        .route("/login", post(login))
-        .route("/logout", post(logout))
-        .route("/email", post(change_email))
-        .route("/settings", post(change_settings))
-        .route("/password", post(change_password))
-        .route("/users", get(list_users).post(create_user))
-        .route(
-            "/users/{id}",
-            axum::routing::patch(change_role).delete(delete_user),
-        )
-        .route("/users/{id}/password", post(reset_password))
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
+        .routes(routes!(session))
+        .routes(routes!(setup))
+        .routes(routes!(login))
+        .routes(routes!(logout))
+        .routes(routes!(change_email))
+        .routes(routes!(change_settings))
+        .routes(routes!(change_password))
+        .routes(routes!(list_users, create_user))
+        .routes(routes!(change_role, delete_user))
+        .routes(routes!(reset_password))
 }
 
 /// The signed-in user, as a request extractor: a valid session cookie or
@@ -221,7 +219,7 @@ async fn admin_count<'e>(db: impl SqliteExecutor<'e>) -> Result<i64, HttpError> 
 // Session + first-run state. The frontend uses this to route every page.
 #[utoipa::path(
     get,
-    path = "/api/session",
+    path = "/session",
     tag = "Auth",
     operation_id = "getSession",
     summary = "The session and the first-run state",
@@ -230,7 +228,7 @@ async fn admin_count<'e>(db: impl SqliteExecutor<'e>) -> Result<i64, HttpError> 
         (status = 200, description = "The session", body = Session),
     ),
 )]
-pub async fn session(
+async fn session(
     State(state): State<AppState>,
     jar: CookieJar,
 ) -> Result<Json<Session>, HttpError> {
@@ -254,7 +252,7 @@ pub struct Credentials {
 // Creates the admin. Only possible while there are no users at all.
 #[utoipa::path(
     post,
-    path = "/api/setup",
+    path = "/setup",
     tag = "Auth",
     operation_id = "setup",
     summary = "Create the first admin",
@@ -266,7 +264,7 @@ pub struct Credentials {
         (status = 409, description = "Conflict", body = ErrorBody),
     ),
 )]
-pub async fn setup(
+async fn setup(
     State(state): State<AppState>,
     jar: CookieJar,
     headers: HeaderMap,
@@ -301,7 +299,7 @@ pub async fn setup(
 
 #[utoipa::path(
     post,
-    path = "/api/login",
+    path = "/login",
     tag = "Auth",
     operation_id = "login",
     summary = "Sign in",
@@ -313,7 +311,7 @@ pub async fn setup(
         (status = 429, description = "Too many attempts, try again later", body = ErrorBody),
     ),
 )]
-pub async fn login(
+async fn login(
     State(state): State<AppState>,
     jar: CookieJar,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -369,7 +367,7 @@ pub async fn login(
 
 #[utoipa::path(
     post,
-    path = "/api/logout",
+    path = "/logout",
     tag = "Auth",
     operation_id = "logout",
     summary = "Sign out",
@@ -377,7 +375,7 @@ pub async fn login(
         (status = 204, description = "Signed out; the session cookie is cleared"),
     ),
 )]
-pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> Result<Response, HttpError> {
+async fn logout(State(state): State<AppState>, jar: CookieJar) -> Result<Response, HttpError> {
     let jar = destroy_session(state.db.writer(), jar).await?;
     Ok((StatusCode::NO_CONTENT, jar).into_response())
 }
@@ -385,7 +383,7 @@ pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> Result<Res
 // Change the signed-in user's own email.
 #[utoipa::path(
     post,
-    path = "/api/email",
+    path = "/email",
     tag = "Account",
     operation_id = "changeEmail",
     summary = "Change your own email",
@@ -398,7 +396,7 @@ pub async fn logout(State(state): State<AppState>, jar: CookieJar) -> Result<Res
     ),
     security(("session" = [])),
 )]
-pub async fn change_email(
+async fn change_email(
     State(state): State<AppState>,
     user: AuthUser,
     body: String,
@@ -430,7 +428,7 @@ pub async fn change_email(
 // Change the signed-in user's own preferences.
 #[utoipa::path(
     post,
-    path = "/api/settings",
+    path = "/settings",
     tag = "Account",
     operation_id = "changeSettings",
     summary = "Change your own preferences",
@@ -443,7 +441,7 @@ pub async fn change_email(
     ),
     security(("session" = [])),
 )]
-pub async fn change_settings(
+async fn change_settings(
     State(state): State<AppState>,
     user: AuthUser,
     body: String,
@@ -493,7 +491,7 @@ pub async fn change_settings(
 // Change the signed-in user's own password.
 #[utoipa::path(
     post,
-    path = "/api/password",
+    path = "/password",
     tag = "Account",
     operation_id = "changePassword",
     summary = "Change your own password",
@@ -505,7 +503,7 @@ pub async fn change_settings(
     ),
     security(("session" = [])),
 )]
-pub async fn change_password(
+async fn change_password(
     State(state): State<AppState>,
     user: AuthUser,
     body: String,
@@ -544,7 +542,7 @@ pub async fn change_password(
 // Users: admin only. Everyone created here can be an admin or not.
 #[utoipa::path(
     get,
-    path = "/api/users",
+    path = "/users",
     tag = "Users",
     operation_id = "listUsers",
     summary = "List the users",
@@ -555,7 +553,7 @@ pub async fn change_password(
     ),
     security(("session" = [])),
 )]
-pub async fn list_users(
+async fn list_users(
     State(state): State<AppState>,
     user: AuthUser,
 ) -> Result<Json<Vec<UserRow>>, HttpError> {
@@ -569,7 +567,7 @@ pub async fn list_users(
 
 #[utoipa::path(
     post,
-    path = "/api/users",
+    path = "/users",
     tag = "Users",
     operation_id = "createUser",
     summary = "Create a user",
@@ -583,7 +581,7 @@ pub async fn list_users(
     ),
     security(("session" = [])),
 )]
-pub async fn create_user(
+async fn create_user(
     State(state): State<AppState>,
     user: AuthUser,
     body: String,
@@ -618,7 +616,7 @@ pub async fn create_user(
 // app always has at least one admin left.
 #[utoipa::path(
     patch,
-    path = "/api/users/{id}",
+    path = "/users/{id}",
     tag = "Users",
     operation_id = "changeUserRole",
     summary = "Change the role of a user",
@@ -635,7 +633,7 @@ pub async fn create_user(
     ),
     security(("session" = [])),
 )]
-pub async fn change_role(
+async fn change_role(
     State(state): State<AppState>,
     user: AuthUser,
     axum::extract::Path(id): axum::extract::Path<i64>,
@@ -671,7 +669,7 @@ pub async fn change_role(
 
 #[utoipa::path(
     delete,
-    path = "/api/users/{id}",
+    path = "/users/{id}",
     tag = "Users",
     operation_id = "deleteUser",
     summary = "Delete a user",
@@ -685,7 +683,7 @@ pub async fn change_role(
     ),
     security(("session" = [])),
 )]
-pub async fn delete_user(
+async fn delete_user(
     State(state): State<AppState>,
     user: AuthUser,
     axum::extract::Path(id): axum::extract::Path<i64>,
@@ -717,7 +715,7 @@ pub async fn delete_user(
 // excluded here, like deletion: admins change their own via /password.
 #[utoipa::path(
     post,
-    path = "/api/users/{id}/password",
+    path = "/users/{id}/password",
     tag = "Users",
     operation_id = "resetUserPassword",
     summary = "Set a new password for a user",
@@ -732,7 +730,7 @@ pub async fn delete_user(
     ),
     security(("session" = [])),
 )]
-pub async fn reset_password(
+async fn reset_password(
     State(state): State<AppState>,
     user: AuthUser,
     axum::extract::Path(id): axum::extract::Path<i64>,

@@ -5,23 +5,23 @@ use crate::routes::auth::AuthUser;
 use crate::routes::sites::{StatsQuery, range_and_filter, site_ids};
 use crate::state::AppState;
 use crate::stats::range_bounds;
-use axum::Router;
 use axum::extract::{Query, State};
 use axum::response::Response;
-use axum::routing::get;
 use chrono::Utc;
 use sqlx::Row;
+use utoipa_axum::router::OpenApiRouter;
+use utoipa_axum::routes;
 
 /// The export: every recorded hit of the dashboard's current view, as raw
 /// CSV rows — the same range, sites and filter the stats endpoints take,
 /// one row per hit, oldest first.
-pub fn router() -> Router<AppState> {
-    Router::new().route("/export", get(export))
+pub fn router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(export))
 }
 
 #[utoipa::path(
     get,
-    path = "/api/export",
+    path = "/export",
     tag = "Stats",
     operation_id = "exportHits",
     summary = "Export the hits of a dashboard view as CSV",
@@ -34,7 +34,7 @@ pub fn router() -> Router<AppState> {
     ),
     security(("session" = [])),
 )]
-pub async fn export(
+async fn export(
     State(state): State<AppState>,
     _user: AuthUser,
     Query(query): Query<StatsQuery>,

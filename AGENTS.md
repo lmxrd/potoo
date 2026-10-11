@@ -79,13 +79,18 @@ when you change how the pools are used.
 it** (nothing is committed or served):
 
 - Every handler has a `#[utoipa::path]` (path, method, `operation_id`,
-  tag, request body, every response including the errors, `security`), and
-  is listed in `paths(...)` in `openapi.rs`. Request and response bodies are
-  named structs with `ToSchema` (never `json!` or a struct declared inside
-  a handler); query parameters are `IntoParams`. `openapi.rs` has a test
-  with the list of expected endpoints: adding or removing one means changing
-  it. The non-JSON endpoints (`/tracker.js`, `/api/pixel`, `/api/export`,
-  `/api/health`) are documented too.
+  tag, request body, every response including the errors, `security`) and
+  is registered with `.routes(routes!(handler))` on the `OpenApiRouter` of
+  its module's `router()` (utoipa-axum): the router is the one and only
+  list, so a routed endpoint is documented and a documented one is routed
+  (a test in `tests/api.rs` checks it). The path in the annotation is the
+  route, relative to where the router is nested (`/api`, so `/sites`, not
+  `/api/sites`; handlers with the same path go in one `routes!(a, b)`).
+  Request and response bodies are named structs with `ToSchema` (never
+  `json!` or a struct declared inside a handler); query parameters are
+  `IntoParams`. The non-JSON endpoints (`/tracker.js`, `/api/pixel`,
+  `/api/export`, `/api/health`) are documented too. `openapi.rs` only holds
+  the title, the tags and the cookie scheme.
 - Flags are booleans in both requests and responses (`is_admin`,
   `honor_dnt`), never 0/1.
 - The spec is written by the `openapi` binary, built with `--features spec`,
