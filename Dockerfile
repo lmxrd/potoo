@@ -20,11 +20,19 @@ RUN pnpm build
 FROM rust:1.99-slim AS compile
 WORKDIR /app/backend
 
+# A profiling image is built with --build-arg PROFILE=profiling
+# --build-arg FEATURES=profiling (mise run build:profiling); the default
+# is the production build.
+ARG PROFILE=release
+ARG FEATURES=
+
 # The target follows the build architecture, so one file builds amd64 and
 # arm64 natively. rust-embed wants ../frontend/dist next to the crate. The
 # cargo registry and target directory are cache mounts: a source change
 # recompiles only the crate.
 COPY backend/Cargo.toml backend/Cargo.lock ./
+COPY backend/build.rs ./
+COPY backend/migrations migrations/
 COPY backend/src src/
 COPY --from=frontend /app/dist /app/frontend/dist
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -32,8 +40,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     target="$(uname -m)-unknown-linux-musl" \
     && apt-get update && apt-get install -y --no-install-recommends musl-tools \
     && rustup target add "$target" \
-    && cargo build --release --target "$target" \
-    && cp "target/$target/release/potoo" /potoo
+    && cargo build --profile "$PROFILE" --features "$FEATURES" --target "$target" \
+    && cp "target/$target/$PROFILE/potoo" /potoo
 
 # The runtime: Alpine, the static binary, and a writable /data for the
 # database and the GeoIP database. ca-certificates is what the GeoIP

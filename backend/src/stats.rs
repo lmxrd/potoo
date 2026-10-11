@@ -1,7 +1,6 @@
 use crate::db::Db;
 use crate::filter::{FacetFilters, filter_sql};
 use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
-use rusqlite::params_from_iter;
 use serde::Serialize;
 
 const DAY_MS: i64 = 86_400_000;
@@ -361,7 +360,7 @@ fn custom_buckets(from: DateTime<Utc>, to: DateTime<Utc>) -> Buckets {
 }
 
 /// One row of a breakdown.
-#[derive(Serialize)]
+#[derive(Serialize, sqlx::FromRow)]
 struct Count {
     #[serde(rename = "pageviews")]
     pageviews: i64,
@@ -369,51 +368,51 @@ struct Count {
     visitors: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, sqlx::FromRow)]
 pub struct DayRow {
     pub day: String,
     pub pageviews: i64,
     pub visitors: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, sqlx::FromRow)]
 pub struct PathRow {
     pub path: String,
     pub pageviews: i64,
     pub visitors: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, sqlx::FromRow)]
 pub struct CountryRow {
     pub country: String,
     pub visitors: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, sqlx::FromRow)]
 pub struct DeviceRow {
     pub device: String,
     pub visitors: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, sqlx::FromRow)]
 pub struct BrowserRow {
     pub browser: String,
     pub visitors: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, sqlx::FromRow)]
 pub struct OsRow {
     pub os: String,
     pub visitors: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, sqlx::FromRow)]
 pub struct ReferrerRow {
     pub referrer: String,
     pub pageviews: i64,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, sqlx::FromRow)]
 pub struct ClickRow {
     pub name: String,
     pub clicks: i64,
@@ -440,6 +439,29 @@ pub struct SiteStats {
     pub clicks: Vec<ClickRow>,
 }
 
+/// One aggregation over the selected hits, mapped onto a row type by its
+/// column names. The SQL is assembled from fixed fragments and `?`
+/// placeholders only; every value is bound.
+async fn query_rows<T>(
+    db: &Db,
+    in_sites: &str,
+    within: &str,
+    params: &[String],
+    select: impl Into<String>,
+    tail: String,
+) -> sqlx::Result<Vec<T>>
+where
+    T: for<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> + Send + Unpin,
+{
+    let select = select.into();
+    let sql = format!("SELECT {select} FROM hits WHERE {in_sites} AND {within} {tail}");
+    let mut query = sqlx::query_as(sqlx::AssertSqlSafe(sql));
+    for param in params {
+        query = query.bind(param.as_str());
+    }
+    query.fetch_all(db.reader()).await
+}
+
 /// Aggregate the hits of the given sites over a range. "Visitors" counts
 /// distinct daily hashes, which include the site id, so the same person
 /// on two of the sites counts as two visitors here.
@@ -449,7 +471,7 @@ pub async fn stats_for(
     range: &StatsRange,
     filters: &FacetFilters,
     now: DateTime<Utc>,
-) -> rusqlite::Result<SiteStats> {
+) -> sqlx::Result<SiteStats> {
     let days = days_field(range);
     if site_ids.is_empty() {
         return Ok(SiteStats {
@@ -500,168 +522,69 @@ pub async fn stats_for(
     }
     params.extend(filter_params);
 
-    fn query_rows<T>(
-        conn: &rusqlite::Connection,
-        in_sites: &str,
-        within: &str,
-        params: &[String],
-        select: &str,
-        tail: &str,
-        map_row: impl Fn(&rusqlite::Row<'_>) -> rusqlite::Result<T>,
-    ) -> rusqlite::Result<Vec<T>> {
-        let sql = format!("SELECT {select} FROM hits WHERE {in_sites} AND {within} {tail}");
-        let mut stmt = conn.prepare(&sql)?;
-        let rows = stmt.query_map(params_from_iter(params.iter()), map_row)?;
-        rows.collect()
+    let pv = "kind = 'pageview'";
+    // A macro, not a closure: each use maps onto a different row type.
+    macro_rules! rows {
+        ($row:ty, $select:expr, $tail:expr) => {
+            query_rows::<$row>(db, &in_sites, &within, &params, $select, $tail)
+        };
     }
 
-    let conn = db.read().await;
-    let pv = "kind = 'pageview'";
-
-    let totals = query_rows(
-        &conn,
-        &in_sites,
-        &within,
-        &params,
-        "COUNT(*) AS pageviews, COUNT(DISTINCT visitor) AS visitors",
-        &format!("AND {pv}"),
-        |row| {
-            Ok(Count {
-                pageviews: row.get(0)?,
-                visitors: row.get(1)?,
-            })
-        },
-    )?
-    .into_iter()
-    .next()
-    .unwrap_or(Count {
+    // The aggregations are independent reads: run them side by side on the
+    // reader connections.
+    let (totals, hit_days, paths, countries, devices, browsers, os, referrers, clicks) = tokio::try_join!(
+        rows!(
+            Count,
+            "COUNT(*) AS pageviews, COUNT(DISTINCT visitor) AS visitors",
+            format!("AND {pv}")
+        ),
+        rows!(
+            DayRow,
+            format!("{sql} AS day, COUNT(*) AS pageviews, COUNT(DISTINCT visitor) AS visitors"),
+            format!("AND {pv} GROUP BY day ORDER BY day")
+        ),
+        rows!(
+            PathRow,
+            "path, COUNT(*) AS pageviews, COUNT(DISTINCT visitor) AS visitors",
+            format!("AND {pv} GROUP BY path ORDER BY pageviews DESC LIMIT 50")
+        ),
+        rows!(
+            CountryRow,
+            "COALESCE(country, '??') AS country, COUNT(DISTINCT visitor) AS visitors",
+            format!("AND {pv} GROUP BY country ORDER BY visitors DESC LIMIT 50")
+        ),
+        rows!(
+            DeviceRow,
+            "device, COUNT(DISTINCT visitor) AS visitors",
+            format!("AND {pv} GROUP BY device ORDER BY visitors DESC")
+        ),
+        rows!(
+            BrowserRow,
+            "browser, COUNT(DISTINCT visitor) AS visitors",
+            format!("AND {pv} GROUP BY browser ORDER BY visitors DESC")
+        ),
+        rows!(
+            OsRow,
+            "os, COUNT(DISTINCT visitor) AS visitors",
+            format!("AND {pv} GROUP BY os ORDER BY visitors DESC")
+        ),
+        rows!(
+            ReferrerRow,
+            "referrer, COUNT(*) AS pageviews",
+            format!(
+                "AND {pv} AND referrer IS NOT NULL GROUP BY referrer ORDER BY pageviews DESC LIMIT 20"
+            )
+        ),
+        rows!(
+            ClickRow,
+            "name, COUNT(*) AS clicks",
+            "AND kind = 'click' GROUP BY name ORDER BY clicks DESC LIMIT 50".to_string()
+        ),
+    )?;
+    let totals = totals.into_iter().next().unwrap_or(Count {
         pageviews: 0,
         visitors: 0,
     });
-
-    let hit_days = query_rows(
-        &conn,
-        &in_sites,
-        &within,
-        &params,
-        &format!("{sql} AS day, COUNT(*) AS pageviews, COUNT(DISTINCT visitor) AS visitors"),
-        &format!("AND {pv} GROUP BY day ORDER BY day"),
-        |row| {
-            Ok(DayRow {
-                day: row.get(0)?,
-                pageviews: row.get(1)?,
-                visitors: row.get(2)?,
-            })
-        },
-    )?;
-
-    let paths = query_rows(
-        &conn,
-        &in_sites,
-        &within,
-        &params,
-        "path, COUNT(*) AS pageviews, COUNT(DISTINCT visitor) AS visitors",
-        &format!("AND {pv} GROUP BY path ORDER BY pageviews DESC LIMIT 50"),
-        |row| {
-            Ok(PathRow {
-                path: row.get(0)?,
-                pageviews: row.get(1)?,
-                visitors: row.get(2)?,
-            })
-        },
-    )?;
-
-    let countries = query_rows(
-        &conn,
-        &in_sites,
-        &within,
-        &params,
-        "COALESCE(country, '??') AS country, COUNT(DISTINCT visitor) AS visitors",
-        &format!("AND {pv} GROUP BY country ORDER BY visitors DESC LIMIT 50"),
-        |row| {
-            Ok(CountryRow {
-                country: row.get(0)?,
-                visitors: row.get(1)?,
-            })
-        },
-    )?;
-
-    let devices = query_rows(
-        &conn,
-        &in_sites,
-        &within,
-        &params,
-        "device, COUNT(DISTINCT visitor) AS visitors",
-        &format!("AND {pv} GROUP BY device ORDER BY visitors DESC"),
-        |row| {
-            Ok(DeviceRow {
-                device: row.get(0)?,
-                visitors: row.get(1)?,
-            })
-        },
-    )?;
-
-    let browsers = query_rows(
-        &conn,
-        &in_sites,
-        &within,
-        &params,
-        "browser, COUNT(DISTINCT visitor) AS visitors",
-        &format!("AND {pv} GROUP BY browser ORDER BY visitors DESC"),
-        |row| {
-            Ok(BrowserRow {
-                browser: row.get(0)?,
-                visitors: row.get(1)?,
-            })
-        },
-    )?;
-
-    let os = query_rows(
-        &conn,
-        &in_sites,
-        &within,
-        &params,
-        "os, COUNT(DISTINCT visitor) AS visitors",
-        &format!("AND {pv} GROUP BY os ORDER BY visitors DESC"),
-        |row| {
-            Ok(OsRow {
-                os: row.get(0)?,
-                visitors: row.get(1)?,
-            })
-        },
-    )?;
-
-    let referrers = query_rows(
-        &conn,
-        &in_sites,
-        &within,
-        &params,
-        "referrer, COUNT(*) AS pageviews",
-        &format!(
-            "AND {pv} AND referrer IS NOT NULL GROUP BY referrer ORDER BY pageviews DESC LIMIT 20"
-        ),
-        |row| {
-            Ok(ReferrerRow {
-                referrer: row.get(0)?,
-                pageviews: row.get(1)?,
-            })
-        },
-    )?;
-
-    let clicks = query_rows(
-        &conn,
-        &in_sites,
-        &within,
-        &params,
-        "name, COUNT(*) AS clicks",
-        "AND kind = 'click' GROUP BY name ORDER BY clicks DESC LIMIT 50",
-        |row| {
-            Ok(ClickRow {
-                name: row.get(0)?,
-                clicks: row.get(1)?,
-            })
-        },
-    )?;
 
     // Zero fill the periods without hits, so the chart shows every bucket.
     let hits: std::collections::HashMap<String, DayRow> =

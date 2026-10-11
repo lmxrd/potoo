@@ -4,6 +4,8 @@ pub mod db;
 pub mod error;
 pub mod filter;
 pub mod geo;
+pub mod ingest;
+pub mod profile;
 pub mod routes;
 pub mod state;
 pub mod stats;

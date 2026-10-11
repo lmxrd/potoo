@@ -9,8 +9,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch};
 use axum::{Json, Router};
 use chrono::Utc;
-use rusqlite::{OptionalExtension, params};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 pub fn router() -> Router<AppState> {
@@ -40,11 +39,9 @@ pub async fn site_ids(state: &AppState, sites: Option<&str>) -> Result<Vec<i64>,
             .map_err(|_| HttpError::bad_request("sites must be comma separated site ids"))?;
         return Ok(ids);
     }
-    let conn = state.db.lock().await;
-    let mut stmt = conn.prepare("SELECT id FROM sites")?;
-    let ids = stmt
-        .query_map([], |row| row.get::<_, i64>(0))?
-        .collect::<Result<Vec<_>, _>>()?;
+    let ids = sqlx::query_scalar("SELECT id FROM sites")
+        .fetch_all(state.db.reader())
+        .await?;
     Ok(ids)
 }
 
@@ -68,18 +65,18 @@ async fn list(
     State(state): State<AppState>,
     _user: AuthUser,
 ) -> Result<Json<serde_json::Value>, HttpError> {
-    let conn = state.db.lock().await;
-    let mut stmt =
-        conn.prepare("SELECT id, hostname, honor_dnt, created_at FROM sites ORDER BY hostname")?;
-    let rows = stmt.query_map([], |row| {
-        Ok(json!({
-            "id": row.get::<_, i64>(0)?,
-            "hostname": row.get::<_, String>(1)?,
-            "honor_dnt": row.get::<_, i64>(2)?,
-            "created_at": row.get::<_, String>(3)?,
-        }))
-    })?;
-    Ok(Json(json!(rows.collect::<Result<Vec<_>, _>>()?)))
+    #[derive(Serialize, sqlx::FromRow)]
+    struct SiteRow {
+        id: i64,
+        hostname: String,
+        honor_dnt: i64,
+        created_at: String,
+    }
+    let rows: Vec<SiteRow> =
+        sqlx::query_as("SELECT id, hostname, honor_dnt, created_at FROM sites ORDER BY hostname")
+            .fetch_all(state.db.reader())
+            .await?;
+    Ok(Json(json!(rows)))
 }
 
 /// Expected a hostname such as example.com or blog.example.com.
@@ -136,28 +133,28 @@ async fn create(
     let input: SiteInput =
         serde_json::from_str(&body).map_err(|_| HttpError::bad_request("Invalid request body"))?;
     let hostname = validate_hostname(&input.hostname)?;
-    let conn = state.db.lock().await;
-    let taken: Option<i64> = conn
-        .query_row(
-            "SELECT 1 FROM sites WHERE hostname = ?1",
-            params![&hostname],
-            |r| r.get(0),
-        )
-        .optional()?;
+    let mut tx = state.db.writer().begin().await?;
+    let taken: Option<i64> = sqlx::query_scalar("SELECT 1 FROM sites WHERE hostname = ?1")
+        .bind(&hostname)
+        .fetch_optional(&mut *tx)
+        .await?;
     if taken.is_some() {
         return Err(HttpError {
             status: StatusCode::CONFLICT,
             message: "Site already exists".into(),
         });
     }
-    conn.execute(
-        "INSERT INTO sites (hostname, honor_dnt) VALUES (?1, ?2)",
-        params![&hostname, input.honor_dnt as i64],
-    )?;
+    let id = sqlx::query("INSERT INTO sites (hostname, honor_dnt) VALUES (?1, ?2)")
+        .bind(&hostname)
+        .bind(input.honor_dnt as i64)
+        .execute(&mut *tx)
+        .await?
+        .last_insert_rowid();
+    tx.commit().await?;
     Ok((
         StatusCode::CREATED,
         Json(json!({
-            "id": conn.last_insert_rowid(),
+            "id": id,
             "hostname": hostname,
             "honor_dnt": input.honor_dnt as i64,
         })),
@@ -181,11 +178,12 @@ async fn update(
     }
     let input: DntInput =
         serde_json::from_str(&body).map_err(|_| HttpError::bad_request("Invalid request body"))?;
-    let conn = state.db.lock().await;
-    conn.execute(
-        "UPDATE sites SET honor_dnt = ?1 WHERE id = ?2",
-        params![input.honor_dnt as i64, id],
-    )?;
+    sqlx::query("UPDATE sites SET honor_dnt = ?1 WHERE id = ?2")
+        .bind(input.honor_dnt as i64)
+        .bind(id)
+        .execute(state.db.writer())
+        .await?;
+    state.db.forget_sites();
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -198,8 +196,11 @@ async fn delete(
     if user.0.is_admin != 1 {
         return Err(HttpError::forbidden());
     }
-    let conn = state.db.lock().await;
-    conn.execute("DELETE FROM sites WHERE id = ?1", params![id])?;
+    sqlx::query("DELETE FROM sites WHERE id = ?1")
+        .bind(id)
+        .execute(state.db.writer())
+        .await?;
+    state.db.forget_sites();
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -210,21 +211,18 @@ async fn site_stats(
     Query(query): Query<StatsQuery>,
 ) -> Result<Json<serde_json::Value>, HttpError> {
     let (range, filters) = range_and_filter(&query)?;
-    let conn = state.db.lock().await;
-    let site: Option<(i64, String, i64)> = conn
-        .query_row(
-            "SELECT id, hostname, honor_dnt FROM sites WHERE id = ?1",
-            params![id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .optional()?;
-    drop(conn);
+    let site: Option<(i64, String, i64)> =
+        sqlx::query_as("SELECT id, hostname, honor_dnt FROM sites WHERE id = ?1")
+            .bind(id)
+            .fetch_optional(state.db.reader())
+            .await?;
     let Some((id, hostname, honor_dnt)) = site else {
         return Err(HttpError {
             status: StatusCode::NOT_FOUND,
             message: "Not found".into(),
         });
     };
+    state.ingest.flush().await;
     let stats = stats_for(&state.db, &[id], &range, &filters, Utc::now()).await?;
     let mut value = serde_json::to_value(&stats).unwrap();
     value["site"] = json!({ "id": id, "hostname": hostname, "honor_dnt": honor_dnt });

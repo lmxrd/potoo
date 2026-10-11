@@ -10,7 +10,7 @@ use axum::extract::{Query, State};
 use axum::response::Response;
 use axum::routing::get;
 use chrono::Utc;
-use rusqlite::params_from_iter;
+use sqlx::Row;
 
 /// The export: every recorded hit of the dashboard's current view, as raw
 /// CSV rows — the same range, sites and filter the stats endpoints take,
@@ -49,7 +49,7 @@ async fn export(
         params.extend(filter_params);
     }
 
-    let conn = state.db.read().await;
+    state.ingest.flush().await;
     // No table alias: the filter clause names its columns unqualified,
     // and every column it can name lives in hits alone.
     let sql = format!(
@@ -60,26 +60,21 @@ async fn export(
          ORDER BY hits.created_at, hits.id",
         where_clauses.join(" AND ")
     );
-    let mut stmt = conn.prepare(&sql)?;
-    let hits = stmt
-        .query_map(params_from_iter(params.iter()), |row| {
-            Ok([
-                row.get::<_, Option<String>>(0)?.unwrap_or_default(),
-                row.get::<_, Option<String>>(1)?.unwrap_or_default(),
-                row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-                row.get::<_, Option<String>>(3)?.unwrap_or_default(),
-                row.get::<_, Option<String>>(4)?.unwrap_or_default(),
-                row.get::<_, Option<String>>(5)?.unwrap_or_default(),
-                row.get::<_, Option<String>>(6)?.unwrap_or_default(),
-                row.get::<_, Option<String>>(7)?.unwrap_or_default(),
-                row.get::<_, Option<String>>(8)?.unwrap_or_default(),
-                row.get::<_, Option<String>>(9)?.unwrap_or_default(),
-            ]
-            .to_vec())
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    drop(stmt);
-    drop(conn);
+    // Fixed fragments and `?` placeholders only; the values are bound.
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
+    for param in &params {
+        query = query.bind(param.as_str());
+    }
+    let hits = query
+        .fetch_all(state.db.reader())
+        .await?
+        .iter()
+        .map(|row| {
+            (0..10)
+                .map(|i| Ok(row.try_get::<Option<String>, _>(i)?.unwrap_or_default()))
+                .collect::<sqlx::Result<Vec<String>>>()
+        })
+        .collect::<sqlx::Result<Vec<_>>>()?;
 
     let mut rows = vec![
         [

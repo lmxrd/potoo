@@ -80,38 +80,30 @@ struct Hit {
     created_at: String,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     // Deterministic: the same seed gives the same data.
     let mut rng = StdRng::seed_from_u64(42);
 
     let path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "data/potoo.db".into());
-    let db = db::open(&path);
+    let db = db::open(&path).await;
+    let pool = db.writer();
 
-    let (sites, inserted_demo_site) = {
-        let conn = db.blocking_lock();
-        let mut sites: Vec<(i64, String)> = Vec::new();
-        {
-            let mut stmt = conn.prepare("SELECT id, hostname FROM sites").unwrap();
-            let rows = stmt
-                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-                .unwrap();
-            for row in rows {
-                sites.push(row.unwrap());
-            }
-        }
-        let demo = sites.is_empty();
-        if demo {
-            conn.execute(
-                "INSERT INTO sites (hostname) VALUES ('blog.example.com')",
-                [],
-            )
-            .unwrap();
-            sites = vec![(conn.last_insert_rowid(), "blog.example.com".to_string())];
-        }
-        // The demo data replaces whatever hits are in the database.
-        conn.execute("DELETE FROM hits", []).unwrap();
-        (sites, demo)
-    };
+    let mut sites: Vec<(i64, String)> = sqlx::query_as("SELECT id, hostname FROM sites")
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    let inserted_demo_site = sites.is_empty();
+    if inserted_demo_site {
+        let id = sqlx::query("INSERT INTO sites (hostname) VALUES ('blog.example.com')")
+            .execute(pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+        sites = vec![(id, "blog.example.com".to_string())];
+    }
+    // The demo data replaces whatever hits are in the database.
+    sqlx::query("DELETE FROM hits").execute(pool).await.unwrap();
 
     let now = Utc::now();
     let midnight = Utc
@@ -128,36 +120,32 @@ fn main() {
             let trend = 0.55 + 0.9 * (i as f64) / (YEAR - 1) as f64;
             let hits = day_hits(&mut rng, *site_id, start, end, base, trend);
             inserted += hits.len();
-            let conn = db.blocking_lock();
-            conn.execute("BEGIN", []).unwrap();
-            {
-                let mut stmt = conn
-                    .prepare(
-                        "INSERT INTO hits
-                           (site_id, kind, path, name, referrer, country, device, browser, os, visitor, created_at)
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-                    )
-                    .unwrap();
-                for hit in &hits {
-                    stmt.execute(rusqlite::params![
-                        hit.site_id,
-                        hit.kind,
-                        hit.path,
-                        hit.name,
-                        hit.referrer,
-                        hit.country,
-                        hit.device,
-                        hit.browser,
-                        hit.os,
-                        hit.visitor,
-                        hit.created_at,
-                    ])
-                    .unwrap();
-                }
+            let mut tx = pool.begin().await.unwrap();
+            for hit in &hits {
+                sqlx::query(
+                    "INSERT INTO hits
+                       (site_id, kind, path, name, referrer, country, device, browser, os, visitor, created_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                )
+                .bind(hit.site_id)
+                .bind(hit.kind)
+                .bind(hit.path)
+                .bind(hit.name)
+                .bind(hit.referrer)
+                .bind(hit.country)
+                .bind(hit.device)
+                .bind(hit.browser)
+                .bind(hit.os)
+                .bind(&hit.visitor)
+                .bind(&hit.created_at)
+                .execute(&mut *tx)
+                .await
+                .unwrap();
             }
-            conn.execute("COMMIT", []).unwrap();
+            tx.commit().await.unwrap();
         }
     }
+    db.close().await;
 
     if inserted_demo_site {
         println!("Created the demo site blog.example.com.");

@@ -1,50 +1,109 @@
-use rusqlite::{Connection, OpenFlags};
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use tokio::sync::{Mutex, MutexGuard};
+use sqlx::SqlitePool;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
+use std::collections::HashMap;
+use std::str::FromStr;
+use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
 /// How many read-only connections serve the dashboard and the export.
-const READERS: usize = 4;
+const READERS: u32 = 4;
 
-/// The database: one writer connection and a few read-only ones. SQLite
-/// has a single writer, and every write here is small, so the writer sits
-/// behind one async mutex. In WAL mode readers never block the writer
-/// (nor each other), so the heavy aggregate queries get their own
-/// connections and can no longer hold up the inserts of the tracker.
+/// How long a site stays cached. Sites change through this process, which
+/// forgets them at once; the expiry only covers another process (the seed
+/// binary) changing the database.
+const SITE_TTL: Duration = Duration::from_secs(60);
+
+/// A registered site, as the tracker needs it.
+#[derive(Clone, Copy)]
+pub struct Site {
+    pub id: i64,
+    pub honor_dnt: bool,
+}
+
+/// The database: a pool of one writer connection and a pool of read-only
+/// ones. SQLite has a single writer, so the writer pool has a single
+/// connection: writes queue up for it in order, and a transaction holds it
+/// until it ends. In WAL mode readers never block the writer (nor each
+/// other), so the heavy aggregate queries get their own connections and
+/// cannot hold up the inserts of the tracker.
+///
+/// Never run a query on the writer pool while holding a transaction (or a
+/// connection) from it: with one connection that waits for itself. Inside
+/// a transaction, use the transaction.
 pub struct Database {
-    writer: Mutex<Connection>,
-    readers: Vec<Mutex<Connection>>,
-    next: AtomicUsize,
+    writer: SqlitePool,
+    reader: SqlitePool,
+    /// The hot path of the tracker looks up the site and the day's salt of
+    /// every hit; both hardly ever change, so they are kept in memory
+    /// instead of taking a database connection per hit. Misses (unknown
+    /// hostnames, which anyone can send) are not cached.
+    sites: RwLock<HashMap<String, (Site, Instant)>>,
+    salt: Mutex<Option<(String, String)>>,
 }
 
 pub type Db = Arc<Database>;
 
 impl Database {
-    /// The writer, for anything that changes data (or needs to read its
-    /// own writes in the same step).
-    pub async fn lock(&self) -> MutexGuard<'_, Connection> {
-        self.writer.lock().await
+    /// For everything that changes data, and for reads that must be part of
+    /// such a change (inside its transaction).
+    pub fn writer(&self) -> &SqlitePool {
+        &self.writer
     }
 
-    /// The writer from non-async code (the seed binary).
-    pub fn blocking_lock(&self) -> MutexGuard<'_, Connection> {
-        self.writer.blocking_lock()
+    /// For reads. An in-memory database (the tests) is private to its one
+    /// connection, so there it is the writer pool.
+    pub fn reader(&self) -> &SqlitePool {
+        &self.reader
     }
 
-    /// A read-only connection: a free one if there is one, otherwise the
-    /// next in turn. An in-memory database (the tests) is private to its
-    /// connection and has no readers, so reads use the writer there.
-    pub async fn read(&self) -> MutexGuard<'_, Connection> {
-        if self.readers.is_empty() {
-            return self.writer.lock().await;
+    /// The site registered for a hostname. A hit is answered from memory;
+    /// a miss reads the database once.
+    pub async fn site(&self, hostname: &str) -> sqlx::Result<Option<Site>> {
+        if let Some((site, since)) = self.sites.read().unwrap().get(hostname)
+            && since.elapsed() < SITE_TTL
+        {
+            return Ok(Some(*site));
         }
-        for reader in &self.readers {
-            if let Ok(conn) = reader.try_lock() {
-                return conn;
-            }
+        let site: Option<(i64, i64)> =
+            sqlx::query_as("SELECT id, honor_dnt FROM sites WHERE hostname = ?1")
+                .bind(hostname)
+                .fetch_optional(self.reader())
+                .await?;
+        let site = site.map(|(id, honor_dnt)| Site {
+            id,
+            honor_dnt: honor_dnt == 1,
+        });
+        if let Some(site) = site {
+            self.sites
+                .write()
+                .unwrap()
+                .insert(hostname.to_string(), (site, Instant::now()));
         }
-        let i = self.next.fetch_add(1, Ordering::Relaxed) % self.readers.len();
-        self.readers[i].lock().await
+        Ok(site)
+    }
+
+    /// Forget every cached site: call after a site is changed or deleted.
+    pub fn forget_sites(&self) {
+        self.sites.write().unwrap().clear();
+    }
+
+    /// The salt of a day, if it is the one in memory.
+    pub fn cached_salt(&self, day: &str) -> Option<String> {
+        match &*self.salt.lock().unwrap() {
+            Some((cached_day, salt)) if cached_day == day => Some(salt.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn remember_salt(&self, day: &str, salt: &str) {
+        *self.salt.lock().unwrap() = Some((day.to_string(), salt.to_string()));
+    }
+
+    /// Close the connections, which checkpoints the WAL: call on a clean
+    /// stop, after the last write.
+    pub async fn close(&self) {
+        self.reader.close().await;
+        self.writer.close().await;
     }
 }
 
@@ -57,132 +116,102 @@ const SYNCHRONOUS_MODES: [&str; 4] = ["OFF", "NORMAL", "FULL", "EXTRA"];
 pub const DEFAULT_SYNCHRONOUS: &str = "NORMAL";
 
 /// Open the database with the default `synchronous` mode.
-pub fn open(path: &str) -> Db {
-    open_with(path, DEFAULT_SYNCHRONOUS)
+pub async fn open(path: &str) -> Db {
+    open_with(path, DEFAULT_SYNCHRONOUS).await
 }
 
-/// Open the database and make sure the schema is current. The schema is
-/// idempotent, so this is also all the migration there is. `synchronous`
-/// is one of OFF, NORMAL, FULL and EXTRA, in any case.
-pub fn open_with(path: &str, synchronous: &str) -> Db {
+/// Open the database and bring its schema up to date (the files in
+/// `migrations/`, applied in order and recorded in `_sqlx_migrations`).
+/// `synchronous` is one of OFF, NORMAL, FULL and EXTRA, in any case.
+pub async fn open_with(path: &str, synchronous: &str) -> Db {
     let synchronous = synchronous.to_ascii_uppercase();
     assert!(
         SYNCHRONOUS_MODES.contains(&synchronous.as_str()),
         "SQLITE_SYNCHRONOUS must be one of {}, not {synchronous}",
         SYNCHRONOUS_MODES.join(", ")
     );
+    let synchronous = SqliteSynchronous::from_str(&synchronous).expect("a valid mode");
+
+    let memory = path == ":memory:";
     // The database's directory may not exist yet (a fresh clone, a new
     // volume): create it.
-    if let Some(parent) = std::path::Path::new(path)
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
+    if !memory
+        && let Some(parent) = std::path::Path::new(path)
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
     {
         let _ = std::fs::create_dir_all(parent);
     }
-    let conn =
-        Connection::open(path).unwrap_or_else(|e| panic!("cannot open database at {path}: {e}"));
-    conn.pragma_update(None, "journal_mode", "WAL").ok();
-    conn.pragma_update(None, "synchronous", &synchronous)
-        .expect("cannot set synchronous");
-    conn.pragma_update(None, "foreign_keys", "ON")
-        .expect("cannot enable foreign keys");
-    conn.execute_batch(SCHEMA)
-        .unwrap_or_else(|e| panic!("cannot initialize schema: {e}"));
-    ensure_columns(&conn);
+
+    let options = if memory {
+        SqliteConnectOptions::from_str("sqlite::memory:").expect("a valid url")
+    } else {
+        SqliteConnectOptions::new()
+            .filename(path)
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+    }
+    .synchronous(synchronous)
+    .foreign_keys(true)
+    .busy_timeout(Duration::from_secs(5));
+
+    // The connections live as long as the pool: an in-memory database
+    // disappears with its connection.
+    let pool = |options: SqliteConnectOptions, connections: u32| {
+        SqlitePoolOptions::new()
+            .max_connections(connections)
+            .min_connections(1)
+            .idle_timeout(None)
+            .max_lifetime(None)
+            .connect_lazy_with(options)
+    };
+    let writer = pool(options.clone(), 1);
+    migrate(&writer).await;
 
     // The readers open after the schema exists, so they see a finished
     // database in WAL mode.
-    let readers = if path == ":memory:" {
-        Vec::new()
+    let reader = if memory {
+        writer.clone()
     } else {
-        (0..READERS)
-            .map(|_| {
-                let reader = Connection::open_with_flags(
-                    path,
-                    OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-                )
-                .unwrap_or_else(|e| panic!("cannot open a reader on {path}: {e}"));
-                Mutex::new(reader)
-            })
-            .collect()
+        pool(options.create_if_missing(false).read_only(true), READERS)
     };
     Arc::new(Database {
-        writer: Mutex::new(conn),
-        readers,
-        next: AtomicUsize::new(0),
+        writer,
+        reader,
+        sites: RwLock::new(HashMap::new()),
+        salt: Mutex::new(None),
     })
 }
 
-/// Columns the schema grew after databases already existed. Each runs
-/// when its column is missing, so an existing database keeps working.
-const ADDED_COLUMNS: &[(&str, &str, &str)] = &[(
-    "users",
-    "theme",
-    "ALTER TABLE users ADD COLUMN theme TEXT NOT NULL DEFAULT '{\"base\":\"light\",\"accent\":\"#0f172a\"}'",
-)];
-
-fn ensure_columns(conn: &Connection) {
-    for (table, column, alter) in ADDED_COLUMNS {
-        let present: bool = conn
-            .prepare(&format!("PRAGMA table_info({table})"))
-            .and_then(|mut stmt| {
-                let mut rows = stmt.query([])?;
-                let mut found = false;
-                while let Some(row) = rows.next()? {
-                    if row.get::<_, String>(1)? == *column {
-                        found = true;
-                    }
-                }
-                Ok(found)
-            })
-            .unwrap_or(false);
-        if !present {
-            conn.execute(alter, [])
-                .unwrap_or_else(|e| panic!("cannot add the missing column: {e}"));
-        }
+/// Apply the migrations. A database from before migrations existed has the
+/// tables of the first one and no history of it: its statements are all
+/// idempotent, so it adopts them unchanged — except that a very old one
+/// lacks the `theme` column, which the first migration now includes.
+async fn migrate(pool: &SqlitePool) {
+    let count = |sql: &'static str| async move {
+        sqlx::query_scalar::<_, i64>(sql)
+            .fetch_one(pool)
+            .await
+            .unwrap_or_else(|e| panic!("cannot inspect the database: {e}"))
+    };
+    let legacy = count("SELECT COUNT(*) FROM sqlite_master WHERE name = 'users'").await > 0
+        && count("SELECT COUNT(*) FROM sqlite_master WHERE name = '_sqlx_migrations'").await == 0;
+    if legacy
+        && count("SELECT COUNT(*) FROM pragma_table_info('users') WHERE name = 'theme'").await == 0
+    {
+        sqlx::query(
+            "ALTER TABLE users ADD COLUMN theme TEXT NOT NULL
+             DEFAULT '{\"base\":\"light\",\"accent\":\"#0f172a\"}'",
+        )
+        .execute(pool)
+        .await
+        .unwrap_or_else(|e| panic!("cannot add the missing column: {e}"));
     }
+    sqlx::migrate!("./migrations")
+        .run(pool)
+        .await
+        .unwrap_or_else(|e| panic!("cannot migrate the database: {e}"));
 }
-
-const SCHEMA: &str = r##"
-CREATE TABLE IF NOT EXISTS users (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  email TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  is_admin INTEGER NOT NULL DEFAULT 0,
-  date_format TEXT NOT NULL DEFAULT 'YYYY-MM-DD',
-  time_format TEXT NOT NULL DEFAULT '24h',
-  theme TEXT NOT NULL DEFAULT '{"base":"light","accent":"#0f172a"}',
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-CREATE TABLE IF NOT EXISTS sessions (
-  token_hash TEXT PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  expires_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS sites (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  hostname TEXT NOT NULL UNIQUE,
-  honor_dnt INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-CREATE TABLE IF NOT EXISTS hits (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  site_id INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL CHECK (kind IN ('pageview', 'click')),
-  path TEXT NOT NULL,
-  name TEXT,
-  referrer TEXT,
-  country TEXT,
-  device TEXT NOT NULL,
-  browser TEXT NOT NULL DEFAULT 'Other',
-  os TEXT NOT NULL DEFAULT 'Other',
-  visitor TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-CREATE INDEX IF NOT EXISTS hits_site_time ON hits (site_id, created_at);
-CREATE TABLE IF NOT EXISTS salts (day TEXT PRIMARY KEY, salt TEXT NOT NULL);
-PRAGMA user_version = 1;
-"##;
 
 #[cfg(test)]
 mod tests {
@@ -192,47 +221,130 @@ mod tests {
     async fn readers_see_the_writes_and_do_not_block_the_writer() {
         let dir = std::env::temp_dir().join(format!("potoo-db-test-{}", std::process::id()));
         let path = dir.join("test.db");
-        let db = open(path.to_str().unwrap());
+        let db = open(path.to_str().unwrap()).await;
 
-        let writer = db.lock().await;
-        writer
-            .execute(
-                "INSERT INTO salts (day, salt) VALUES ('2026-01-01', 'a')",
-                [],
-            )
-            .unwrap();
-
-        // A read while the writer is held: it must not wait for it.
-        let reader = tokio::time::timeout(std::time::Duration::from_secs(2), db.read())
+        // A transaction holds the only writer connection ...
+        let mut tx = db.writer().begin().await.unwrap();
+        sqlx::query("INSERT INTO salts (day, salt) VALUES ('2026-01-01', 'a')")
+            .execute(&mut *tx)
             .await
-            .expect("a reader waited for the writer");
-        let salt: String = reader
-            .query_row("SELECT salt FROM salts WHERE day = '2026-01-01'", [], |r| {
-                r.get(0)
-            })
             .unwrap();
+        tx.commit().await.unwrap();
+        let held = db.writer().acquire().await.unwrap();
+
+        // ... and a read goes through anyway, seeing the committed write.
+        let salt: String = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            sqlx::query_scalar("SELECT salt FROM salts WHERE day = '2026-01-01'")
+                .fetch_one(db.reader()),
+        )
+        .await
+        .expect("a reader waited for the writer")
+        .unwrap();
         assert_eq!(salt, "a");
         // And it really is read-only.
-        assert!(reader.execute("DELETE FROM salts", []).is_err());
+        assert!(
+            sqlx::query("DELETE FROM salts")
+                .execute(db.reader())
+                .await
+                .is_err()
+        );
 
-        drop((reader, writer));
+        drop(held);
+        db.close().await;
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    #[test]
-    fn synchronous_is_normal_by_default_and_configurable() {
-        let mode = |db: Db| -> i64 {
-            db.blocking_lock()
-                .query_row("PRAGMA synchronous", [], |r| r.get(0))
+    #[tokio::test]
+    async fn synchronous_is_normal_by_default_and_configurable() {
+        let mode = |db: Db| async move {
+            sqlx::query_scalar::<_, i64>("PRAGMA synchronous")
+                .fetch_one(db.writer())
+                .await
                 .unwrap()
         };
-        assert_eq!(mode(open(":memory:")), 1); // NORMAL
-        assert_eq!(mode(open_with(":memory:", "full")), 2); // FULL
+        assert_eq!(mode(open(":memory:").await).await, 1); // NORMAL
+        assert_eq!(mode(open_with(":memory:", "full").await).await, 2); // FULL
     }
 
-    #[test]
+    #[tokio::test]
     #[should_panic(expected = "SQLITE_SYNCHRONOUS")]
-    fn an_unknown_synchronous_mode_is_refused() {
-        open_with(":memory:", "sometimes");
+    async fn an_unknown_synchronous_mode_is_refused() {
+        open_with(":memory:", "sometimes").await;
+    }
+
+    #[tokio::test]
+    async fn sites_are_cached_until_forgotten() {
+        let db = open(":memory:").await;
+        sqlx::query("INSERT INTO sites (hostname, honor_dnt) VALUES ('a.com', 0)")
+            .execute(db.writer())
+            .await
+            .unwrap();
+        assert!(!db.site("a.com").await.unwrap().unwrap().honor_dnt);
+        assert!(db.site("nope.com").await.unwrap().is_none());
+
+        // Changed behind the cache's back: still the cached value ...
+        sqlx::query("UPDATE sites SET honor_dnt = 1")
+            .execute(db.writer())
+            .await
+            .unwrap();
+        assert!(!db.site("a.com").await.unwrap().unwrap().honor_dnt);
+        // ... until the site is forgotten, as the routes do after an edit.
+        db.forget_sites();
+        assert!(db.site("a.com").await.unwrap().unwrap().honor_dnt);
+
+        // A site added later is found: misses are not cached.
+        sqlx::query("INSERT INTO sites (hostname) VALUES ('nope.com')")
+            .execute(db.writer())
+            .await
+            .unwrap();
+        assert!(db.site("nope.com").await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn a_database_from_before_migrations_is_adopted() {
+        let dir = std::env::temp_dir().join(format!("potoo-legacy-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("legacy.db");
+        // What an old build left behind: users without a theme, a row in it.
+        let options = SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true);
+        let old = SqlitePool::connect_with(options).await.unwrap();
+        sqlx::query(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL UNIQUE,
+               password_hash TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0,
+               date_format TEXT NOT NULL DEFAULT 'YYYY-MM-DD', time_format TEXT NOT NULL DEFAULT '24h',
+               created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')))",
+        )
+        .execute(&old)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO users (email, password_hash) VALUES ('a@b.co', 'x')")
+            .execute(&old)
+            .await
+            .unwrap();
+        old.close().await;
+
+        let db = open(path.to_str().unwrap()).await;
+        let theme: String = sqlx::query_scalar("SELECT theme FROM users")
+            .fetch_one(db.reader())
+            .await
+            .unwrap();
+        assert!(theme.contains("light"));
+        // The other tables arrived, and the history is recorded.
+        let hits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM hits")
+            .fetch_one(db.reader())
+            .await
+            .unwrap();
+        assert_eq!(hits, 0);
+        let applied: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations")
+            .fetch_one(db.reader())
+            .await
+            .unwrap();
+        assert_eq!(applied, 1);
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

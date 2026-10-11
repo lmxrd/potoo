@@ -17,8 +17,11 @@ maxminddb = "0.32.0"
 mime_guess = "2.0.5"
 rand = "0.10.3"
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
-rusqlite = { version = "0.40.2", features = ["bundled"] }
 rust-embed = "8.13.0"
+# SQLite only (bundled, so the static musl build needs no system library); no
+# TLS or other drivers. Queries are checked at run time: `sqlx::query`, never
+# the `query!` macros, which need a database at compile time.
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
@@ -28,6 +31,15 @@ tokio = { version = "1.53.2", features = ["full"] }
 tower-http = { version = "0.7.1", features = ["cors", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"
+# Profiling only, never in a production build (see the profiling feature).
+pprof = { version = "0.15.0", optional = true, features = ["flamegraph"] }
+
+[features]
+# A CPU profile of the running server: sampled while it runs, written as a
+# flamegraph (PROFILE_FLAMEGRAPH=<path>) when it is stopped with SIGINT or
+# SIGTERM, and per-phase timers of the hit path printed every 5 seconds.
+# Off by default; build with `--features profiling --profile profiling`.
+profiling = ["dep:pprof"]
 
 # Smaller, faster release binaries; the release workflow and the image
 # both build with this profile.
@@ -35,3 +47,9 @@ tracing-subscriber = "0.3.23"
 strip = true
 lto = true
 codegen-units = 1
+
+# A release build that keeps its symbols, so a profile has names in it.
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = 1

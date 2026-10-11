@@ -47,8 +47,8 @@ impl IntoResponse for HttpError {
     }
 }
 
-impl From<rusqlite::Error> for HttpError {
-    fn from(e: rusqlite::Error) -> Self {
+impl From<sqlx::Error> for HttpError {
+    fn from(e: sqlx::Error) -> Self {
         HttpError::internal(format!("database error: {e}"))
     }
 }

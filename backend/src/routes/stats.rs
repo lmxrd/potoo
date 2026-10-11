@@ -21,6 +21,7 @@ async fn stats(
 ) -> Result<Json<serde_json::Value>, HttpError> {
     let (range, filters) = range_and_filter(&query)?;
     let ids = site_ids(&state, query.sites.as_deref()).await?;
+    state.ingest.flush().await;
     let stats = stats_for(&state.db, &ids, &range, &filters, Utc::now()).await?;
     Ok(Json(json!(serde_json::to_value(&stats).unwrap())))
 }

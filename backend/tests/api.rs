@@ -14,8 +14,10 @@ struct TestApp {
 
 async fn spawn_app() -> TestApp {
     potoo::install_tls_provider();
+    let db = db::open(":memory:").await;
     let state = AppState {
-        db: db::open(":memory:"),
+        ingest: potoo::ingest::Ingest::spawn(db.clone()).0,
+        db,
         geo: Arc::new(geo::Geo::open("/nonexistent/country.mmdb", None).await),
         trust_proxy: true,
         throttle: Arc::new(auth::LoginThrottle::default()),

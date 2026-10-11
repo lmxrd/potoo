@@ -4,8 +4,8 @@ use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier, generate_salt};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
-use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
+use sqlx::SqliteExecutor;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -26,7 +26,7 @@ pub const DATE_FORMATS: [&str; 5] = [
 pub const TIME_FORMATS: [&str; 2] = ["24h", "12h"];
 
 /// The signed-in user, as the session endpoint returns them.
-#[derive(Serialize)]
+#[derive(Serialize, sqlx::FromRow)]
 pub struct User {
     pub id: i64,
     pub email: String,
@@ -56,43 +56,36 @@ pub fn verify_password(password: &str, stored: &str) -> bool {
 }
 
 /// The user of a valid session cookie, if any.
-pub fn current_user(conn: &Connection, token: Option<&str>) -> Option<User> {
+pub async fn current_user<'e>(db: impl SqliteExecutor<'e>, token: Option<&str>) -> Option<User> {
     let token = token?;
-    let now = now_iso();
-    conn.query_row(
+    sqlx::query_as::<_, User>(
         "SELECT u.id, u.email, u.is_admin, u.date_format, u.time_format, u.theme
          FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = ?1 AND s.expires_at > ?2",
-        params![sha256_hex(token), now],
-        |row| {
-            Ok(User {
-                id: row.get(0)?,
-                email: row.get(1)?,
-                is_admin: row.get(2)?,
-                date_format: row.get(3)?,
-                time_format: row.get(4)?,
-                theme: row.get(5)?,
-            })
-        },
     )
-    .optional()
+    .bind(sha256_hex(token))
+    .bind(now_iso())
+    .fetch_optional(db)
+    .await
     .ok()
     .flatten()
 }
 
 /// Create a session and set its cookie, returning the updated jar.
-pub fn create_session(
-    conn: &Connection,
+pub async fn create_session<'e>(
+    db: impl SqliteExecutor<'e>,
     jar: CookieJar,
     user_id: i64,
     secure: bool,
-) -> rusqlite::Result<CookieJar> {
+) -> sqlx::Result<CookieJar> {
     let token = random_hex(32);
     let expires = SystemTime::now() + Duration::from_secs(SESSION_DAYS * 86_400);
-    conn.execute(
-        "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?1, ?2, ?3)",
-        params![sha256_hex(&token), user_id, iso(expires)],
-    )?;
+    sqlx::query("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?1, ?2, ?3)")
+        .bind(sha256_hex(&token))
+        .bind(user_id)
+        .bind(iso(expires))
+        .execute(db)
+        .await?;
     Ok(jar.add(
         Cookie::build((COOKIE.to_string(), token))
             .path("/")
@@ -104,13 +97,15 @@ pub fn create_session(
 }
 
 /// Delete the session of the request's cookie, and clear the cookie.
-pub fn destroy_session(conn: &Connection, jar: CookieJar) -> rusqlite::Result<CookieJar> {
+pub async fn destroy_session<'e>(
+    db: impl SqliteExecutor<'e>,
+    jar: CookieJar,
+) -> sqlx::Result<CookieJar> {
     if let Some(cookie) = jar.get(COOKIE) {
-        let token = cookie.value().to_string();
-        conn.execute(
-            "DELETE FROM sessions WHERE token_hash = ?1",
-            params![sha256_hex(&token)],
-        )?;
+        sqlx::query("DELETE FROM sessions WHERE token_hash = ?1")
+            .bind(sha256_hex(cookie.value()))
+            .execute(db)
+            .await?;
     }
     Ok(jar.remove(Cookie::from(COOKIE)))
 }

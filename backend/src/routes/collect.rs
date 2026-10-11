@@ -1,4 +1,6 @@
 use crate::error::HttpError;
+use crate::ingest::NewHit;
+use crate::profile::{Phase, timed};
 use crate::state::AppState;
 use crate::tracker::{GIF, TRACKER_JS};
 use crate::visitor::{client_ip, parse_browser, parse_device, parse_os, visitor_hash};
@@ -7,7 +9,6 @@ use axum::extract::{ConnectInfo, Query, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use rusqlite::{OptionalExtension, params};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -95,19 +96,11 @@ async fn record(
     let Some(host) = host else {
         return Ok(());
     };
-    let conn = state.db.lock().await;
-    let site: Option<(i64, i64)> = conn
-        .query_row(
-            "SELECT id, honor_dnt FROM sites WHERE hostname = ?1",
-            params![&host],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    drop(conn);
-    let Some((site_id, honor_dnt)) = site else {
+    let site = timed(Phase::Site, state.db.site(&host)).await?;
+    let Some(site) = site else {
         return Ok(());
     };
-    if honor_dnt == 1
+    if site.honor_dnt
         && (headers.get("dnt").map(|v| v == "1").unwrap_or(false)
             || headers.get("sec-gpc").map(|v| v == "1").unwrap_or(false))
     {
@@ -133,28 +126,22 @@ async fn record(
         ),
         Kind::Pageview => (None, clean_referrer(hit.referrer.as_deref(), &host)),
     };
-    let country = state.geo.lookup(&ip).await;
-    let visitor = visitor_hash(&state.db, site_id, &ip, ua).await;
+    let country = timed(Phase::Geo, state.geo.lookup(&ip)).await;
+    let visitor = visitor_hash(&state.db, site.id, &ip, ua).await;
 
-    let conn = state.db.lock().await;
-    conn.execute(
-        "INSERT INTO hits
-           (site_id, kind, path, name, referrer, country, device, browser, os, visitor)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        params![
-            site_id,
-            hit.kind.as_str(),
-            clean_path(hit.path.as_deref()),
-            name,
-            referrer,
-            country,
-            device.as_str(),
-            parse_browser(ua),
-            parse_os(ua),
-            visitor,
-        ],
-    )?;
-    Ok(())
+    state.ingest.submit(NewHit {
+        created_at: crate::auth::now_iso(),
+        site_id: site.id,
+        kind: hit.kind.as_str(),
+        path: clean_path(hit.path.as_deref()),
+        name,
+        referrer,
+        country,
+        device: device.as_str().into(),
+        browser: parse_browser(ua).into(),
+        os: parse_os(ua).into(),
+        visitor,
+    })
 }
 
 // The beacon endpoint of /api/collect, hit by the tracker script.
@@ -179,17 +166,20 @@ async fn collect_post(
             "click" => Kind::Click,
             _ => return Ok(StatusCode::NO_CONTENT.into_response()),
         };
-        record(
-            &state,
-            &headers,
-            Some(addr.ip()),
-            Hit {
-                host: host_of(hit.host.as_deref()),
-                kind,
-                path: hit.path,
-                name: hit.name,
-                referrer: hit.referrer,
-            },
+        timed(
+            Phase::Total,
+            record(
+                &state,
+                &headers,
+                Some(addr.ip()),
+                Hit {
+                    host: host_of(hit.host.as_deref()),
+                    kind,
+                    path: hit.path,
+                    name: hit.name,
+                    referrer: hit.referrer,
+                },
+            ),
         )
         .await?;
     }

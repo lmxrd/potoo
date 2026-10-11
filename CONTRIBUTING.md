@@ -25,6 +25,8 @@ backend).
 | `mise run start`        | Builds, then runs the server (never a stale binary)            |
 | `mise run build`        | Builds the frontend and compiles the backend binary            |
 | `mise run build:docker` | Builds the Docker image                                       |
+| `mise run build:profiling` | The image with per-phase timers and an opt-in CPU flamegraph (never published) |
+| `mise run loadtest`     | Write load against the image in a 2 CPU, 2 GB container (`scripts/loadtest.sh`; `TARGET=goatcounter` compares) |
 | `mise run check`        | Format, lint and type checks for backend and frontend         |
 | `mise run fix`          | Applies the format and lint fixes                             |
 | `mise run test`         | The backend end-to-end tests                                  |
@@ -38,12 +40,24 @@ against an in-memory database: setup, login and its throttle, users and
 the last-admin rules, sites, collection (bots and Do-Not-Track
 included), the stats with a filter, and the export.
 
+## Changing the schema
+
+Add a new numbered file to `backend/migrations/` (`0002_what_it_does.sql`).
+It is applied, in order, when the server or the seed starts, and recorded in
+the `_sqlx_migrations` table. Never edit a migration that has shipped: its
+checksum is recorded, and a changed file stops the server from starting.
+The first one is idempotent so that databases created before migrations
+existed adopt it unchanged.
+
 ## The code
 
 ```
 backend/src/main.rs        entrypoint: env config, geo refresh, retention
 backend/src/lib.rs         the app: routes, cache headers, static serving
-backend/src/db.rs          the SQLite connection + schema, applied on startup
+backend/src/db.rs          the SQLite pools (one writer, read-only readers), caches, migrations on startup
+backend/src/ingest.rs      the hit queue and the batched writer
+backend/src/profile.rs     per-phase timers, compiled in only with the profiling feature
+backend/migrations/        the schema, one numbered SQL file per change (sqlx migrations)
 backend/src/auth.rs        password hashing, sessions, the login throttle
 backend/src/visitor.rs     user agent parsing, client IP, visitor hashes
 backend/src/geo.rs         country lookup + the weekly DB-IP download

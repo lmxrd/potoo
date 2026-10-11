@@ -46,6 +46,11 @@ depends = ["build:frontend"]
 [tasks."build:docker"]
 run = "podman build -t potoo ."
 
+# The image with a CPU profiler: stop the container (SIGTERM) and the
+# flamegraph is written to /data/flamegraph.svg. Never push this one.
+[tasks."build:profiling"]
+run = "podman build --build-arg PROFILE=profiling --build-arg FEATURES=profiling -t potoo:profiling ."
+
 [tasks.check]
 depends = ["check:frontend", "check:backend"]
 
@@ -71,6 +76,11 @@ run = "pnpm run -C frontend fix"
 [tasks.test]
 depends = ["build:frontend"]
 run = "cargo test --manifest-path backend/Cargo.toml"
+
+# Write load against the production image in a 2 CPU, 2 GB container; see
+# scripts/loadtest.sh for the settings (CPUS, MEMORY, RATES, DURATION).
+[tasks.loadtest]
+run = "scripts/loadtest.sh"
 
 # A year of demo data for development. Wipes every hit — not the sites
 # or users — and creates the demo site blog.example.com when there is

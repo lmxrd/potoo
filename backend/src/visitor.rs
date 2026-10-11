@@ -1,7 +1,7 @@
 use crate::db::Db;
+use crate::profile::{Phase, timed};
 use crate::util::{random_hex, sha256_hex};
 use axum::http::HeaderMap;
-use rusqlite::{OptionalExtension, params};
 use std::net::IpAddr;
 
 /// The device class of a hit.
@@ -120,36 +120,49 @@ pub fn client_ip(headers: &HeaderMap, addr: Option<IpAddr>, trust_proxy: bool) -
 /// deleted, so hashes cannot be linked across days.
 async fn daily_salt(db: &Db) -> String {
     let day = crate::auth::now_iso()[..10].to_string();
-    let conn = db.lock().await;
-    let existing: Option<String> = conn
-        .query_row(
-            "SELECT salt FROM salts WHERE day = ?1",
-            params![&day],
-            |row| row.get(0),
-        )
-        .optional()
-        .unwrap_or(None);
-    if let Some(salt) = existing {
+    if let Some(salt) = db.cached_salt(&day) {
         return salt;
     }
-    conn.execute(
-        "INSERT OR IGNORE INTO salts (day, salt) VALUES (?1, ?2)",
-        params![&day, random_hex(32)],
-    )
-    .ok();
-    conn.execute("DELETE FROM salts WHERE day < ?1", params![&day])
-        .ok();
-    conn.query_row(
-        "SELECT salt FROM salts WHERE day = ?1",
-        params![&day],
-        |row| row.get(0),
-    )
-    .unwrap_or_default()
+    let existing: Option<String> = sqlx::query_scalar("SELECT salt FROM salts WHERE day = ?1")
+        .bind(&day)
+        .fetch_optional(db.reader())
+        .await
+        .unwrap_or(None);
+    if let Some(salt) = existing {
+        db.remember_salt(&day, &salt);
+        return salt;
+    }
+    // The first hit of a day creates its salt, and removes the older ones.
+    let created = async {
+        let mut tx = db.writer().begin().await?;
+        sqlx::query("INSERT OR IGNORE INTO salts (day, salt) VALUES (?1, ?2)")
+            .bind(&day)
+            .bind(random_hex(32))
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("DELETE FROM salts WHERE day < ?1")
+            .bind(&day)
+            .execute(&mut *tx)
+            .await?;
+        let salt: String = sqlx::query_scalar("SELECT salt FROM salts WHERE day = ?1")
+            .bind(&day)
+            .fetch_one(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok::<String, sqlx::Error>(salt)
+    }
+    .await
+    .unwrap_or_default();
+    // A failed write leaves the salt empty: do not keep that for the day.
+    if !created.is_empty() {
+        db.remember_salt(&day, &created);
+    }
+    created
 }
 
 /// Pseudonymous, per-day, per-site visitor id. The IP and UA are never
 /// stored: only this hash of them, truncated to 32 hex characters.
 pub async fn visitor_hash(db: &Db, site_id: i64, ip: &str, ua: &str) -> String {
-    let salt = daily_salt(db).await;
+    let salt = timed(Phase::Salt, daily_salt(db)).await;
     sha256_hex(&format!("{salt}|{site_id}|{ip}|{ua}"))[..32].to_string()
 }
