@@ -109,8 +109,11 @@ async fn export(
         .collect::<Vec<String>>(),
     ];
     rows.extend(hits);
-    // The filename carries the export's moment, ISO to the minute: two
+    // The filename carries the export's moment, ISO to the second: two
     // exports of the same view differ, and downloads never collide.
-    let name = format!("potoo-export-{}.csv", Utc::now().format("%Y-%m-%dT%H:%M"));
+    let name = format!(
+        "potoo-export-{}.csv",
+        Utc::now().format("%Y-%m-%dT%H:%M:%S")
+    );
     Ok(csv::download(csv::write_csv(&rows), &name))
 }
