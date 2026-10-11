@@ -25,10 +25,10 @@ pub fn router() -> OpenApiRouter<AppState> {
     tag = "Stats",
     operation_id = "exportHits",
     summary = "Export the hits of a dashboard view as CSV",
-    description = "Every recorded hit of the selected view, oldest first, one CSV row each: site, created_at, kind, path, name, referrer, country, device, browser, os. Takes the same parameters as the stats, so what you see is what you get. Sent as an attachment named potoo-export.csv.",
+    description = "Every recorded hit of the selected view, oldest first, one CSV row each: site, created_at, kind, path, name, referrer, country, device, browser, os. Takes the same parameters as the stats, so what you see is what you get. Sent as an attachment named potoo-export-<timestamp>.csv.",
     params(StatsQuery),
     responses(
-        (status = 200, description = "The hits as CSV", body = String, content_type = "text/csv", headers(("content-disposition" = String, description = "attachment; filename=\"potoo-export.csv\""))),
+        (status = 200, description = "The hits as CSV", body = String, content_type = "text/csv", headers(("content-disposition" = String, description = "attachment; filename=\"potoo-export-<timestamp>.csv\""))),
         (status = 400, description = "The request is invalid", body = ErrorBody),
         (status = 401, description = "Not signed in", body = ErrorBody),
     ),
@@ -109,5 +109,8 @@ async fn export(
         .collect::<Vec<String>>(),
     ];
     rows.extend(hits);
-    Ok(csv::download(csv::write_csv(&rows), "potoo-export.csv"))
+    // The filename carries the export's moment, UTC to the minute: two
+    // exports of the same view differ, and downloads never collide.
+    let name = format!("potoo-export-{}.csv", Utc::now().format("%Y-%m-%dT%H-%M"));
+    Ok(csv::download(csv::write_csv(&rows), &name))
 }

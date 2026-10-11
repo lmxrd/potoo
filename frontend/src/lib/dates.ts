@@ -6,20 +6,7 @@ export const DATE_FORMATS = [
   { value: "DD.MM.YYYY", label: "DD.MM.YYYY (09.10.2026)" },
 ];
 
-const MONTHS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /**
  * A `HH:MM` time as configured: 24-hour by default, or 12-hour with AM/PM.
@@ -37,17 +24,11 @@ export function formatTime(time: string, format = "24h"): string {
  * the hour for hourly buckets, the month for a year, and "9 Oct" style
  * days otherwise.
  */
-export function chartLabel(
-  day: string,
-  range: number,
-  timeFormat = "24h",
-): string {
+export function chartLabel(day: string, range: number, timeFormat = "24h"): string {
   if (range === 1) return formatTime(day.slice(11, 16), timeFormat);
   if (range > 90) {
     const [, month, year] = day.split("-");
-    return Number(month) === 1
-      ? `${MONTHS[0]} ${year.slice(2)}`
-      : MONTHS[Number(month) - 1];
+    return Number(month) === 1 ? `${MONTHS[0]} ${year.slice(2)}` : MONTHS[Number(month) - 1];
   }
   const [, month, date] = day.split("-");
   return `${Number(date)} ${MONTHS[Number(month) - 1]}`;
