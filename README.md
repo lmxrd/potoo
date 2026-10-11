@@ -34,7 +34,7 @@ identity, and you keep your data.
   SPA navigation via `pushState` is tracked.
 - **CSV export** of all hits, filtered like the dashboard view.
 - **Multiple users, any number of admins**, with role management, password
-  resets, and per-user settings (email, password, date format).
+  resets, and per-user settings (email, password, date and time format, theme).
 
 ![A site's page: its snippet and settings](docs/screenshots/site.png)
 
@@ -46,8 +46,8 @@ identity, and you keep your data.
 
 ### Docker
 
-The CI publishes an amd64 image to the GitHub Container Registry, so
-running your own instance is one command:
+Every release publishes a multi-arch image (amd64 and arm64) to the GitHub
+Container Registry, so running your own instance is one command:
 
 ```bash
 docker run -d --name potoo -p 8000:8000 -v potoo-data:/data ghcr.io/lmxrd/potoo
@@ -87,7 +87,7 @@ docker run -d --name potoo -p 8000:8000 -v potoo-data:/data potoo
 The image is Alpine holding a single static binary: the frontend and
 the database schema are embedded in it. The database and the GeoIP database
 live in the `/data` volume. Build it yourself with `mise run build:docker`
-(podman; the image is amd64, emulated on arm64 machines).
+(podman); it builds natively for the architecture of your machine.
 
 Behind a reverse proxy, set `TRUST_PROXY=1` so the client IP is read from
 `X-Forwarded-For`, and terminate TLS there.
@@ -207,6 +207,16 @@ of rows the dashboard view is computed from, so what you see is what you get.
 | `RETENTION_DAYS`     | unset               | Delete hits older than this                                                                                                                 |
 
 This site or product includes IP data from db-ip.com, licensed under CC BY 4.0.
+
+### How hits are stored
+
+A hit is answered as soon as it is queued, and a single writer commits the
+queued hits to the database in batches, typically within a few
+milliseconds. A clean stop (`docker stop`, a deploy) finishes the requests
+in flight and writes everything queued. A crash or a power cut can lose the
+hits still queued — the last few milliseconds — and, with the default
+`SQLITE_SYNCHRONOUS=NORMAL`, the last few commits. Past a queue of 20,000
+waiting hits the tracker answers `503` instead of buffering more.
 
 ## Notes
 

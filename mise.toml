@@ -1,5 +1,8 @@
+# Node and pnpm match the Docker image (node:24, and the pnpm of
+# frontend/package.json's packageManager): change them together.
 [tools]
-pnpm = "latest"
+node = "24"
+pnpm = "12.11.2"
 # The host target comes with the toolchain; the release also builds the
 # static musl binary, so its std is installed for either architecture.
 rust = {
@@ -13,14 +16,20 @@ rust = {
 [tasks.dev]
 depends = ["dev:backend", "dev:frontend"]
 
+# The backend needs frontend/dist to exist to compile, even in debug.
 [tasks."dev:backend"]
+depends = ["build:frontend"]
 run = "cargo run --manifest-path backend/Cargo.toml"
 
+# Tasks with sources and outputs are skipped when the outputs are newer
+# than the sources.
+#
 # The frontend's dependencies. Every frontend task depends on this, so a
 # fresh checkout (CI included) works; pnpm installs frozen when CI is set.
 [tasks."install:frontend"]
 run = "pnpm install -C frontend"
-sources = ["./frontend/package.json", "./frontend/node_modules"]
+sources = ["frontend/package.json", "frontend/pnpm-lock.yaml"]
+outputs = ["frontend/node_modules/.modules.yaml"]
 
 [tasks."dev:frontend"]
 depends = ["install:frontend"]
@@ -38,10 +47,28 @@ depends = ["build:frontend", "build:backend"]
 [tasks."build:frontend"]
 depends = ["install:frontend"]
 run = "pnpm run -C frontend build"
+sources = [
+  "frontend/src/**/*",
+  "frontend/index.html",
+  "frontend/vite.config.ts",
+  "frontend/tsconfig.json",
+  "frontend/package.json",
+  "frontend/pnpm-lock.yaml",
+]
+outputs = ["frontend/dist/index.html"]
 
 [tasks."build:backend"]
-run = "cargo build --release --manifest-path backend/Cargo.toml"
 depends = ["build:frontend"]
+run = "cargo build --release --manifest-path backend/Cargo.toml"
+sources = [
+  "backend/src/**/*",
+  "backend/migrations/**/*",
+  "backend/Cargo.toml",
+  "backend/Cargo.lock",
+  "backend/build.rs",
+  "frontend/dist/**/*",
+]
+outputs = ["backend/target/release/potoo"]
 
 [tasks."build:docker"]
 run = "podman build -t potoo ."
@@ -76,6 +103,7 @@ run = "pnpm run -C frontend fix"
 [tasks.test]
 depends = ["build:frontend"]
 run = "cargo test --manifest-path backend/Cargo.toml"
+sources = ["backend/src/**/*", "backend/tests/**/*", "backend/migrations/**/*", "backend/Cargo.toml", "backend/Cargo.lock"]
 
 # Write load against the production image in a 2 CPU, 2 GB container; see
 # scripts/loadtest.sh for the settings (CPUS, MEMORY, RATES, DURATION).
@@ -86,6 +114,7 @@ run = "scripts/loadtest.sh"
 # or users — and creates the demo site blog.example.com when there is
 # none. Deterministic: seeding twice gives the same data.
 [tasks.seed]
+depends = ["build:frontend"]
 run = "cargo run --manifest-path backend/Cargo.toml --bin seed"
 
 # Remove the local data: the SQLite database and the GeoIP database.

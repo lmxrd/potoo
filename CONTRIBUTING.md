@@ -7,7 +7,7 @@ way are the changes we want.
 ## Getting set up
 
 Install [mise](https://mise.jdx.dev) and run `mise install` — it brings
-the Rust toolchain and pnpm. Then:
+the Rust toolchain, Node and pnpm. Then:
 
 ```bash
 mise run dev     # the backend on :8000 and the Vite dev server together
@@ -19,19 +19,22 @@ backend).
 
 ## Tasks
 
-| Task                    | What it does                                                 |
-| ----------------------- | ------------------------------------------------------------ |
-| `mise run dev`          | Runs the backend and the frontend (Vite) together            |
-| `mise run start`        | Builds, then runs the server (never a stale binary)            |
-| `mise run build`        | Builds the frontend and compiles the backend binary            |
-| `mise run build:docker` | Builds the Docker image                                       |
-| `mise run build:profiling` | The image with per-phase timers and an opt-in CPU flamegraph (never published) |
-| `mise run loadtest`     | Write load against the image in a 2 CPU, 2 GB container (`scripts/loadtest.sh`; `TARGET=goatcounter` compares) |
-| `mise run check`        | Format, lint and type checks for backend and frontend         |
-| `mise run fix`          | Applies the format and lint fixes                             |
-| `mise run test`         | The backend end-to-end tests                                  |
-| `mise run seed`         | A year of demo data (wipes every hit; deterministic)          |
-| `mise run clean`        | Removes the local data: the database and the GeoIP database   |
+| Task                       | What it does                                                                                                   |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `mise run dev`             | Runs the backend and the frontend (Vite) together                                                              |
+| `mise run start`           | Builds, then runs the server (never a stale binary)                                                            |
+| `mise run build`           | Builds the frontend and compiles the backend binary                                                            |
+| `mise run build:docker`    | Builds the Docker image (podman), natively for your machine                                                    |
+| `mise run build:profiling` | The image with per-phase timers and an opt-in CPU flamegraph (never published)                                 |
+| `mise run loadtest`        | Write load against the image in a 2 CPU, 2 GB container (`scripts/loadtest.sh`; `TARGET=goatcounter` compares) |
+| `mise run check`           | Format, lint and type checks for backend and frontend                                                          |
+| `mise run fix`             | Applies the format and lint fixes                                                                              |
+| `mise run test`            | The backend tests: end-to-end over HTTP, and unit tests                                                        |
+| `mise run seed`            | A year of demo data (wipes every hit; deterministic)                                                           |
+| `mise run clean`           | Removes the local data: the database and the GeoIP database                                                    |
+
+Tasks that build something are cached by their `sources` and `outputs` in
+`mise.toml`: an unchanged task is skipped.
 
 `mise run check` and `mise run test` must pass before a change can land.
 The checks cover formatting (rustfmt, oxfmt), linting (clippy, oxlint) and
@@ -52,8 +55,10 @@ existed adopt it unchanged.
 ## The code
 
 ```
-backend/src/main.rs        entrypoint: env config, geo refresh, retention
+backend/src/main.rs        entrypoint: env config, geo refresh, retention, graceful stop
 backend/src/lib.rs         the app: routes, cache headers, static serving
+backend/src/state.rs       the shared AppState
+backend/src/error.rs       HttpError, answered as {"error": "..."}
 backend/src/db.rs          the SQLite pools (one writer, read-only readers), caches, migrations on startup
 backend/src/ingest.rs      the hit queue and the batched writer
 backend/src/profile.rs     per-phase timers, compiled in only with the profiling feature
@@ -65,14 +70,16 @@ backend/src/stats.rs       ranges, chart buckets, the aggregations
 backend/src/filter.rs      the RSQL filter subset the dashboard uses
 backend/src/csv.rs         the CSV writer + the export download
 backend/src/tracker.rs     the tracker script and the pixel GIF
+backend/src/util.rs        sha256 and random hex helpers
 backend/src/routes/        auth, users, sites, stats, export, collect
 backend/src/bin/seed.rs    a year of demo data, for development
+backend/examples/          the load generator behind `mise run loadtest`
+backend/tests/api.rs       the end-to-end tests
+scripts/                   the load test script and its generator image
 frontend/src/routes/       dashboard, sites table, site page, users, settings
+frontend/src/components/   the shared UI pieces
 frontend/src/lib/          the API client, ranges, filters, date formatting
 ```
-
-The database schema lives in `db.rs` and is applied (idempotently) on
-startup — there is no migration tooling to run.
 
 ## The rules a change must keep
 
@@ -99,28 +106,36 @@ not a change we can take. Concretely:
   ISO timestamps, plus `sites` and the `q` filter — parsed by the same
   code in `stats.rs` and `routes/sites.rs`. Add a new time-filtered
   endpoint by reusing them, not by inventing a new syntax.
-- **Keep it simple.** One SQLite connection behind an async mutex, no
-  ORM, no abstraction layers. If a change needs a new dependency or a
+- **Keep it simple.** SQLite through sqlx with run-time queries (one
+  writer connection, read-only readers), no ORM, no abstraction layers. If a change needs a new dependency or a
   new concept, first check whether the naive version is enough.
 - **Comment the why, not the what** — the reasoning behind a decision
   is the part the code cannot show.
 
 ## Releasing
 
-CI runs the checks on every pull request and push to main — nothing is
-published from CI. A release is a tag and a published GitHub release:
+Releases are automated with [release-please](https://github.com/googleapis/release-please),
+driven by the commit messages on `main`. Write them as
+[Conventional Commits](https://www.conventionalcommits.org): `feat:` bumps
+the minor version, `fix:` the patch, `feat!:` (or a `BREAKING CHANGE:`
+footer) the major; `ci:`, `chore:`, `docs:` and the like release nothing.
 
-1. Tag the commit: `git tag v1.2.3 && git push origin v1.2.3`.
-2. Create and publish the release on GitHub, with the same tag.
+1. Every push to `main` updates one open "release PR": the version in
+   `backend/Cargo.toml`, `backend/Cargo.lock` and `frontend/package.json`,
+   and the changelog.
+2. Merge that PR when you want to ship. The release (tag `v1.2.3`) is
+   created, and the release workflow builds the Linux binaries (static
+   musl, and glibc suffixed `-gnu`, for amd64 and arm64) and attaches them,
+   and pushes the multi-arch image as `1.2.3`, `1.2` and `latest`.
 
-The release workflow then attaches the binaries of the tagged commit to
-the release — static musl for both Linux architectures, and both macOS
-ones — and pushes the image as `1.2.3`, `1.2` and `latest`. The tag
-decides the version; the workflow strips the leading `v`.
+`CHANGELOG.md` is written by release-please: do not edit it by hand. The
+release PR needs "Allow GitHub Actions to create and approve pull
+requests" turned on in the repository's Actions settings.
 
 ## Submitting
 
-Small, described commits; one logical change each. The backend and the
+Small commits, one logical change each, with a conventional message (see
+Releasing). The backend and the
 frontend are separately checkable (`mise run check:backend`,
 `mise run check:frontend`) — a change that only touches one should not
 leave the other dirty.

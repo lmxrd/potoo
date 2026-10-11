@@ -5,5 +5,6 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 
 export default defineConfig({
   plugins: [tanstackRouter({ target: "react", autoCodeSplitting: true }), react(), tailwindcss()],
-  server: { proxy: { "/api": "http://localhost:8000" } },
+  // The tracker script is served from the root, like in production.
+  server: { proxy: { "/api": "http://localhost:8000", "/tracker.js": "http://localhost:8000" } },
 });
