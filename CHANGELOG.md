@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/lmxrd/potoo/compare/v0.4.0...v0.5.0) (2026-10-12)
+
+
+### Features
+
+* import visitors and create sites ([ac42c1a](https://github.com/lmxrd/potoo/commit/ac42c1a0b7543fab7c4c2a1cd718d690c2cff5c5))
+
 ## [0.4.0](https://github.com/lmxrd/potoo/compare/v0.3.0...v0.4.0) (2026-10-12)
 
 ### ⚠ BREAKING CHANGES
