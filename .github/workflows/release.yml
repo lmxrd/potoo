@@ -37,13 +37,14 @@ jobs:
       # touches only the workspace's own packages, never a dependency.
       # A push with the default token starts no workflow; the next push to
       # main makes release-please rewrite the branch, and this runs again.
+      - uses: actions/checkout@v5
+        if: steps.release.outputs.prs_created == 'true'
+        with:
+          ref: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+
       - name: Update Cargo.lock on the release PR
         if: steps.release.outputs.prs_created == 'true'
-        env:
-          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
         run: |
-          git fetch origin "$BRANCH"
-          git checkout "$BRANCH"
           cargo update --workspace --manifest-path backend/Cargo.toml
           if git diff --quiet -- backend/Cargo.lock; then
             echo "Cargo.lock is up to date"
@@ -52,7 +53,7 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add backend/Cargo.lock
             git commit -m "chore: update Cargo.lock to the release version"
-            git push origin "$BRANCH"
+            git push
           fi
 
   # musl binaries are static and run on any Linux, so they get the plain
