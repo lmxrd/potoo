@@ -1,6 +1,6 @@
 use crate::db::Db;
 use crate::filter::{FacetFilters, filter_sql};
-use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
+use chrono::{DateTime, Datelike, TimeZone, Utc};
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -18,11 +18,11 @@ pub enum Bucket {
     Month,
 }
 
-/// A rolling window of days, or an explicit UTC range with minute
+/// A rolling window ending now, or an explicit UTC range with minute
 /// precision — the two forms every time-filtered endpoint accepts.
 pub enum StatsRange {
-    /// The last `n` days, calendar aligned.
-    Days(u32),
+    /// The window's length in milliseconds; it ends now.
+    Rolling { millis: i64 },
     /// An explicit range; the `to` minute is included.
     FromTo {
         from: DateTime<Utc>,
@@ -33,9 +33,8 @@ pub enum StatsRange {
 /// Parse the range of a stats or export request — the one shape every
 /// endpoint that filters by time accepts:
 ///
-/// - `range`: an ISO 8601 duration like `P7D`, `PT24H` or `P1Y` — a
-///   rolling window ending now, rounded up to whole days (at least
-///   one);
+/// - `range`: an ISO 8601 duration like `P7D`, `PT12H` or `P1Y` — a
+///   rolling window of exactly that length, ending now;
 /// - or `from`/`to`: an explicit pair of ISO timestamps, YYYY-MM-DDTHH:MM
 ///   in UTC, with the `to` minute included. The dashboard's "Today" view
 ///   is this form: UTC midnight to now.
@@ -63,17 +62,15 @@ pub fn parse_range(
         });
     }
     match range {
-        None => Ok(StatsRange::Days(7)),
+        None => Ok(StatsRange::Rolling { millis: 7 * DAY_MS }),
         Some(range) => {
             let Some(millis) = parse_duration(range) else {
                 return Err("range must be a duration like P7D or PT24H".into());
             };
-            // Durations are whole days, at least one: PT12H is a day.
-            let days = ((millis + DAY_MS - 1) / DAY_MS).max(1);
-            if days > 365 {
+            if millis > 365 * DAY_MS {
                 return Err("range can span at most P1Y (365 days)".into());
             }
-            Ok(StatsRange::Days(days as u32))
+            Ok(StatsRange::Rolling { millis })
         }
     }
 }
@@ -156,7 +153,7 @@ fn parse_minute(raw: &str) -> Option<i64> {
 /// The range as the `days` field of the stats response.
 fn days_field(range: &StatsRange) -> i64 {
     match range {
-        StatsRange::Days(n) => i64::from(*n),
+        StatsRange::Rolling { millis } => (*millis + DAY_MS - 1) / DAY_MS,
         StatsRange::FromTo { from, to } => ((*to - *from).num_milliseconds() + DAY_MS - 1) / DAY_MS,
     }
 }
@@ -172,8 +169,17 @@ struct Buckets {
 
 fn buckets(range: &StatsRange, now: DateTime<Utc>) -> Buckets {
     match range {
-        StatsRange::Days(n) => preset_buckets(*n, now),
-        StatsRange::FromTo { from, to } => custom_buckets(*from, *to),
+        StatsRange::Rolling { millis } => {
+            let end = now.timestamp_millis();
+            let mut buckets = span_buckets(end - millis, end);
+            // The window ends now, so it has no fixed upper bound.
+            buckets.until = None;
+            buckets
+        }
+        StatsRange::FromTo { from, to } => span_buckets(
+            from.timestamp_millis(),
+            to.timestamp_millis() + MINUTE_MS, // the `to` minute is included
+        ),
     }
 }
 
@@ -207,74 +213,11 @@ const WEEK_SQL: &str =
     "date(created_at, '-' || ((cast(strftime('%w', created_at) as integer) + 6) % 7) || ' days')";
 const MONTH_SQL: &str = "substr(created_at, 1, 7) || '-01'";
 
-/// The last `n` days, calendar aligned: up to 30 days is one bucket per
-/// day, up to 90 is one per week (Mondays), a year is one per month.
-/// Days(1) is the last 24 started hours, ending with the current one.
-fn preset_buckets(n: u32, now: DateTime<Utc>) -> Buckets {
-    let day_start = now.date_naive().and_hms_opt(0, 0, 0).unwrap().and_utc();
-    let start = day_start.timestamp_millis();
-    if n == 1 {
-        let hour_start = start + i64::from(now.hour()) * HOUR_MS;
-        return Buckets {
-            keys: (0..24)
-                .map(|i| hour(hour_start - (23 - i) * HOUR_MS))
-                .collect(),
-            since: iso(hour_start - 23 * HOUR_MS),
-            until: None,
-            sql: HOUR_SQL,
-            bucket: None,
-        };
-    }
-    if n <= 30 {
-        let days = i64::from(n);
-        return Buckets {
-            keys: (0..days)
-                .map(|i| date(start - (days - 1 - i) * DAY_MS))
-                .collect(),
-            since: format!("{}T00:00:00.000", date(start - (days - 1) * DAY_MS)),
-            until: None,
-            sql: DAY_SQL,
-            bucket: None,
-        };
-    }
-    if n <= 90 {
-        // Weeks start on Monday; 13 of them cover 90 days.
-        let weekday = now.weekday().num_days_from_sunday(); // 0 is Sunday
-        let this_monday = start - i64::from((weekday + 6) % 7) * DAY_MS;
-        return Buckets {
-            keys: (0..13)
-                .map(|i| date(this_monday - (12 - i) * 7 * DAY_MS))
-                .collect(),
-            since: format!("{}T00:00:00.000", date(this_monday - 12 * 7 * DAY_MS)),
-            until: None,
-            sql: WEEK_SQL,
-            bucket: None,
-        };
-    }
-    // Months: the current one and the 11 before it.
-    let month_index = now.year() * 12 + now.month() as i32 - 1; // 0-based
-    let month_start = |i: i32| {
-        let m = month_index - (11 - i);
-        Utc.with_ymd_and_hms(m.div_euclid(12), (m.rem_euclid(12) + 1) as u32, 1, 0, 0, 0)
-            .unwrap()
-            .timestamp_millis()
-    };
-    Buckets {
-        keys: (0..12).map(|i| date(month_start(i))).collect(),
-        since: format!("{}T00:00:00.000", date(month_start(0))),
-        until: None,
-        sql: MONTH_SQL,
-        bucket: None,
-    }
-}
-
-/// The buckets of an explicit range. The bucket size follows the span:
-/// hours for up to two days, days for up to 35, weeks (Mondays) for up to
-/// 180, and months beyond. Buckets are calendar aligned, but the first
-/// and last are clipped to the range itself.
-fn custom_buckets(from: DateTime<Utc>, to: DateTime<Utc>) -> Buckets {
-    let start = from.timestamp_millis();
-    let end = to.timestamp_millis() + MINUTE_MS; // the `to` minute is included
+/// The buckets of a window, exclusive at `end`. The bucket size follows
+/// the span: hours for up to two days, days for up to 35, weeks
+/// (Mondays) for up to 180, and months beyond. Buckets are calendar
+/// aligned, but the first and last are clipped to the window itself.
+fn span_buckets(start: i64, end: i64) -> Buckets {
     let span = end - start;
     let midnight = |millis: i64| {
         let dt = Utc.timestamp_millis_opt(millis).unwrap();
@@ -329,7 +272,9 @@ fn custom_buckets(from: DateTime<Utc>, to: DateTime<Utc>) -> Buckets {
             sql: WEEK_SQL,
         };
     }
-    let first_dt = from
+    let first_dt = Utc
+        .timestamp_millis_opt(start)
+        .unwrap()
         .date_naive()
         .with_day(1)
         .unwrap()
@@ -428,7 +373,7 @@ pub struct ClickRow {
 pub struct SiteStats {
     /// The length of the range in days (rounded up).
     pub days: i64,
-    /// Set only for explicit from/to ranges: the bucket the chart shows.
+    /// The bucket the chart's byDay rows are aggregated over.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bucket: Option<Bucket>,
     pub pageviews: i64,
@@ -633,29 +578,34 @@ mod tests {
 
     #[test]
     fn parses_presets_and_ranges() {
+        // The default is the rolling last 7 days.
         assert!(matches!(
             parse_range(None, None, None),
-            Ok(StatsRange::Days(7))
+            Ok(StatsRange::Rolling { millis }) if millis == 7 * DAY_MS
         ));
         // "Today" is the dashboard's label for a midnight-to-now window,
         // sent as from/to; the backend has no named range.
         assert!(parse_range(Some("today"), None, None).is_err());
-        // Durations are rolling windows, rounded up to whole days.
+        // Durations are rolling windows of exactly their length.
         assert!(matches!(
-            parse_range(Some("P30D"), None, None),
-            Ok(StatsRange::Days(30))
+            parse_range(Some("PT12H"), None, None),
+            Ok(StatsRange::Rolling { millis }) if millis == 12 * HOUR_MS
         ));
         assert!(matches!(
             parse_range(Some("PT24H"), None, None),
-            Ok(StatsRange::Days(1))
+            Ok(StatsRange::Rolling { millis }) if millis == DAY_MS
+        ));
+        assert!(matches!(
+            parse_range(Some("P30D"), None, None),
+            Ok(StatsRange::Rolling { millis }) if millis == 30 * DAY_MS
         ));
         assert!(matches!(
             parse_range(Some("P2W"), None, None),
-            Ok(StatsRange::Days(14))
+            Ok(StatsRange::Rolling { millis }) if millis == 14 * DAY_MS
         ));
         assert!(matches!(
             parse_range(Some("P1Y"), None, None),
-            Ok(StatsRange::Days(365))
+            Ok(StatsRange::Rolling { millis }) if millis == 365 * DAY_MS
         ));
         assert!(parse_range(Some("P400D"), None, None).is_err());
         assert!(parse_range(Some("7"), None, None).is_err());
@@ -673,38 +623,56 @@ mod tests {
     }
 
     #[test]
-    fn custom_buckets_follow_the_span() {
-        let from = Utc.with_ymd_and_hms(2026, 1, 1, 10, 30, 0).unwrap();
-        let to = Utc.with_ymd_and_hms(2026, 1, 2, 12, 30, 0).unwrap();
-        let buckets = custom_buckets(from, to);
-        assert_eq!(buckets.bucket, Some(Bucket::Hour));
-        assert_eq!(buckets.keys.first().unwrap(), "2026-01-01T10:00");
-        assert_eq!(buckets.keys.last().unwrap(), "2026-01-02T12:00");
-        assert_eq!(buckets.since, "2026-01-01T10:30:00.000Z");
-        assert_eq!(buckets.until.as_deref(), Some("2026-01-02T12:31:00.000Z"));
-
-        let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
-        let to = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
-        let buckets = custom_buckets(from, to);
-        assert_eq!(buckets.bucket, Some(Bucket::Day));
-        assert_eq!(buckets.keys.len(), 32);
-        assert_eq!(buckets.keys.first().unwrap(), "2026-01-01");
+    fn rolling_windows_are_exact() {
+        // A fixed moment: 2026-10-09 is a Friday.
+        let now = Utc.with_ymd_and_hms(2026, 10, 9, 14, 30, 0).unwrap();
+        // PT12H: twelve hours back, hourly chart.
+        let chart = buckets(
+            &StatsRange::Rolling {
+                millis: 12 * HOUR_MS,
+            },
+            now,
+        );
+        assert_eq!(chart.bucket, Some(Bucket::Hour));
+        assert_eq!(chart.since, "2026-10-09T02:30:00.000Z");
+        assert_eq!(chart.until, None);
+        assert_eq!(chart.keys.first().unwrap(), "2026-10-09T02:00");
+        assert_eq!(chart.keys.last().unwrap(), "2026-10-09T14:00");
+        assert_eq!(chart.keys.len(), 13);
+        // P7D: seven days back, daily buckets, the ends partial.
+        let chart = buckets(&StatsRange::Rolling { millis: 7 * DAY_MS }, now);
+        assert_eq!(chart.bucket, Some(Bucket::Day));
+        assert_eq!(chart.since, "2026-10-02T14:30:00.000Z");
+        assert_eq!(chart.until, None);
+        assert_eq!(chart.keys.first().unwrap(), "2026-10-02");
+        assert_eq!(chart.keys.last().unwrap(), "2026-10-09");
+        assert_eq!(chart.keys.len(), 8);
+        // The `days` field is the window's length in days, rounded up.
+        assert_eq!(
+            days_field(&StatsRange::Rolling {
+                millis: 12 * HOUR_MS
+            }),
+            1
+        );
+        assert_eq!(days_field(&StatsRange::Rolling { millis: 7 * DAY_MS }), 7);
     }
 
     #[test]
-    fn preset_buckets_are_calendar_aligned() {
-        // A fixed moment: 2026-10-09 is a Friday.
-        let now = Utc.with_ymd_and_hms(2026, 10, 9, 14, 0, 0).unwrap();
-        let buckets = preset_buckets(7, now);
-        assert_eq!(buckets.keys.first().unwrap(), "2026-10-03");
-        assert_eq!(buckets.keys.last().unwrap(), "2026-10-09");
-        // Weeks start on Monday.
-        let buckets = preset_buckets(90, now);
-        assert_eq!(buckets.keys.last().unwrap(), "2026-10-05");
-        assert_eq!(buckets.keys.len(), 13);
-        // The last 24 started hours end with the current one.
-        let buckets = preset_buckets(1, now);
-        assert_eq!(buckets.keys.last().unwrap(), "2026-10-09T14:00");
-        assert_eq!(buckets.keys.len(), 24);
+    fn fromto_buckets_follow_the_span() {
+        let from = Utc.with_ymd_and_hms(2026, 1, 1, 10, 30, 0).unwrap();
+        let to = Utc.with_ymd_and_hms(2026, 1, 2, 12, 30, 0).unwrap();
+        let chart = buckets(&StatsRange::FromTo { from, to }, from);
+        assert_eq!(chart.bucket, Some(Bucket::Hour));
+        assert_eq!(chart.keys.first().unwrap(), "2026-01-01T10:00");
+        assert_eq!(chart.keys.last().unwrap(), "2026-01-02T12:00");
+        assert_eq!(chart.since, "2026-01-01T10:30:00.000Z");
+        assert_eq!(chart.until.as_deref(), Some("2026-01-02T12:31:00.000Z"));
+
+        let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let to = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
+        let chart = buckets(&StatsRange::FromTo { from, to }, from);
+        assert_eq!(chart.bucket, Some(Bucket::Day));
+        assert_eq!(chart.keys.len(), 32);
+        assert_eq!(chart.keys.first().unwrap(), "2026-01-01");
     }
 }

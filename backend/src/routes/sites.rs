@@ -27,9 +27,9 @@ pub struct StatsQuery {
     /// Comma separated hostnames, e.g. `blog.example.com,shop.example.com`.
     /// Every site when absent. An unknown hostname is a 400.
     pub sites: Option<String>,
-    /// A rolling window ending now, as an ISO 8601 duration rounded up to
-    /// whole days: `PT24H`, `P7D`, `P30D`, `P90D`, `P1Y`, ... (at most
-    /// 365 days). Default `P7D`. Ignored when `from` and `to` are given.
+    /// A rolling window ending now, as an ISO 8601 duration:
+    /// `PT12H`, `P7D`, `P30D`, `P90D`, `P1Y`, ... (at most 365 days).
+    /// Default `P7D`. Ignored when `from` and `to` are given.
     pub range: Option<String>,
     /// The start of an exact window, `YYYY-MM-DDTHH:MM` in UTC. Needs `to`.
     pub from: Option<String>,

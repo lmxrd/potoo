@@ -30,6 +30,15 @@ const DAY = 86_400_000;
 const HOUR = 3_600_000;
 const MINUTE_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 
+/** The presets as exact lengths: a preset is that long a window, ending now. */
+const PRESET_MS: Record<Exclude<RangePreset, "today">, number> = {
+  PT24H: 24 * HOUR,
+  P7D: 7 * DAY,
+  P30D: 30 * DAY,
+  P90D: 90 * DAY,
+  P1Y: 365 * DAY,
+};
+
 /** A local `datetime-local` value as UTC with minute precision, or null. */
 function utcMinute(value: string): string | null {
   const time = Date.parse(value);
@@ -73,8 +82,8 @@ export function rangeQuery(range: DateRange): RangeQuery | null {
 }
 
 /**
- * The exact window a range covers. Presets mirror the backend's calendar
- * alignment (UTC days, weeks from Monday) and end now; custom is exactly
+ * The exact window a range covers. Presets are rolling windows of their
+ * duration, ending now; Today is UTC midnight to now; custom is exactly
  * what its inputs say.
  */
 export function rangeWindow(range: DateRange): { from: Date; to: Date } | null {
@@ -84,29 +93,11 @@ export function rangeWindow(range: DateRange): { from: Date; to: Date } | null {
     return Number.isNaN(+from) || Number.isNaN(+to) || from >= to ? null : { from, to };
   }
   const now = new Date();
-  const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-  switch (range.preset) {
-    case "today":
-      return { from: new Date(midnight), to: now };
-    case "PT24H":
-      return {
-        from: new Date(Math.floor(+now / HOUR) * HOUR - 23 * HOUR),
-        to: now,
-      };
-    case "P7D":
-      return { from: new Date(midnight - 6 * DAY), to: now };
-    case "P30D":
-      return { from: new Date(midnight - 29 * DAY), to: now };
-    case "P90D": {
-      const monday = midnight - ((now.getUTCDay() + 6) % 7) * DAY;
-      return { from: new Date(monday - 12 * 7 * DAY), to: now };
-    }
-    default:
-      return {
-        from: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)),
-        to: now,
-      };
+  if (range.preset === "today") {
+    const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    return { from: new Date(midnight), to: now };
   }
+  return { from: new Date(+now - PRESET_MS[range.preset]), to: now };
 }
 
 /** A date as a `datetime-local` value, in the browser's timezone. */
