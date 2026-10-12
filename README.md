@@ -149,7 +149,11 @@ derives what the dashboard needs and then **discards the rest**:
 - the IP address becomes a country (via the local GeoIP database) and is
   thrown away;
 - the browser's user agent becomes the device class, browser family and
-  operating system, and is thrown away;
+  operating system, and is thrown away. Those are stored as lowercase keys
+  (`no`, `desktop`, `chrome`, `macos`); the dashboard decides what to call
+  them. A client or platform Potoo does not know is kept under the short
+  name it announces (`palemoon`, `cros`), never as the user agent, and is
+  reported once in the server's log so it can be given a name;
 - the page's query string and fragment are dropped (they often hold personal
   data), and only the referring hostname is kept, never the full URL;
 - "unique visitor" is a salted, per-day, per-site hash of the IP and user

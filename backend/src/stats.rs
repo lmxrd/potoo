@@ -226,24 +226,31 @@ pub struct PathRow {
 
 #[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct CountryRow {
+    /// A lowercase ISO 3166-1 alpha-2 code (`no`, `us`), or `??` for hits
+    /// whose country could not be resolved.
     pub country: String,
     pub visitors: i64,
 }
 
 #[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct DeviceRow {
+    /// `desktop`, `mobile` or `tablet`.
     pub device: String,
     pub visitors: i64,
 }
 
 #[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct BrowserRow {
+    /// A lowercase key: `chrome`, `safari`, `firefox`, `edge`, `opera` or
+    /// `other`.
     pub browser: String,
     pub visitors: i64,
 }
 
 #[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct OsRow {
+    /// A lowercase key: `windows`, `macos`, `ios`, `ipados`, `android`,
+    /// `linux` or `other`.
     pub os: String,
     pub visitors: i64,
 }
@@ -398,12 +405,12 @@ pub async fn stats_for(
         rows!(
             BrowserRow,
             "browser, COUNT(DISTINCT visitor) AS visitors",
-            format!("AND {pv} GROUP BY browser ORDER BY visitors DESC")
+            format!("AND {pv} GROUP BY browser ORDER BY visitors DESC LIMIT 50")
         ),
         rows!(
             OsRow,
             "os, COUNT(DISTINCT visitor) AS visitors",
-            format!("AND {pv} GROUP BY os ORDER BY visitors DESC")
+            format!("AND {pv} GROUP BY os ORDER BY visitors DESC LIMIT 50")
         ),
         rows!(
             ReferrerRow,

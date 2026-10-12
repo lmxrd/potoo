@@ -218,8 +218,8 @@ async fn setup_users_sites_collection_stats_and_exports() {
     assert_eq!(stats["pageviews"], json!(1));
     assert_eq!(stats["paths"][0]["path"], json!("/a"));
     assert_eq!(stats["devices"][0]["device"], json!("mobile"));
-    assert_eq!(stats["browsers"][0]["browser"], json!("Safari"));
-    assert_eq!(stats["os"][0]["os"], json!("iOS"));
+    assert_eq!(stats["browsers"][0]["browser"], json!("safari"));
+    assert_eq!(stats["os"][0]["os"], json!("ios"));
     assert_eq!(stats["clicks"][0], json!({ "name": "signup", "clicks": 1 }));
     assert_eq!(stats["days"], json!(1));
 
@@ -290,6 +290,25 @@ async fn setup_users_sites_collection_stats_and_exports() {
     )
     .await;
     assert_eq!(stats["pageviews"], json!(1));
+    // The facets with a fixed vocabulary are stored lowercase, and a filter
+    // on them does not care about case: `Safari` and `iOS` find `safari` and
+    // `ios`. A path is case sensitive: `/A` is not `/a`.
+    assert_eq!(
+        pageviews(&app, &session, &window, "browser==Safari;os==iOS").await,
+        json!(1)
+    );
+    assert_eq!(
+        pageviews(&app, &session, &window, "browser==SAFARI,browser==Chrome").await,
+        json!(1)
+    );
+    assert_eq!(
+        pageviews(&app, &session, &window, "browser==chrome").await,
+        json!(0)
+    );
+    assert_eq!(
+        pageviews(&app, &session, &window, "path==/A").await,
+        json!(0)
+    );
     // An unknown hostname is a 400 that names it, and one of several spoils
     // the request; known ones are matched whatever their case.
     let response = request(
@@ -580,6 +599,15 @@ async fn every_documented_operation_is_routed() {
         }
     }
     assert!(checked >= 23, "only {checked} operations documented");
+}
+
+/// The pageviews of the test site in a window, under a filter.
+async fn pageviews(app: &TestApp, session: &str, window: &(String, String), q: &str) -> Value {
+    let url = format!(
+        "/api/stats?sites=blog.example.com&from={}&to={}&q={q}",
+        window.0, window.1
+    );
+    json(request(app, Method::GET, &url, Some(session), None).await).await["pageviews"].clone()
 }
 
 async fn post_raw(app: &TestApp, path: &str, content_type: &str, body: &str) -> Response {

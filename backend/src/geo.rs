@@ -77,7 +77,8 @@ impl Geo {
         geo
     }
 
-    /// The country code of an IP, or None when it cannot be resolved.
+    /// The country of an IP as a lowercase ISO 3166-1 alpha-2 code (`no`,
+    /// `us`), or None when it cannot be resolved.
     pub async fn lookup(&self, ip: &str) -> Option<String> {
         let addr: IpAddr = ip.parse().ok()?;
         let reader = self.reader.read().await.clone()?;
@@ -86,7 +87,7 @@ impl Geo {
             return None;
         }
         let country: maxminddb::geoip2::Country = result.decode().ok()??;
-        country.country.iso_code.map(|code| code.to_string())
+        country.country.iso_code.map(|code| code.to_lowercase())
     }
 
     async fn load_from_disk(&self) -> bool {

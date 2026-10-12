@@ -11,6 +11,7 @@ import { parse } from "@rsql/parser";
 import builder from "@rsql/builder";
 import { emit } from "@rsql/emitter";
 import type { DashboardSearch } from "./date-range";
+import { storedValue } from "./labels";
 
 /**
  * The dashboard's filters, as RSQL in the page's `?q=` param: equality
@@ -64,7 +65,9 @@ function add(node: Node, facets: FacetFilters) {
   const facet = getSelector(node);
   if (!FACETS[facet]) throw new Error("facet");
   const values = facets.get(facet) ?? new Set<string>();
-  values.add(String(getValue(node)));
+  // Values are stored lowercase for some facets: an old link with `NO` or
+  // `Chrome` still lights up the right row.
+  values.add(storedValue(facet, String(getValue(node))));
   facets.set(facet, values);
 }
 

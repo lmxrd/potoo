@@ -31,24 +31,24 @@ const REFERRERS: &[(&str, u32)] = &[
     ("lobste.rs", 15),
 ];
 const COUNTRIES: &[(&str, u32)] = &[
-    ("NO", 12),
-    ("US", 28),
-    ("DE", 12),
-    ("GB", 10),
-    ("FR", 8),
-    ("NL", 6),
-    ("SE", 6),
-    ("IN", 8),
-    ("JP", 5),
-    ("BR", 5),
+    ("no", 12),
+    ("us", 28),
+    ("de", 12),
+    ("gb", 10),
+    ("fr", 8),
+    ("nl", 6),
+    ("se", 6),
+    ("in", 8),
+    ("jp", 5),
+    ("br", 5),
 ];
-const BROWSERS: &[(&str, u32)] = &[("Chrome", 64), ("Safari", 20), ("Firefox", 9), ("Edge", 7)];
+const BROWSERS: &[(&str, u32)] = &[("chrome", 64), ("safari", 20), ("firefox", 9), ("edge", 7)];
 const OSES: &[(&str, u32)] = &[
-    ("Windows", 48),
-    ("iOS", 20),
-    ("macOS", 13),
-    ("Android", 13),
-    ("Linux", 6),
+    ("windows", 48),
+    ("ios", 20),
+    ("macos", 13),
+    ("android", 13),
+    ("linux", 6),
 ];
 const DEVICES: &[(&str, u32)] = &[("desktop", 62), ("mobile", 33), ("tablet", 5)];
 const CLICKS: &[(&str, u32)] = &[("signup", 30), ("docs", 30), ("demo", 25), ("download", 15)];

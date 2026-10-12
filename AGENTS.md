@@ -99,6 +99,17 @@ it** (nothing is committed or served):
   `sendBeacon` sends) and answers 204 to anything; `/api/auth/login` takes
   `Result<ApiJson<_>, HttpError>` so that an unreadable body fails like a
   wrong password. The JSON endpoints document a 415 in their annotations.
+- **Facet values are lowercase in the database**: `country` (ISO alpha-2),
+  `device`, `browser`, `os`, and the referrer's hostname. A path and a click
+  label are as the site wrote them. The frontend owns the display names
+  (`frontend/src/lib/labels.ts`); filters on the lowercase facets are not
+  case sensitive. A value the parsers do not know is **stored as it is**
+  (the name it announces), never as a generic `other`, and is logged once
+  (`no known name for this value`) so that a migration can name it later; add
+  its label to `labels.ts` too (an unlabeled value shows as it is, with a
+  console warning). `other` is only for a client that announced nothing.
+  A new known family means: the parser, `labels.ts`, and a migration that
+  renames what was stored under the old name.
 - Flags are booleans in both requests and responses (`is_admin`,
   `honor_dnt`), never 0/1.
 - The spec is written by the `openapi` binary, built with `--features spec`,
@@ -128,6 +139,10 @@ build:frontend`.
 No cookies or localStorage for visitors, no fingerprinting. The IP and the
 user agent exist in memory only, to derive country, device, browser, OS
 and the per-day, per-site visitor hash — never stored, logged or queued.
+The one thing taken from a user agent that is not a known family is the
+short name of the product or platform it announces (`product_name` /
+`platform_name` in `visitor.rs`): at most 32 plain characters, lowercase,
+no version, nothing else of the user agent.
 Paths lose their query string and fragment; referrers are reduced to the
 hostname; old salts are deleted. A change that breaks any of this is not
 acceptable.

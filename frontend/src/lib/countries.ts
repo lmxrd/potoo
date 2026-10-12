@@ -1,14 +1,14 @@
 const names = new Intl.DisplayNames(["en"], { type: "region" });
 
 /**
- * A country code's English name, via the platform's CLDR data: no map to
- * maintain, no dependency to add. Unknown codes, like the "??" of hits
- * without a resolved country, stay as they are.
+ * A country's English name from its code (stored lowercase, `no`), via the
+ * platform's CLDR data: no map to maintain, no dependency to add. Undefined
+ * for a code that is not one.
  */
-export function countryName(code: string): string {
+export function countryName(code: string): string | undefined {
   try {
-    return names.of(code) ?? code;
+    return names.of(code.toUpperCase());
   } catch {
-    return code;
+    return undefined;
   }
 }

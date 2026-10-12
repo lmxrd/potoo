@@ -3,7 +3,7 @@ import { BarList } from "./bar-list";
 import { bucketLabel, chartLabel, formatDate, formatTime } from "../lib/dates";
 import type { SiteStats } from "../client";
 import type { FacetFilters } from "../lib/filter";
-import { countryName } from "../lib/countries";
+import { facetLabel } from "../lib/labels";
 
 /** The dashboard content: totals, the chart and the breakdowns. */
 export function StatsDashboard({
@@ -86,7 +86,7 @@ export function StatsDashboard({
             }))}
             active={filters.get("country")}
             onToggle={(value) => onToggleFilter("country", value)}
-            format={countryName}
+            format={(value) => facetLabel("country", value)}
           />
         </Card>
         <Card title="Devices">
@@ -97,6 +97,7 @@ export function StatsDashboard({
             }))}
             active={filters.get("device")}
             onToggle={(value) => onToggleFilter("device", value)}
+            format={(value) => facetLabel("device", value)}
           />
         </Card>
         <Card title="Browsers">
@@ -107,6 +108,7 @@ export function StatsDashboard({
             }))}
             active={filters.get("browser")}
             onToggle={(value) => onToggleFilter("browser", value)}
+            format={(value) => facetLabel("browser", value)}
           />
         </Card>
         <Card title="Operating systems">
@@ -117,6 +119,7 @@ export function StatsDashboard({
             }))}
             active={filters.get("os")}
             onToggle={(value) => onToggleFilter("os", value)}
+            format={(value) => facetLabel("os", value)}
           />
         </Card>
         <Card title="Clicks">

@@ -11,7 +11,7 @@ export const DEFAULT_THEME: Theme = { base: "light", accent: "#0f172a" };
 export const THEMES: { label: string; theme: Theme }[] = [
   { label: "Daylight", theme: { base: "light", accent: "#0f172a" } },
   { label: "Nordic", theme: { base: "light", accent: "#1d4ed8" } },
-  { label: "Forest", theme: { base: "light", accent: "#15803d" } },
+  { label: "Forest", theme: { base: "light", accent: "#173428" } },
   { label: "Rosewater", theme: { base: "light", accent: "#be123c" } },
   { label: "Midnight", theme: { base: "dark", accent: "#38bdf8" } },
   { label: "Ember", theme: { base: "dark", accent: "#f59e0b" } },

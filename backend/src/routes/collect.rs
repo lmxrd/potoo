@@ -139,8 +139,8 @@ async fn record(
         referrer,
         country,
         device: device.as_str().into(),
-        browser: parse_browser(ua).into(),
-        os: parse_os(ua).into(),
+        browser: parse_browser(ua),
+        os: parse_os(ua),
         visitor,
     })
 }

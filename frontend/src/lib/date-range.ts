@@ -15,7 +15,13 @@ export type RangePreset = "today" | "PT24H" | "P7D" | "P30D" | "P90D" | "P1Y";
  * The range a dashboard shows: a preset, or an exact custom window as
  * `datetime-local` values, in the browser's timezone, with minute precision.
  */
-export type DateRange = { preset: RangePreset } | { preset: "custom"; from: string; to: string };
+export type DateRange =
+  | { preset: RangePreset }
+  | {
+      preset: "custom";
+      from: string;
+      to: string;
+    };
 
 export const RANGE_PRESETS: { value: RangePreset; label: string }[] = [
   { value: "today", label: "Today" },
@@ -103,7 +109,9 @@ export function rangeWindow(range: DateRange): { from: Date; to: Date } | null {
 /** A date as a `datetime-local` value, in the browser's timezone. */
 export function localInput(date: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}T${p(date.getHours())}:${p(date.getMinutes())}`;
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(
+    date.getDate(),
+  )}T${p(date.getHours())}:${p(date.getMinutes())}`;
 }
 
 /** The range as one line of local text, e.g. "9 Oct 2026 14:30 – 16:00". */
@@ -116,7 +124,7 @@ export function rangeSummary(range: DateRange, format = "YYYY-MM-DD", timeFormat
   return `${formatDate(
     day(window.from),
     format,
-  )} ${time(window.from)} – ${formatDate(day(window.to), format)} ${time(window.to)}`;
+  )} ${time(window.from)} - ${formatDate(day(window.to), format)} ${time(window.to)}`;
 }
 
 /**
@@ -216,7 +224,10 @@ export function useDateRange() {
       navigate({
         to: ".",
         search: (prev) => {
-          const merged: DashboardSearch = { ...(prev as DashboardSearch), ...params };
+          const merged: DashboardSearch = {
+            ...(prev as DashboardSearch),
+            ...params,
+          };
           // Presets and custom ranges replace each other, never stack. The
           // discriminator is what the new range carries: merged alone can
           // still hold the stale `range` of a preset it is replacing.

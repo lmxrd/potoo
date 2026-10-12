@@ -13,6 +13,11 @@ const COLUMNS: [&str; 7] = [
     "path", "country", "device", "browser", "os", "referrer", "name",
 ];
 
+/// The facets whose stored values are lowercase (the country, the device,
+/// the browser, the OS, the referrer's hostname): a filter on them is not
+/// case sensitive. A path and a click label are as the site wrote them.
+const LOWERCASE: [&str; 5] = ["country", "device", "browser", "os", "referrer"];
+
 /// The filters of one stats request: facet to values, OR within a facet.
 pub type FacetFilters = BTreeMap<String, Vec<String>>;
 
@@ -49,6 +54,11 @@ pub fn parse_filter(rsql: &str) -> Result<FacetFilters, String> {
             if !COLUMNS.contains(&facet.as_str()) {
                 return Err(format!("Invalid filter: unknown facet '{facet}'"));
             }
+            let value = if LOWERCASE.contains(&facet.as_str()) {
+                value.to_lowercase()
+            } else {
+                value
+            };
             let values = filters.entry(facet).or_default();
             if !values.contains(&value) {
                 values.push(value);
@@ -231,7 +241,7 @@ mod tests {
         assert_eq!(
             filters,
             FacetFilters::from([
-                ("country".into(), vec!["NO".into(), "DE".into()]),
+                ("country".into(), vec!["no".into(), "de".into()]),
                 ("path".into(), vec!["/pricing".into()]),
             ])
         );
@@ -278,6 +288,24 @@ mod tests {
         let filters = parse_filter("country==NO;device==mobile,device==desktop").unwrap();
         let (clause, params) = filter_sql(&filters);
         assert_eq!(clause, "country IN (?) AND device IN (?, ?)");
-        assert_eq!(params, vec!["NO", "mobile", "desktop"]);
+        assert_eq!(params, vec!["no", "mobile", "desktop"]);
+    }
+
+    #[test]
+    fn the_lowercase_facets_are_not_case_sensitive_the_others_are() {
+        let filters =
+            parse_filter("country==NO,country==De;browser==Chrome;path==/Pricing").unwrap();
+        assert_eq!(filters["country"], ["no", "de"]);
+        assert_eq!(filters["browser"], ["chrome"]);
+        // A path is case sensitive, and so is a click label.
+        assert_eq!(filters["path"], ["/Pricing"]);
+        let filters = parse_filter("name==SignUp;referrer==News.Ycombinator.com").unwrap();
+        assert_eq!(filters["name"], ["SignUp"]);
+        assert_eq!(filters["referrer"], ["news.ycombinator.com"]);
+        // The same value in two cases is one value.
+        assert_eq!(
+            parse_filter("os==macOS,os==MACOS").unwrap()["os"],
+            ["macos"]
+        );
     }
 }

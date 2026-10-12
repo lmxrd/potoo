@@ -279,4 +279,75 @@ mod tests {
             .unwrap();
         assert!(db.site("nope.com").await.unwrap().is_some());
     }
+
+    #[tokio::test]
+    async fn the_lowercase_migration_rewrites_old_rows_and_only_those() {
+        let db = open(":memory:").await;
+        sqlx::query("INSERT INTO sites (hostname) VALUES ('a.com')")
+            .execute(db.writer())
+            .await
+            .unwrap();
+        // Rows as an older build wrote them, and one that is lowercase already.
+        for (country, device, browser, os, path, name) in [
+            (Some("NO"), "desktop", "Chrome", "macOS", "/Pricing", None),
+            (None, "mobile", "Safari", "iOS", "/a", Some("SignUp")),
+            (Some("us"), "tablet", "edge", "windows", "/b", None),
+        ] {
+            sqlx::query(
+                "INSERT INTO hits (site_id, kind, path, name, country, device, browser, os, visitor)
+                 VALUES (1, 'pageview', ?1, ?2, ?3, ?4, ?5, ?6, 'v')",
+            )
+            .bind(path)
+            .bind(name)
+            .bind(country)
+            .bind(device)
+            .bind(browser)
+            .bind(os)
+            .execute(db.writer())
+            .await
+            .unwrap();
+        }
+
+        sqlx::raw_sql(include_str!("../migrations/0002_lowercase_facets.sql"))
+            .execute(db.writer())
+            .await
+            .unwrap();
+
+        #[derive(sqlx::FromRow, PartialEq, Debug)]
+        struct Hit {
+            country: Option<String>,
+            device: String,
+            browser: String,
+            os: String,
+            path: String,
+            name: Option<String>,
+        }
+        let hit = |country: Option<&str>,
+                   device: &str,
+                   browser: &str,
+                   os: &str,
+                   path: &str,
+                   name: Option<&str>| Hit {
+            country: country.map(String::from),
+            device: device.into(),
+            browser: browser.into(),
+            os: os.into(),
+            path: path.into(),
+            name: name.map(String::from),
+        };
+        let rows: Vec<Hit> =
+            sqlx::query_as("SELECT country, device, browser, os, path, name FROM hits ORDER BY id")
+                .fetch_all(db.writer())
+                .await
+                .unwrap();
+        assert_eq!(
+            rows,
+            [
+                hit(Some("no"), "desktop", "chrome", "macos", "/Pricing", None),
+                hit(None, "mobile", "safari", "ios", "/a", Some("SignUp")),
+                hit(Some("us"), "tablet", "edge", "windows", "/b", None),
+            ],
+            "the facets are lowercase, a missing country stays missing, a path and a click label keep their case"
+        );
+    }
 }
