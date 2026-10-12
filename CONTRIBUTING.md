@@ -60,8 +60,6 @@ Add a new numbered file to `backend/migrations/` (`0002_what_it_does.sql`).
 It is applied, in order, when the server or the seed starts, and recorded in
 the `_sqlx_migrations` table. Never edit a migration that has shipped: its
 checksum is recorded, and a changed file stops the server from starting.
-The first one is idempotent so that databases created before migrations
-existed adopt it unchanged.
 
 ## The code
 

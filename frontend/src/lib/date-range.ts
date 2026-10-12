@@ -165,7 +165,7 @@ export function validateDashboardSearch(search: Record<string, unknown>): Dashbo
     out.to = search.to;
   }
   // Hostnames, comma separated. The router parses a lone number in a URL
-  // (`?sites=1`, an old link by id) as a number: read it as the text it was.
+  // (`?sites=1`, a hostname made of digits) as a number: read it as the text it was.
   const sites = typeof search.sites === "number" ? String(search.sites) : search.sites;
   if (typeof sites === "string" && /^[a-z0-9.:-]+(,[a-z0-9.:-]+)*$/i.test(sites)) {
     out.sites = sites;

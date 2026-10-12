@@ -65,7 +65,7 @@ function add(node: Node, facets: FacetFilters) {
   const facet = getSelector(node);
   if (!FACETS[facet]) throw new Error("facet");
   const values = facets.get(facet) ?? new Set<string>();
-  // Values are stored lowercase for some facets: an old link with `NO` or
+  // Values are stored lowercase for some facets: a filter with `NO` or
   // `Chrome` still lights up the right row.
   values.add(storedValue(facet, String(getValue(node))));
   facets.set(facet, values);

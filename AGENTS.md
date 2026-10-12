@@ -59,8 +59,7 @@ before the hit is on disk.
   from fixed fragments and `?` placeholders; every value is bound. Keep it
   that way.
 - Schema changes are **new numbered files** in `backend/migrations/`.
-  Never edit one that has shipped (its checksum is recorded). The first is
-  idempotent so pre-migration databases adopt it.
+  Never edit one that has shipped (its checksum is recorded).
 - The site lookup and the daily salt are cached in `Database`. After any
   change to a site, call `db.forget_sites()`.
 - A clean stop (SIGTERM/SIGINT) drains the queue and closes the pools; a
@@ -71,9 +70,8 @@ pools are one and the same single connection. Two consequences: a write
 made through `db.reader()` (read-only on a real file) passes the tests but
 fails in production; and a read on `db.reader()` while a writer
 transaction is open works in production but deadlocks in the tests. The
-two tests in `db.rs` (`readers_see_the_writes_and_do_not_block_the_writer`,
-`a_database_from_before_migrations_is_adopted`) use a real file; add one
-when you change how the pools are used.
+test in `db.rs` `readers_see_the_writes_and_do_not_block_the_writer` uses a
+real file; add one when you change how the pools are used.
 
 **The API is described by OpenAPI, and the frontend client is generated from
 it** (nothing is committed or served):
