@@ -119,7 +119,7 @@ impl IntoResponse for Failure {
     tag = "Stats",
     operation_id = "importHits",
     summary = "Import hits from CSV",
-    description = "Adds the rows of a CSV in the export's format (site, created_at, kind, path, name, referrer, country, device, browser, os; a header row names the columns). Sent as multipart/form-data with the CSV in a `file` part, or as the body itself with Content-Type text/csv or text/plain. Admin only. All or nothing: if a row cannot be read or names a site that does not exist, nothing is added and the answer lists what is wrong. Imported hits have no visitor, so they add pageviews but no unique visitors. Paths and referrers are reduced as they are for tracked hits; the rows are not checked for duplicates. At most 256 MB.",
+    description = "Adds the rows of a CSV in the export's format (site, created_at, kind, path, name, referrer, country, device, browser, os; a header row names the columns). Sent as multipart/form-data with the CSV in a `file` part, or as the body itself with Content-Type text/csv or text/plain. Admin only. All or nothing: if a row cannot be read or names a site that does not exist, nothing is added and the answer lists what is wrong. Referrer, country, device, browser and os may be empty (unknown). Imported hits have no visitor, so they add pageviews but no unique visitors. Paths and referrers are reduced as they are for tracked hits; the rows are not checked for duplicates. At most 256 MB.",
     request_body(content(
         (ImportForm = "multipart/form-data"),
         (String = "text/csv"),
@@ -372,9 +372,9 @@ struct Row {
     name: Option<String>,
     referrer: Option<String>,
     country: Option<String>,
-    device: String,
-    browser: String,
-    os: String,
+    device: Option<String>,
+    browser: Option<String>,
+    os: Option<String>,
 }
 
 #[derive(Debug)]
@@ -446,14 +446,13 @@ fn parse_row(record: &csv::StringRecord, sites: &HashMap<String, i64>) -> Result
             format!("\"{}\" is not a two-letter country code", field(6)),
         ));
     }
+    // Empty is unknown, as for the country.
     let facet = |i: usize, column: &'static str| {
         let value = field(i).to_lowercase();
-        if value.is_empty() {
-            Err(bad(column, "is empty"))
-        } else if value.chars().count() > 64 {
+        if value.chars().count() > 64 {
             Err(bad(column, "is longer than 64 characters"))
         } else {
-            Ok(value)
+            Ok(Some(value).filter(|v| !v.is_empty()))
         }
     };
     Ok(Row {

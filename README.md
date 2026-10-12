@@ -205,7 +205,8 @@ part or as a `text/csv` body, up to 256 MB. It is all or nothing: if a row
 cannot be read, or names a site that does not exist, nothing is added and
 the answer says what is wrong and on which line. Imported hits have no
 visitor (it cannot be rebuilt from an export), so they add pageviews but no
-unique visitors, and rows are not checked for duplicates.
+unique visitors (country, device, browser and OS may be empty, and show as
+Unknown), and rows are not checked for duplicates.
 
 ## Configuration
 

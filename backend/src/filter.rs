@@ -68,14 +68,30 @@ pub fn parse_filter(rsql: &str) -> Result<FacetFilters, String> {
     Ok(filters)
 }
 
+/// What the stats show, and a filter takes, for a NULL country, device,
+/// browser or os.
+pub const UNKNOWN: &str = "unknown";
+/// The facets that are NULL when unknown.
+const NULLABLE: [&str; 4] = ["country", "device", "browser", "os"];
+
 /// The filters as a SQL clause over the hits table, with its parameters.
 pub fn filter_sql(filters: &FacetFilters) -> (String, Vec<String>) {
     let mut clauses = Vec::new();
     let mut params = Vec::new();
     for (facet, values) in filters {
-        let placeholders = values.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
-        clauses.push(format!("{facet} IN ({placeholders})"));
-        params.extend(values.iter().cloned());
+        // `unknown` selects the hits where the facet is NULL.
+        let unknown = NULLABLE.contains(&facet.as_str()) && values.iter().any(|v| v == UNKNOWN);
+        let known: Vec<&String> = values
+            .iter()
+            .filter(|v| !(unknown && *v == UNKNOWN))
+            .collect();
+        let placeholders = known.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        clauses.push(match (known.is_empty(), unknown) {
+            (_, false) => format!("{facet} IN ({placeholders})"),
+            (true, true) => format!("{facet} IS NULL"),
+            (false, true) => format!("({facet} IN ({placeholders}) OR {facet} IS NULL)"),
+        });
+        params.extend(known.into_iter().cloned());
     }
     (clauses.join(" AND "), params)
 }
@@ -289,6 +305,18 @@ mod tests {
         let (clause, params) = filter_sql(&filters);
         assert_eq!(clause, "country IN (?) AND device IN (?, ?)");
         assert_eq!(params, vec!["no", "mobile", "desktop"]);
+    }
+
+    #[test]
+    fn unknown_selects_the_null_facets() {
+        let filters =
+            parse_filter("device==unknown;country==no,country==Unknown;path==unknown").unwrap();
+        let (clause, params) = filter_sql(&filters);
+        assert_eq!(
+            clause,
+            "(country IN (?) OR country IS NULL) AND device IS NULL AND path IN (?)"
+        );
+        assert_eq!(params, vec!["no", "unknown"]);
     }
 
     #[test]

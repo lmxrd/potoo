@@ -702,7 +702,8 @@ async fn import_adds_every_row_or_none() {
     let header = "site,created_at,kind,path,name,referrer,country,device,browser,os\r\n";
     let good = format!(
         "{header}Blog.Example.com,2026-03-04T12:00:00.000Z,pageview,/a?x=1,,https://news.example.org/post,NO,Desktop,Chrome,macOS\r\n\
-         blog.example.com,2026-03-04T14:00:00+02:00,click,/a,signup,,,mobile,safari,ios\r\n"
+         blog.example.com,2026-03-04T14:00:00+02:00,click,/a,signup,,,mobile,safari,ios\r\n\
+         blog.example.com,2026-03-04T15:00:00Z,pageview,/c,,,,,,\r\n"
     );
     let stats = || async {
         json(
@@ -768,7 +769,7 @@ async fn import_adds_every_row_or_none() {
     let body = json(response).await;
     assert_eq!(body["total_problems"], json!(3));
     let problems = body["problems"].as_array().unwrap();
-    assert_eq!(problems[0]["line"], json!(4));
+    assert_eq!(problems[0]["line"], json!(5));
     assert_eq!(problems[0]["column"], json!("site"));
     assert_eq!(problems[1]["column"], json!("created_at"));
     assert_eq!(problems[2]["column"], json!("kind"));
@@ -776,7 +777,7 @@ async fn import_adds_every_row_or_none() {
         body["error"]
             .as_str()
             .unwrap()
-            .starts_with("Nothing was imported. line 4:")
+            .starts_with("Nothing was imported. line 5:")
     );
     assert_eq!(
         stats().await["pageviews"],
@@ -795,18 +796,59 @@ async fn import_adds_every_row_or_none() {
     // The good file, as the body and as a form.
     let response = post_csv(&app, &session, "text/csv", &good).await;
     assert_eq!(response.status(), 200);
-    assert_eq!(json(response).await["imported"], json!(2));
+    assert_eq!(json(response).await["imported"], json!(3));
     let form = format!(
         "--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"hits.csv\"\r\nContent-Type: text/csv\r\n\r\n{good}\r\n--b--\r\n"
     );
     let response = post_csv(&app, &session, "multipart/form-data; boundary=b", &form).await;
     assert_eq!(response.status(), 200);
-    assert_eq!(json(response).await["imported"], json!(2));
+    assert_eq!(json(response).await["imported"], json!(3));
 
     // Cleaned like a tracked hit; no visitors, only pageviews.
     let stats = stats().await;
-    assert_eq!(stats["pageviews"], json!(2));
+    assert_eq!(stats["pageviews"], json!(4));
     assert_eq!(stats["visitors"], json!(0));
+    // Unknown device, browser and os show as `unknown`, and can be filtered on.
+    assert!(
+        stats["devices"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["device"] == json!("unknown")),
+        "device is shown as unknown"
+    );
+    assert!(
+        stats["browsers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["browser"] == json!("unknown")),
+        "browser is shown as unknown"
+    );
+    assert!(
+        stats["os"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["os"] == json!("unknown")),
+        "os is shown as unknown"
+    );
+    let unknown = json(
+        request(
+            &app,
+            Method::GET,
+            "/api/stats?sites=blog.example.com&from=2026-03-01T00:00:00.000Z&to=2026-03-10T00:00:00.000Z&q=device==unknown",
+            Some(&session),
+            None,
+        )
+        .await,
+    )
+    .await;
+    assert_eq!(
+        unknown["pageviews"],
+        json!(2),
+        "the two imports of the row without a device"
+    );
     let export = request(
         &app,
         Method::GET,

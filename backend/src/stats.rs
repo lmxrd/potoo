@@ -226,7 +226,7 @@ pub struct PathRow {
 
 #[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct CountryRow {
-    /// A lowercase ISO 3166-1 alpha-2 code (`no`, `us`), or `??` for hits
+    /// A lowercase ISO 3166-1 alpha-2 code (`no`, `us`), or `unknown` for hits
     /// whose country could not be resolved.
     pub country: String,
     pub visitors: i64,
@@ -234,7 +234,7 @@ pub struct CountryRow {
 
 #[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct DeviceRow {
-    /// `desktop`, `mobile` or `tablet`.
+    /// `desktop`, `mobile` or `tablet`, or `unknown` for hits with none.
     pub device: String,
     pub visitors: i64,
 }
@@ -242,7 +242,7 @@ pub struct DeviceRow {
 #[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct BrowserRow {
     /// A lowercase key: `chrome`, `safari`, `firefox`, `edge`, `opera` or
-    /// `other`.
+    /// `other`, or `unknown` for hits with none.
     pub browser: String,
     pub visitors: i64,
 }
@@ -250,7 +250,7 @@ pub struct BrowserRow {
 #[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct OsRow {
     /// A lowercase key: `windows`, `macos`, `ios`, `ipados`, `android`,
-    /// `linux` or `other`.
+    /// `linux` or `other`, or `unknown` for hits with none.
     pub os: String,
     pub visitors: i64,
 }
@@ -394,22 +394,22 @@ pub async fn stats_for(
         ),
         rows!(
             CountryRow,
-            "COALESCE(country, '??') AS country, COUNT(DISTINCT visitor) AS visitors",
+            "COALESCE(country, 'unknown') AS country, COUNT(DISTINCT visitor) AS visitors",
             format!("AND {pv} GROUP BY country ORDER BY visitors DESC LIMIT 50")
         ),
         rows!(
             DeviceRow,
-            "device, COUNT(DISTINCT visitor) AS visitors",
+            "COALESCE(device, 'unknown') AS device, COUNT(DISTINCT visitor) AS visitors",
             format!("AND {pv} GROUP BY device ORDER BY visitors DESC")
         ),
         rows!(
             BrowserRow,
-            "browser, COUNT(DISTINCT visitor) AS visitors",
+            "COALESCE(browser, 'unknown') AS browser, COUNT(DISTINCT visitor) AS visitors",
             format!("AND {pv} GROUP BY browser ORDER BY visitors DESC LIMIT 50")
         ),
         rows!(
             OsRow,
-            "os, COUNT(DISTINCT visitor) AS visitors",
+            "COALESCE(os, 'unknown') AS os, COUNT(DISTINCT visitor) AS visitors",
             format!("AND {pv} GROUP BY os ORDER BY visitors DESC LIMIT 50")
         ),
         rows!(

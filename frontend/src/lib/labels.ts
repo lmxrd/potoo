@@ -39,13 +39,17 @@ export function storedValue(facet: string, value: string): string {
   return LOWERCASE.has(facet) ? value.toLowerCase() : value;
 }
 
+/** The facets that have no value for some hits (the backend stores NULL). */
+const UNKNOWABLE = new Set(["country", "device", "browser", "os"]);
+
 const reported = new Set<string>();
 
 /** What to show for a stored value of a facet; the value itself if unknown. */
 export function facetLabel(facet: string, value: string): string {
-  // Paths, referrers and click labels are shown as they are, and so is the
-  // "??" of hits whose country could not be resolved.
-  if (facet === "country" && value !== "??") return label(facet, value, countryName(value));
+  // Paths, referrers and click labels are shown as they are. The key `unknown`
+  // is that of the hits whose country, device, browser or OS is not known.
+  if (value === "unknown" && UNKNOWABLE.has(facet)) return "Unknown";
+  if (facet === "country") return label(facet, value, countryName(value));
   const labels = LABELS[facet];
   return labels ? label(facet, value, labels[value]) : value;
 }
