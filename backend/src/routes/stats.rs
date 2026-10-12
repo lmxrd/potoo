@@ -5,7 +5,6 @@ use crate::state::AppState;
 use crate::stats::{SiteStats, stats_for};
 use axum::Json;
 use axum::extract::{Query, State};
-use chrono::Utc;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -37,6 +36,6 @@ async fn stats(
     let (range, filters) = range_and_filter(&query)?;
     let ids = site_ids(&state, query.sites.as_deref()).await?;
     state.ingest.flush().await;
-    let stats = stats_for(&state.db, &ids, &range, &filters, Utc::now()).await?;
+    let stats = stats_for(&state.db, &ids, &range, &filters).await?;
     Ok(Json(stats))
 }

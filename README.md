@@ -180,14 +180,15 @@ one site, and the export — takes the same query params:
 
 | Param   | What it is                                                                                     |
 | ------- | ---------------------------------------------------------------------------------------------- |
-| `range` | A rolling window ending now, as an ISO 8601 duration: `PT24H`, `P7D`, `P30D`, `P90D`, `P1Y`   |
-| `from`+`to` | Instead of a duration: an exact window, ISO timestamps in UTC with minute precision         |
+| `from`+`to` | Both required: the exact window, as ISO 8601 timestamps (the `to` instant included). It spans at most 730 days — two years |
 | `sites` | Comma-separated hostnames, e.g. `blog.example.com,shop.example.com`; when absent, every site. An unknown hostname is a 400 |
 | `q`     | A filter over the dashboard's facets, e.g. `country==NO;path==/pricing`                        |
 
-The dashboard's "Today" view is a `from`/`to` pair: UTC midnight to now. The
-`q` filter is equality on the facets the dashboard shows, OR (`,`) within one
-facet and AND (`;`) across them.
+The dashboard's presets (`24h`, `7d`, `30d`, ...) are a URL shorthand: the
+dashboard turns each into its exact `from`/`to` window when the request is
+made, so a preset stays rolling as long as the dashboard keeps re-fetching
+it. The `q` filter is equality on the facets the dashboard shows, OR (`,`)
+within one facet and AND (`;`) across them.
 
 The export is `GET /api/export` with those params, and returns raw data only:
 one CSV row per recorded hit — site, timestamp, kind, path, name, referrer,

@@ -41,7 +41,7 @@ async fn export(
 ) -> Result<Response, HttpError> {
     let (range, filters) = range_and_filter(&query)?;
     let ids = site_ids(&state, query.sites.as_deref()).await?;
-    let (since, until) = range_bounds(&range, Utc::now());
+    let (since, until) = range_bounds(&range);
 
     let mut where_clauses: Vec<String> = Vec::new();
     let mut params: Vec<String> = Vec::new();
@@ -54,10 +54,8 @@ async fn export(
     }
     where_clauses.push("hits.created_at >= ?".into());
     params.push(since);
-    if let Some(until) = until {
-        where_clauses.push("hits.created_at < ?".into());
-        params.push(until);
-    }
+    where_clauses.push("hits.created_at < ?".into());
+    params.push(until);
     let (filter_clause, filter_params) = filter_sql(&filters);
     if !filter_clause.is_empty() {
         where_clauses.push(filter_clause);

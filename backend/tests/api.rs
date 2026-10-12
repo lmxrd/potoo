@@ -1,5 +1,6 @@
 //! End-to-end tests over real HTTP, against an in-memory database.
 
+use chrono::{Duration, Utc};
 use potoo::{app, auth, db, geo, state::AppState};
 use reqwest::{Client, Method, Response};
 use serde_json::{Value, json};
@@ -170,6 +171,12 @@ async fn setup_users_sites_collection_stats_and_exports() {
     .await;
     assert_eq!(site["hostname"], json!("blog.example.com"));
     let site_id = site["id"].as_i64().unwrap();
+    // The window of the stats and the exports: twelve hours either side
+    // of now, so it covers the hits this test collects.
+    let window = (
+        (Utc::now() - Duration::hours(12)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        (Utc::now() + Duration::hours(12)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+    );
 
     // Collection: a pageview and a click; unknown hosts are ignored, and
     // so are query strings on paths.
@@ -198,7 +205,10 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::GET,
-            "/api/stats?sites=Blog.Example.com&range=P1D",
+            &format!(
+                "/api/stats?sites=Blog.Example.com&from={}&to={}",
+                window.0, window.1
+            ),
             Some(&session),
             None,
         )
@@ -269,7 +279,10 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::GET,
-            "/api/stats?sites=blog.example.com&q=path==/a",
+            &format!(
+                "/api/stats?sites=blog.example.com&from={}&to={}&q=path==/a",
+                window.0, window.1
+            ),
             Some(&session),
             None,
         )
@@ -282,7 +295,10 @@ async fn setup_users_sites_collection_stats_and_exports() {
     let response = request(
         &app,
         Method::GET,
-        "/api/stats?sites=blog.example.com,Nope.example.com",
+        &format!(
+            "/api/stats?sites=blog.example.com,Nope.example.com&from={}&to={}",
+            window.0, window.1
+        ),
         Some(&session),
         None,
     )
@@ -297,7 +313,10 @@ async fn setup_users_sites_collection_stats_and_exports() {
     let export = request(
         &app,
         Method::GET,
-        "/api/export?sites=blog.example.com&range=P1D",
+        &format!(
+            "/api/export?sites=blog.example.com&from={}&to={}",
+            window.0, window.1
+        ),
         Some(&session),
         None,
     )
@@ -314,7 +333,10 @@ async fn setup_users_sites_collection_stats_and_exports() {
     let filtered = request(
         &app,
         Method::GET,
-        "/api/export?sites=blog.example.com&range=P1D&q=name==signup",
+        &format!(
+            "/api/export?sites=blog.example.com&from={}&to={}&q=name==signup",
+            window.0, window.1
+        ),
         Some(&session),
         None,
     )
@@ -509,11 +531,18 @@ async fn bots_and_dnt_are_not_recorded() {
         .unwrap();
     assert_eq!(dnt.status(), 204);
 
+    let window = (
+        (Utc::now() - Duration::hours(12)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        (Utc::now() + Duration::hours(12)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+    );
     let stats = json(
         request(
             &app,
             Method::GET,
-            "/api/stats?sites=example.com",
+            &format!(
+                "/api/stats?sites=example.com&from={}&to={}",
+                window.0, window.1
+            ),
             Some(&session),
             None,
         )

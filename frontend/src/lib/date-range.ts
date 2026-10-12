@@ -67,18 +67,16 @@ function todayWindow(): { from: string; to: string } {
 
 /**
  * The query params of a range — the same ones the stats and the export
- * endpoints take — or null when a custom range is invalid. Presets go as
- * the duration they are (`range=P7D`); custom ranges are ISO timestamps
- * in UTC, minute precision.
+ * endpoints take: the exact window, as full ISO timestamps. The URL and
+ * the API never see a range's name: presets are expanded to their exact
+ * window when the request is made, so a preset stays rolling for as
+ * long as the dashboard keeps re-fetching it.
  */
-export type RangeQuery = { range: string } | { from: string; to: string };
+export type RangeQuery = { from: string; to: string };
 
 export function rangeQuery(range: DateRange): RangeQuery | null {
-  if (range.preset === "today") return todayWindow();
-  if (range.preset !== "custom") return { range: range.preset };
-  const from = utcMinute(range.from);
-  const to = utcMinute(range.to);
-  return from && to && from < to ? { from, to } : null;
+  const window = rangeWindow(range);
+  return window ? { from: window.from.toISOString(), to: window.to.toISOString() } : null;
 }
 
 /**
@@ -95,7 +93,9 @@ export function rangeWindow(range: DateRange): { from: Date; to: Date } | null {
   const now = new Date();
   if (range.preset === "today") {
     const midnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
-    return { from: new Date(midnight), to: now };
+    // Not before midnight in practice, but from must be before to.
+    const to = +now > midnight ? now : new Date(midnight + 60_000);
+    return { from: new Date(midnight), to };
   }
   return { from: new Date(+now - PRESET_MS[range.preset]), to: now };
 }

@@ -19,22 +19,18 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(get_site, update, delete))
 }
 
-/// What the stats and the export are computed over. All parameters are
-/// optional: without any, every site over the last 7 days.
+/// What the stats and the export are computed over: an exact window,
+/// the selected sites, and a facet filter.
 #[derive(Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct StatsQuery {
     /// Comma separated hostnames, e.g. `blog.example.com,shop.example.com`.
     /// Every site when absent. An unknown hostname is a 400.
     pub sites: Option<String>,
-    /// A rolling window ending now, as an ISO 8601 duration:
-    /// `PT12H`, `P7D`, `P30D`, `P90D`, `P1Y`, ... (at most 365 days).
-    /// Default `P7D`. Ignored when `from` and `to` are given.
-    pub range: Option<String>,
-    /// The start of an exact window, `YYYY-MM-DDTHH:MM` in UTC. Needs `to`.
+    /// The start of the window, as an ISO 8601 timestamp. Required.
     pub from: Option<String>,
-    /// The end of an exact window (that minute included), `YYYY-MM-DDTHH:MM`
-    /// in UTC. Needs `from`; the window spans at most 730 days.
+    /// The end of the window (that instant included), as an ISO 8601
+    /// timestamp. Required; the window spans at most 730 days (two years).
     pub to: Option<String>,
     /// A filter over the facets (path, country, device, browser, os,
     /// referrer, name): equality, OR (`,`) within a facet and AND (`;`)
@@ -74,12 +70,8 @@ pub async fn site_ids(state: &AppState, sites: Option<&str>) -> Result<Vec<i64>,
 pub fn range_and_filter(
     query: &StatsQuery,
 ) -> Result<(crate::stats::StatsRange, filter::FacetFilters), HttpError> {
-    let range = parse_range(
-        query.range.as_deref(),
-        query.from.as_deref(),
-        query.to.as_deref(),
-    )
-    .map_err(HttpError::bad_request)?;
+    let range =
+        parse_range(query.from.as_deref(), query.to.as_deref()).map_err(HttpError::bad_request)?;
     let filters = filter::parse_filter_param(query.q.as_deref()).map_err(HttpError::bad_request)?;
     Ok((range, filters))
 }

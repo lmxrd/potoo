@@ -6,7 +6,6 @@ use utoipa::ToSchema;
 
 const DAY_MS: i64 = 86_400_000;
 const HOUR_MS: i64 = 3_600_000;
-const MINUTE_MS: i64 = 60_000;
 
 /// The bucket a custom range's chart is aggregated over.
 #[derive(Serialize, ToSchema, Clone, Copy, Debug, PartialEq, Eq)]
@@ -18,177 +17,71 @@ pub enum Bucket {
     Month,
 }
 
-/// A rolling window ending now, or an explicit UTC range with minute
-/// precision — the two forms every time-filtered endpoint accepts.
-pub enum StatsRange {
-    /// The window's length in milliseconds; it ends now.
-    Rolling { millis: i64 },
-    /// An explicit range; the `to` minute is included.
-    FromTo {
-        from: DateTime<Utc>,
-        to: DateTime<Utc>,
-    },
+/// The window every time-filtered endpoint aggregates over: rows with
+/// `created_at >= from` and `created_at <= to` — the `to` instant
+/// included, exactly as the request named it. Durations and named ranges
+/// are the frontend's concern: it turns them into this before the
+/// request.
+pub struct StatsRange {
+    pub from: DateTime<Utc>,
+    pub to: DateTime<Utc>,
 }
 
-/// Parse the range of a stats or export request — the one shape every
-/// endpoint that filters by time accepts:
-///
-/// - `range`: an ISO 8601 duration like `P7D`, `PT12H` or `P1Y` — a
-///   rolling window of exactly that length, ending now;
-/// - or `from`/`to`: an explicit pair of ISO timestamps, YYYY-MM-DDTHH:MM
-///   in UTC, with the `to` minute included. The dashboard's "Today" view
-///   is this form: UTC midnight to now.
-pub fn parse_range(
-    range: Option<&str>,
-    from: Option<&str>,
-    to: Option<&str>,
-) -> Result<StatsRange, String> {
-    if from.is_some() || to.is_some() {
-        let (Some(from), Some(to)) = (from, to) else {
-            return Err("from and to are both required, as YYYY-MM-DDTHH:MM in UTC".into());
-        };
-        let (Some(start), Some(end)) = (parse_minute(from), parse_minute(to)) else {
-            return Err("from and to must be YYYY-MM-DDTHH:MM in UTC".into());
-        };
-        if start >= end {
-            return Err("from must be before to".into());
-        }
-        if end - start > 730 * DAY_MS {
-            return Err("the range can span at most 730 days".into());
-        }
-        return Ok(StatsRange::FromTo {
-            from: Utc.timestamp_millis_opt(start).unwrap(),
-            to: Utc.timestamp_millis_opt(end).unwrap(),
-        });
-    }
-    match range {
-        None => Ok(StatsRange::Rolling { millis: 7 * DAY_MS }),
-        Some(range) => {
-            let Some(millis) = parse_duration(range) else {
-                return Err("range must be a duration like P7D or PT24H".into());
-            };
-            if millis > 365 * DAY_MS {
-                return Err("range can span at most P1Y (365 days)".into());
-            }
-            Ok(StatsRange::Rolling { millis })
-        }
-    }
-}
-
-/// An ISO 8601 duration like P1Y, P3M, P2W, P7D or PT24H, as
-/// milliseconds. Years count as 365 and months as 30 days, which is
-/// exactly how the day presets behave.
-fn parse_duration(raw: &str) -> Option<i64> {
-    let body = raw.strip_prefix('P')?;
-    let (date, time) = body
-        .split_once('T')
-        .map(|(date, time)| (date, Some(time)))
-        .unwrap_or((body, None));
-    let mut total = 0i64;
-    let mut scan = |part: &str, date_units: bool| -> Option<()> {
-        let mut number: i64 = 0;
-        let mut digits = 0;
-        for c in part.chars() {
-            match c.to_digit(10) {
-                Some(d) => {
-                    number = number * 10 + i64::from(d);
-                    digits += 1;
-                }
-                None => {
-                    if digits == 0 {
-                        return None;
-                    }
-                    total += match (c, date_units) {
-                        ('Y', true) => number * 365 * DAY_MS,
-                        ('M', true) => number * 30 * DAY_MS,
-                        ('W', true) => number * 7 * DAY_MS,
-                        ('D', true) => number * DAY_MS,
-                        ('H', false) => number * HOUR_MS,
-                        ('M', false) => number * MINUTE_MS,
-                        ('S', false) => number * 1_000,
-                        _ => return None,
-                    };
-                    number = 0;
-                    digits = 0;
-                }
-            }
-        }
-        (digits == 0).then_some(())
+/// Parse the from/to of a stats or export request — the one shape every
+/// endpoint that filters by time accepts: a pair of ISO 8601 timestamps,
+/// with any offset, the `to` instant included, spanning at most 730 days
+/// (two years).
+pub fn parse_range(from: Option<&str>, to: Option<&str>) -> Result<StatsRange, String> {
+    let (Some(from), Some(to)) = (from, to) else {
+        return Err("from and to are both required, as ISO 8601 timestamps".into());
     };
-    scan(date, true)?;
-    if let Some(time) = time {
-        scan(time, false)?;
+    let (Ok(from), Ok(to)) = (
+        DateTime::parse_from_rfc3339(from),
+        DateTime::parse_from_rfc3339(to),
+    ) else {
+        return Err("from and to must be ISO 8601 timestamps".into());
+    };
+    let range = StatsRange {
+        from: from.with_timezone(&Utc),
+        to: to.with_timezone(&Utc),
+    };
+    if range.from >= range.to {
+        return Err("from must be before to".into());
     }
-    (total > 0).then_some(total)
+    if (range.to - range.from).num_milliseconds() > 730 * DAY_MS {
+        return Err("the range can span at most 730 days (two years)".into());
+    }
+    Ok(range)
 }
 
-/// A strict YYYY-MM-DDTHH:MM, as milliseconds since the epoch.
-fn parse_minute(raw: &str) -> Option<i64> {
-    let bytes = raw.as_bytes();
-    if bytes.len() != 16
-        || bytes[10] != b'T'
-        || bytes[4] != b'-'
-        || bytes[7] != b'-'
-        || bytes[13] != b':'
-        || !bytes
-            .iter()
-            .enumerate()
-            .all(|(i, b)| i == 4 || i == 7 || i == 10 || i == 13 || b.is_ascii_digit())
-    {
-        return None;
-    }
-    let year: i32 = raw[0..4].parse().ok()?;
-    let month: u32 = raw[5..7].parse().ok()?;
-    let day: u32 = raw[8..10].parse().ok()?;
-    let hour: u32 = raw[11..13].parse().ok()?;
-    let minute: u32 = raw[14..16].parse().ok()?;
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
-        return None;
-    }
-    Utc.with_ymd_and_hms(year, month, day, hour, minute, 0)
-        .single()
-        .map(|dt| dt.timestamp_millis())
-}
-
-/// The range as the `days` field of the stats response.
+/// The range as the `days` field of the stats response: the length of
+/// the window in days, rounded up.
 fn days_field(range: &StatsRange) -> i64 {
-    match range {
-        StatsRange::Rolling { millis } => (*millis + DAY_MS - 1) / DAY_MS,
-        StatsRange::FromTo { from, to } => ((*to - *from).num_milliseconds() + DAY_MS - 1) / DAY_MS,
-    }
+    ((range.to - range.from).num_milliseconds() + DAY_MS - 1) / DAY_MS
 }
 
 /// The buckets a range's chart is aggregated over.
 struct Buckets {
     keys: Vec<String>,
     since: String,
-    until: Option<String>,
+    until: String,
     sql: &'static str,
     bucket: Option<Bucket>,
 }
 
-fn buckets(range: &StatsRange, now: DateTime<Utc>) -> Buckets {
-    match range {
-        StatsRange::Rolling { millis } => {
-            let end = now.timestamp_millis();
-            let mut buckets = span_buckets(end - millis, end);
-            // The window ends now, so it has no fixed upper bound.
-            buckets.until = None;
-            buckets
-        }
-        StatsRange::FromTo { from, to } => span_buckets(
-            from.timestamp_millis(),
-            to.timestamp_millis() + MINUTE_MS, // the `to` minute is included
-        ),
-    }
+fn buckets(range: &StatsRange) -> Buckets {
+    span_buckets(
+        range.from.timestamp_millis(),
+        range.to.timestamp_millis() + 1, // the `to` instant is included
+    )
 }
 
 /// The window a range covers, as ISO timestamps: rows with
-/// `created_at >= since` and, when the range ends before now,
-/// `created_at < until`. Shared by the stats aggregations and the raw
-/// export, so both always cover exactly the same rows.
-pub fn range_bounds(range: &StatsRange, now: DateTime<Utc>) -> (String, Option<String>) {
-    let buckets = buckets(range, now);
+/// `created_at >= since` and `created_at < until`. Shared by the stats
+/// aggregations and the raw export, so both always cover exactly the
+/// same rows.
+pub fn range_bounds(range: &StatsRange) -> (String, String) {
+    let buckets = buckets(range);
     (buckets.since, buckets.until)
 }
 
@@ -237,7 +130,7 @@ fn span_buckets(start: i64, end: i64) -> Buckets {
                 .map(|i| hour(first + i * HOUR_MS))
                 .collect(),
             since: iso(start),
-            until: Some(iso(end)),
+            until: iso(end),
             sql: HOUR_SQL,
         };
     }
@@ -250,7 +143,7 @@ fn span_buckets(start: i64, end: i64) -> Buckets {
                 .map(|i| date(first + i * DAY_MS))
                 .collect(),
             since: iso(start),
-            until: Some(iso(end)),
+            until: iso(end),
             sql: DAY_SQL,
         };
     }
@@ -268,7 +161,7 @@ fn span_buckets(start: i64, end: i64) -> Buckets {
                 .map(|i| date(first + i * 7 * DAY_MS))
                 .collect(),
             since: iso(start),
-            until: Some(iso(end)),
+            until: iso(end),
             sql: WEEK_SQL,
         };
     }
@@ -305,7 +198,7 @@ fn span_buckets(start: i64, end: i64) -> Buckets {
             })
             .collect(),
         since: iso(start),
-        until: Some(iso(end)),
+        until: iso(end),
         sql: MONTH_SQL,
     }
 }
@@ -420,7 +313,6 @@ pub async fn stats_for(
     site_ids: &[i64],
     range: &StatsRange,
     filters: &FacetFilters,
-    now: DateTime<Utc>,
 ) -> sqlx::Result<SiteStats> {
     let days = days_field(range);
     if site_ids.is_empty() {
@@ -446,7 +338,7 @@ pub async fn stats_for(
         until,
         sql,
         bucket,
-    } = buckets(range, now);
+    } = buckets(range);
 
     let in_sites = format!(
         "site_id IN ({})",
@@ -455,21 +347,15 @@ pub async fn stats_for(
     // The filters apply to every aggregation, so a filtered view is
     // fully recomputed: the same facets, restricted to the selected values.
     let (filter_clause, filter_params) = filter_sql(filters);
-    let within = match until {
-        Some(_) => "created_at >= ? AND created_at < ?",
-        None => "created_at >= ?",
-    };
     let within = if filter_clause.is_empty() {
-        within.to_string()
+        "created_at >= ? AND created_at < ?".to_string()
     } else {
-        format!("{within} AND {filter_clause}")
+        format!("created_at >= ? AND created_at < ? AND {filter_clause}")
     };
     let mut params: Vec<String> = Vec::new();
     params.extend(site_ids.iter().map(|id| id.to_string()));
     params.push(since.clone());
-    if let Some(until) = &until {
-        params.push(until.clone());
-    }
+    params.push(until.clone());
     params.extend(filter_params);
 
     let pv = "kind = 'pageview'";
@@ -577,100 +463,73 @@ mod tests {
     use chrono::TimeZone;
 
     #[test]
-    fn parses_presets_and_ranges() {
-        // The default is the rolling last 7 days.
-        assert!(matches!(
-            parse_range(None, None, None),
-            Ok(StatsRange::Rolling { millis }) if millis == 7 * DAY_MS
-        ));
-        // "Today" is the dashboard's label for a midnight-to-now window,
-        // sent as from/to; the backend has no named range.
-        assert!(parse_range(Some("today"), None, None).is_err());
-        // Durations are rolling windows of exactly their length.
-        assert!(matches!(
-            parse_range(Some("PT12H"), None, None),
-            Ok(StatsRange::Rolling { millis }) if millis == 12 * HOUR_MS
-        ));
-        assert!(matches!(
-            parse_range(Some("PT24H"), None, None),
-            Ok(StatsRange::Rolling { millis }) if millis == DAY_MS
-        ));
-        assert!(matches!(
-            parse_range(Some("P30D"), None, None),
-            Ok(StatsRange::Rolling { millis }) if millis == 30 * DAY_MS
-        ));
-        assert!(matches!(
-            parse_range(Some("P2W"), None, None),
-            Ok(StatsRange::Rolling { millis }) if millis == 14 * DAY_MS
-        ));
-        assert!(matches!(
-            parse_range(Some("P1Y"), None, None),
-            Ok(StatsRange::Rolling { millis }) if millis == 365 * DAY_MS
-        ));
-        assert!(parse_range(Some("P400D"), None, None).is_err());
-        assert!(parse_range(Some("7"), None, None).is_err());
-        assert!(parse_range(Some("P"), None, None).is_err());
-        assert!(parse_range(Some("P7X"), None, None).is_err());
-        assert!(parse_range(Some("P7"), None, None).is_err());
-        // Explicit ranges: both ends, minute precision, ordered.
-        assert!(parse_range(None, Some("2026-10-09T00:00"), None).is_err());
-        assert!(parse_range(None, Some("2026-10-09T00:00"), Some("2026-10-09T09:99")).is_err());
-        assert!(matches!(
-            parse_range(None, Some("2026-10-09T00:00"), Some("2026-10-10T00:00")),
-            Ok(StatsRange::FromTo { .. })
-        ));
-        assert!(parse_range(None, Some("2026-10-10T00:00"), Some("2026-10-09T00:00")).is_err());
-    }
-
-    #[test]
-    fn rolling_windows_are_exact() {
-        // A fixed moment: 2026-10-09 is a Friday.
-        let now = Utc.with_ymd_and_hms(2026, 10, 9, 14, 30, 0).unwrap();
-        // PT12H: twelve hours back, hourly chart.
-        let chart = buckets(
-            &StatsRange::Rolling {
-                millis: 12 * HOUR_MS,
-            },
-            now,
-        );
-        assert_eq!(chart.bucket, Some(Bucket::Hour));
-        assert_eq!(chart.since, "2026-10-09T02:30:00.000Z");
-        assert_eq!(chart.until, None);
-        assert_eq!(chart.keys.first().unwrap(), "2026-10-09T02:00");
-        assert_eq!(chart.keys.last().unwrap(), "2026-10-09T14:00");
-        assert_eq!(chart.keys.len(), 13);
-        // P7D: seven days back, daily buckets, the ends partial.
-        let chart = buckets(&StatsRange::Rolling { millis: 7 * DAY_MS }, now);
-        assert_eq!(chart.bucket, Some(Bucket::Day));
-        assert_eq!(chart.since, "2026-10-02T14:30:00.000Z");
-        assert_eq!(chart.until, None);
-        assert_eq!(chart.keys.first().unwrap(), "2026-10-02");
-        assert_eq!(chart.keys.last().unwrap(), "2026-10-09");
-        assert_eq!(chart.keys.len(), 8);
-        // The `days` field is the window's length in days, rounded up.
+    fn parses_iso_windows() {
+        // Both ends are required.
+        assert!(parse_range(None, None).is_err());
+        assert!(parse_range(Some("2026-10-09T00:00:00Z"), None).is_err());
+        assert!(parse_range(None, Some("2026-10-10T00:00:00Z")).is_err());
+        // They are ISO 8601 timestamps, with any offset.
+        assert!(parse_range(Some("nonsense"), Some("2026-10-10T00:00:00Z")).is_err());
+        assert!(parse_range(Some("2026-10-09T00:00:00Z"), Some("nonsense")).is_err());
+        let range = parse_range(
+            Some("2026-10-09T00:00:00.500Z"),
+            Some("2026-10-10T00:00:00Z"),
+        )
+        .unwrap();
         assert_eq!(
-            days_field(&StatsRange::Rolling {
-                millis: 12 * HOUR_MS
-            }),
-            1
+            range.from,
+            Utc.with_ymd_and_hms(2026, 10, 9, 0, 0, 0).unwrap()
+                + chrono::Duration::milliseconds(500)
         );
-        assert_eq!(days_field(&StatsRange::Rolling { millis: 7 * DAY_MS }), 7);
+        assert_eq!(
+            range.to,
+            Utc.with_ymd_and_hms(2026, 10, 10, 0, 0, 0).unwrap()
+        );
+        let range = parse_range(
+            Some("2026-10-09T02:00:00+02:00"),
+            Some("2026-10-10T00:00:00Z"),
+        )
+        .unwrap();
+        assert_eq!(
+            range.from,
+            Utc.with_ymd_and_hms(2026, 10, 9, 0, 0, 0).unwrap()
+        );
+        // from must be before to, and the window spans at most 730 days
+        // (two years) — exactly 730 is allowed.
+        assert!(parse_range(Some("2026-10-10T00:00:00Z"), Some("2026-10-09T00:00:00Z")).is_err());
+        assert!(parse_range(Some("2026-01-01T00:00:00Z"), Some("2029-01-01T00:00:00Z")).is_err());
+        assert!(parse_range(Some("2026-01-01T00:00:00Z"), Some("2028-01-01T00:00:00Z")).is_ok());
     }
 
     #[test]
-    fn fromto_buckets_follow_the_span() {
+    fn days_field_rounds_up() {
         let from = Utc.with_ymd_and_hms(2026, 1, 1, 10, 30, 0).unwrap();
         let to = Utc.with_ymd_and_hms(2026, 1, 2, 12, 30, 0).unwrap();
-        let chart = buckets(&StatsRange::FromTo { from, to }, from);
+        assert_eq!(days_field(&StatsRange { from, to }), 2); // 26 hours
+        let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let to = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
+        assert_eq!(days_field(&StatsRange { from, to }), 1); // 12 hours
+    }
+
+    #[test]
+    fn buckets_follow_the_span() {
+        let range = StatsRange {
+            from: Utc.with_ymd_and_hms(2026, 1, 1, 10, 30, 0).unwrap(),
+            to: Utc.with_ymd_and_hms(2026, 1, 2, 12, 30, 0).unwrap(),
+        };
+        let chart = buckets(&range);
         assert_eq!(chart.bucket, Some(Bucket::Hour));
         assert_eq!(chart.keys.first().unwrap(), "2026-01-01T10:00");
         assert_eq!(chart.keys.last().unwrap(), "2026-01-02T12:00");
         assert_eq!(chart.since, "2026-01-01T10:30:00.000Z");
-        assert_eq!(chart.until.as_deref(), Some("2026-01-02T12:31:00.000Z"));
+        // The to instant is included: the bound is the moment after it.
+        assert_eq!(chart.until, "2026-01-02T12:30:00.001Z");
 
-        let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
-        let to = Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap();
-        let chart = buckets(&StatsRange::FromTo { from, to }, from);
+        let range = StatsRange {
+            from: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
+            to: Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap(),
+        };
+        let chart = buckets(&range);
         assert_eq!(chart.bucket, Some(Bucket::Day));
         assert_eq!(chart.keys.len(), 32);
         assert_eq!(chart.keys.first().unwrap(), "2026-01-01");
