@@ -25,7 +25,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     tag = "Stats",
     operation_id = "exportHits",
     summary = "Export the hits of a dashboard view as CSV",
-    description = "Every recorded hit of the selected view, oldest first, one CSV row each: site, created_at, kind, path, name, referrer, country, device, browser, os. Takes the same parameters as the stats, so what you see is what you get. Sent as an attachment named potoo-export-<timestamp>.csv.",
+    description = "Every recorded hit of the selected view, oldest first, one CSV row each: site, created_at, kind, path, name, referrer, country, device, browser, os, visitor (the pseudonymous visitor hash of the day; empty for an imported hit that had none). Takes the same parameters as the stats, so what you see is what you get. Sent as an attachment named potoo-export-<timestamp>.csv.",
     params(StatsQuery),
     responses(
         (status = 200, description = "The hits as CSV", body = String, content_type = "text/csv", headers(("content-disposition" = String, description = "attachment; filename=\"potoo-export-<timestamp>.csv\""))),
@@ -67,7 +67,7 @@ async fn export(
     // and every column it can name lives in hits alone.
     let sql = format!(
         "SELECT s.hostname AS site, hits.created_at, hits.kind, hits.path, hits.name,
-                hits.referrer, hits.country, hits.device, hits.browser, hits.os
+                hits.referrer, hits.country, hits.device, hits.browser, hits.os, hits.visitor
          FROM hits JOIN sites s ON s.id = hits.site_id
          WHERE {}
          ORDER BY hits.created_at, hits.id",
@@ -83,7 +83,7 @@ async fn export(
         .await?
         .iter()
         .map(|row| {
-            (0..10)
+            (0..11)
                 .map(|i| Ok(row.try_get::<Option<String>, _>(i)?.unwrap_or_default()))
                 .collect::<sqlx::Result<Vec<String>>>()
         })
@@ -101,6 +101,7 @@ async fn export(
             "device",
             "browser",
             "os",
+            "visitor",
         ]
         .iter()
         .map(|s| s.to_string())

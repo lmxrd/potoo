@@ -203,10 +203,13 @@ The import (admins only; "Import hits" in the account menu) is
 `POST /api/import` with a file in the export's format, as a multipart `file`
 part or as a `text/csv` body, up to 256 MB. It is all or nothing: if a row
 cannot be read, or names a site that does not exist, nothing is added and
-the answer says what is wrong and on which line. Imported hits have no
-visitor (it cannot be rebuilt from an export), so they add pageviews but no
-unique visitors (country, device, browser and OS may be empty, and show as
-Unknown), and rows are not checked for duplicates.
+the answer says what is wrong and on which line. The export ends with a
+`visitor` column (the pseudonymous hash of the day) and the import takes it
+back, so a round trip keeps the unique visitors; the column is optional in a
+file to import. A hit without one adds a page view but no unique visitor.
+Sites that do not exist are refused, or created when the request has
+`create_sites=true` (the import page has a toggle for it). Country, device, browser and OS may be empty (they show as Unknown), and rows
+are not checked for duplicates.
 
 ## Configuration
 

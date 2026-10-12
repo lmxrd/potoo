@@ -99,7 +99,8 @@ it** (nothing is committed or served):
   wrong password. The other exception is `/api/import` (`routes/import.rs`),
   which takes a multipart `file` part or a `text/csv` / `text/plain` body (up
   to 256 MB), reads it whole, checks every row, then inserts in one
-  transaction: all or nothing, and `hits.visitor` is NULL for what it adds.
+  transaction: all or nothing. The export has a `visitor` column and the import
+  takes it as an optional one; `hits.visitor` is NULL for a hit without one.
   The JSON endpoints document a 415 in their annotations.
 - **Facet values are lowercase in the database**: `country` (ISO alpha-2),
   `device`, `browser`, `os`, and the referrer's hostname. A path and a click

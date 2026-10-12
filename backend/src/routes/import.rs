@@ -1,16 +1,17 @@
 use crate::error::{ErrorBody, HttpError};
 use crate::routes::auth::AuthUser;
 use crate::routes::collect::{clean_path, clean_referrer};
+use crate::routes::sites::validate_hostname;
 use crate::state::AppState;
 use axum::Json;
 use axum::body::Bytes;
-use axum::extract::{DefaultBodyLimit, FromRequest, Multipart, Request, State};
+use axum::extract::{DefaultBodyLimit, FromRequest, Multipart, Query, Request, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
@@ -25,8 +26,11 @@ pub fn router() -> OpenApiRouter<AppState> {
 /// A million rows are about 120 MB.
 const MAX_BODY: usize = 256 * 1024 * 1024;
 /// More problems than this are counted, not listed.
+/// The columns a file must have; `visitor` may follow.
+const REQUIRED: usize = COLUMNS.len() - 1;
 const MAX_PROBLEMS: usize = 100;
-const COLUMNS: [&str; 10] = [
+/// The columns of the export; the last is optional in a file to import.
+const COLUMNS: [&str; 11] = [
     "site",
     "created_at",
     "kind",
@@ -37,12 +41,24 @@ const COLUMNS: [&str; 10] = [
     "device",
     "browser",
     "os",
+    "visitor",
 ];
+
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ImportQuery {
+    /// Create the sites of the file that do not exist, instead of refusing
+    /// the file. Default false.
+    #[serde(default)]
+    pub create_sites: bool,
+}
 
 #[derive(Serialize, ToSchema)]
 pub struct ImportResult {
     /// How many hits were added.
     pub imported: i64,
+    /// How many sites were created.
+    pub sites_created: i64,
 }
 
 /// One thing wrong with the file.
@@ -119,7 +135,8 @@ impl IntoResponse for Failure {
     tag = "Stats",
     operation_id = "importHits",
     summary = "Import hits from CSV",
-    description = "Adds the rows of a CSV in the export's format (site, created_at, kind, path, name, referrer, country, device, browser, os; a header row names the columns). Sent as multipart/form-data with the CSV in a `file` part, or as the body itself with Content-Type text/csv or text/plain. Admin only. All or nothing: if a row cannot be read or names a site that does not exist, nothing is added and the answer lists what is wrong. Referrer, country, device, browser and os may be empty (unknown). Imported hits have no visitor, so they add pageviews but no unique visitors. Paths and referrers are reduced as they are for tracked hits; the rows are not checked for duplicates. At most 256 MB.",
+    description = "Adds the rows of a CSV in the export's format (site, created_at, kind, path, name, referrer, country, device, browser, os and optionally visitor; a header row names the columns). Sent as multipart/form-data with the CSV in a `file` part, or as the body itself with Content-Type text/csv or text/plain. Admin only. All or nothing: if a row cannot be read or names a site that does not exist, nothing is added and the answer lists what is wrong. With `create_sites=true` the sites of the file that do not exist are created (with the defaults of a new site) in the same transaction, in place of being refused. Referrer, country, device, browser and os may be empty (unknown). The header may end with an optional `visitor` column, the hash the export writes; hits without one add pageviews but no unique visitors. Paths and referrers are reduced as they are for tracked hits; the rows are not checked for duplicates. At most 256 MB.",
+    params(ImportQuery),
     request_body(content(
         (ImportForm = "multipart/form-data"),
         (String = "text/csv"),
@@ -138,6 +155,7 @@ impl IntoResponse for Failure {
 async fn import(
     State(state): State<AppState>,
     user: AuthUser,
+    Query(query): Query<ImportQuery>,
     request: Request,
 ) -> Result<Json<ImportResult>, Failure> {
     if !user.0.is_admin {
@@ -157,7 +175,7 @@ async fn import(
     let sites = std::sync::Arc::new(sites);
     let problems = {
         let (csv, sites) = (csv.clone(), sites.clone());
-        tokio::task::spawn_blocking(move || check(&csv, &sites))
+        tokio::task::spawn_blocking(move || check(&csv, &sites, query.create_sites))
             .await
             .map_err(|e| HttpError::internal(e.to_string()))?
     };
@@ -165,16 +183,27 @@ async fn import(
         return Err(Failure::Rejected(problems.listed, problems.total));
     }
 
-    // The same rows again, now known to be good.
+    // The sites the file asked for, then the same rows again, now known to
+    // be good.
+    let mut sites = (*sites).clone();
+    for hostname in &problems.new_sites {
+        let id = sqlx::query("INSERT INTO sites (hostname) VALUES (?1)")
+            .bind(hostname)
+            .execute(&mut *tx)
+            .await?
+            .last_insert_rowid();
+        sites.insert(hostname.clone(), id);
+    }
     let mut reader = reader(without_bom(&csv));
+    let width = reader.headers().map_or(REQUIRED, |h| h.len());
     let mut imported = 0;
     for record in reader.records() {
         let record = record.map_err(|e| HttpError::internal(e.to_string()))?;
-        let row = parse_row(&record, &sites).expect("the check passed");
+        let row = parse_row(&record, &sites, width, false).expect("the check passed");
         sqlx::query(
             "INSERT INTO hits
-               (created_at, site_id, kind, path, name, referrer, country, device, browser, os)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+               (created_at, site_id, kind, path, name, referrer, country, device, browser, os, visitor)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         )
         .bind(row.created_at)
         .bind(row.site_id)
@@ -186,12 +215,19 @@ async fn import(
         .bind(row.device)
         .bind(row.browser)
         .bind(row.os)
+        .bind(row.visitor)
         .execute(&mut *tx)
         .await?;
         imported += 1;
     }
     tx.commit().await?;
-    Ok(Json(ImportResult { imported }))
+    if !problems.new_sites.is_empty() {
+        state.db.forget_sites();
+    }
+    Ok(Json(ImportResult {
+        imported,
+        sites_created: problems.new_sites.len() as i64,
+    }))
 }
 
 /// The CSV of the request: the `file` part of a form, or the body.
@@ -281,6 +317,8 @@ impl<'a> Lines<'a> {
 struct Problems {
     listed: Vec<ImportProblem>,
     total: usize,
+    /// The sites to create, once each, in file order.
+    new_sites: Vec<String>,
 }
 
 impl Problems {
@@ -301,7 +339,7 @@ impl Problems {
 }
 
 /// Every problem of the file, up to a limit, and how many there were.
-fn check(csv: &[u8], sites: &HashMap<String, i64>) -> Problems {
+fn check(csv: &[u8], sites: &HashMap<String, i64>, create_sites: bool) -> Problems {
     let mut problems = Problems::default();
     let csv = without_bom(csv);
     let mut lines = Lines::new(csv);
@@ -310,13 +348,14 @@ fn check(csv: &[u8], sites: &HashMap<String, i64>) -> Problems {
         Err(e) => problems.file(format!("The header row cannot be read: {e}")),
         Ok(header) => {
             let found: Vec<&str> = header.iter().map(str::trim).collect();
-            if found != COLUMNS {
+            if found != COLUMNS[..REQUIRED] && found != COLUMNS {
                 problems.add(ImportProblem {
                     line: 1,
                     column: None,
                     message: format!(
-                        "The header must be exactly: {}. Found: {}",
-                        COLUMNS.join(","),
+                        "The header must be {}, optionally followed by {}. Found: {}",
+                        COLUMNS[..REQUIRED].join(","),
+                        COLUMNS[REQUIRED],
                         found.join(",")
                     ),
                 });
@@ -326,6 +365,7 @@ fn check(csv: &[u8], sites: &HashMap<String, i64>) -> Problems {
     if problems.total > 0 {
         return problems;
     }
+    let width = reader.headers().map_or(REQUIRED, |h| h.len());
 
     let mut unknown_sites: Vec<String> = Vec::new();
     let mut rows = 0;
@@ -342,7 +382,16 @@ fn check(csv: &[u8], sites: &HashMap<String, i64>) -> Problems {
                 continue;
             }
         };
-        if let Err(problem) = parse_row(&record, sites) {
+        let row = parse_row(&record, sites, width, create_sites);
+        if let Ok(Row {
+            new_site: Some(hostname),
+            ..
+        }) = &row
+            && !problems.new_sites.contains(hostname)
+        {
+            problems.new_sites.push(hostname.clone());
+        }
+        if let Err(problem) = row {
             // An unknown site is one problem however many rows it has.
             if problem.unknown_site {
                 let site = record.get(0).unwrap_or("").trim().to_lowercase();
@@ -366,6 +415,8 @@ fn check(csv: &[u8], sites: &HashMap<String, i64>) -> Problems {
 
 struct Row {
     site_id: i64,
+    /// The hostname, when the site does not exist yet.
+    new_site: Option<String>,
     created_at: String,
     kind: &'static str,
     path: String,
@@ -375,6 +426,7 @@ struct Row {
     device: Option<String>,
     browser: Option<String>,
     os: Option<String>,
+    visitor: Option<String>,
 }
 
 #[derive(Debug)]
@@ -394,22 +446,43 @@ fn bad(column: &'static str, message: impl Into<String>) -> RowProblem {
 
 /// One row, cleaned the way a tracked hit is: facets lowercase, paths
 /// without a query string or fragment, referrers reduced to the hostname.
-fn parse_row(record: &csv::StringRecord, sites: &HashMap<String, i64>) -> Result<Row, RowProblem> {
-    if record.len() != COLUMNS.len() {
+fn parse_row(
+    record: &csv::StringRecord,
+    sites: &HashMap<String, i64>,
+    width: usize,
+    create_sites: bool,
+) -> Result<Row, RowProblem> {
+    if record.len() != width {
         return Err(RowProblem {
             unknown_site: false,
             column: None,
-            message: format!("expected {} columns, found {}", COLUMNS.len(), record.len()),
+            message: format!("expected {width} columns, found {}", record.len()),
         });
     }
     let field = |i: usize| record.get(i).unwrap_or("").trim();
 
     let host = field(0).to_lowercase();
-    let Some(&site_id) = sites.get(&host) else {
-        return Err(RowProblem {
-            unknown_site: true,
-            ..bad("site", format!("unknown site \"{host}\"; create it first"))
-        });
+    let (site_id, new_site) = match sites.get(&host) {
+        Some(&id) => (id, None),
+        // A site to create: its id is known once it is inserted.
+        None if create_sites => match validate_hostname(&host) {
+            Ok(hostname) => (0, Some(hostname)),
+            Err(_) => {
+                return Err(RowProblem {
+                    unknown_site: true,
+                    ..bad("site", format!("\"{host}\" is not a valid hostname"))
+                });
+            }
+        },
+        None => {
+            return Err(RowProblem {
+                unknown_site: true,
+                ..bad(
+                    "site",
+                    format!("unknown site \"{host}\"; create it first, or allow creating sites"),
+                )
+            });
+        }
     };
     let created_at = DateTime::parse_from_rfc3339(field(1))
         .map_err(|_| {
@@ -457,6 +530,7 @@ fn parse_row(record: &csv::StringRecord, sites: &HashMap<String, i64>) -> Result
     };
     Ok(Row {
         site_id,
+        new_site,
         created_at,
         kind,
         path: clean_path(Some(path)),
@@ -466,7 +540,17 @@ fn parse_row(record: &csv::StringRecord, sites: &HashMap<String, i64>) -> Result
         device: facet(7, "device")?,
         browser: facet(8, "browser")?,
         os: facet(9, "os")?,
+        visitor: visitor(field(10))?,
     })
+}
+
+/// The visitor hash of a hit, if the file has one: opaque, as the export
+/// wrote it (32 hex characters).
+fn visitor(value: &str) -> Result<Option<String>, RowProblem> {
+    if value.chars().count() > 64 {
+        return Err(bad("visitor", "is longer than 64 characters"));
+    }
+    Ok(Some(value.to_string()).filter(|v| !v.is_empty()))
 }
 
 /// The multipart form of the request, as the spec describes it.

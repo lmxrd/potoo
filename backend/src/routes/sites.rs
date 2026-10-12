@@ -124,7 +124,7 @@ async fn list(
 }
 
 /// Expected a hostname such as example.com or blog.example.com.
-fn validate_hostname(raw: &str) -> Result<String, HttpError> {
+pub(crate) fn validate_hostname(raw: &str) -> Result<String, HttpError> {
     let host = raw.trim().to_lowercase();
     let invalid =
         || HttpError::bad_request("Expected a hostname such as example.com or blog.example.com");

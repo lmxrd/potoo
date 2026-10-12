@@ -158,6 +158,14 @@ depends = ["build:frontend"]
 run = "cargo run --bin seed"
 dir = "{{ config_root }}/backend"
 
-# Remove the local data: the SQLite database and the GeoIP database.
+# Remove everything that is generated or local: the Rust build (and the
+# OpenAPI spec in it), node_modules, the frontend build and the generated API
+# client, and the local data (the SQLite database and the GeoIP database).
+# `mise run install:frontend` and a build bring it all back.
 [tasks.clean]
-run = "rm -rf data"
+dir = "{{ config_root }}"
+run = """
+rm -rf backend/target backend/data data
+rm -rf frontend/node_modules frontend/dist frontend/src/client
+rm -f frontend/openapi-ts-error-*.log
+"""
