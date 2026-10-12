@@ -169,8 +169,8 @@ pub struct CollectBody {
     tag = "Tracking",
     operation_id = "collectHit",
     summary = "Record a hit (the tracker script)",
-    description = "Sent by /tracker.js with sendBeacon: the body is a JSON object sent as text/plain, so that no CORS preflight is needed. Answers 204 for every well-formed request, also for hits that are ignored (bots, Do Not Track, unknown sites). The hit is queued and written within milliseconds; with 20,000 hits waiting the answer is 503.",
-    request_body(content = CollectBody, content_type = "text/plain"),
+    description = "Sent by /tracker.js with sendBeacon: the body is a JSON object sent as text/plain, so that no CORS preflight is needed (application/json is accepted too: this is the only endpoint that takes anything but JSON). Answers 204 for every well-formed request, also for hits that are ignored (bots, Do Not Track, unknown sites). The hit is queued and written within milliseconds; with 20,000 hits waiting the answer is 503.",
+    request_body(content((CollectBody = "text/plain"), (CollectBody = "application/json"))),
     responses(
         (status = 204, description = "The hit was accepted, or ignored"),
         (status = 503, description = "Too many hits queued, try again", body = ErrorBody),

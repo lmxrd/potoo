@@ -71,6 +71,7 @@ backend/src/lib.rs         the app: the API routes plus the frontend, and the TL
 backend/src/frontend.rs    the embedded frontend: static files, cache headers, the SPA fallback
 backend/src/state.rs       the shared AppState
 backend/src/error.rs       HttpError, answered as {"error": "..."}
+backend/src/extract.rs     ApiJson: the JSON request body extractor
 backend/src/db.rs          the SQLite pools (one writer, read-only readers), caches, migrations on startup
 backend/src/ingest.rs      the hit queue and the batched writer
 backend/src/profile.rs     per-phase timers, compiled in only with the profiling feature

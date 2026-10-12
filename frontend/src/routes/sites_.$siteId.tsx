@@ -39,7 +39,9 @@ function SitePage() {
   const params = site ? statsQuery(query, site.hostname, buildFilter(filters)) : null;
   // The previous numbers stay on screen while the next range loads.
   const { data: stats, error: statsError } = useQuery({
-    ...getStatsOptions({ query: params ?? undefined }),
+    // The query never runs while the range is invalid (`enabled`), so the
+    // empty one it is built from is never sent.
+    ...getStatsOptions({ query: params ?? { from: "", to: "" } }),
     enabled: params !== null,
     placeholderData: keepPreviousData,
   });

@@ -581,3 +581,57 @@ async fn every_documented_operation_is_routed() {
     }
     assert!(checked >= 23, "only {checked} operations documented");
 }
+
+async fn post_raw(app: &TestApp, path: &str, content_type: &str, body: &str) -> Response {
+    app.client
+        .post(format!("{}{path}", app.base))
+        .header("user-agent", UA)
+        .header("content-type", content_type)
+        .body(body.to_string())
+        .send()
+        .await
+        .unwrap()
+}
+
+/// Bodies are JSON and nothing else, except at the tracker's endpoint,
+/// which takes the `text/plain` that `sendBeacon` sends too.
+#[tokio::test]
+async fn bodies_are_json_only_except_at_collect() {
+    let app = spawn_app().await;
+    let credentials = r#"{"email":"a@example.com","password":"correct horse battery"}"#;
+
+    // Valid JSON in another content type is a 415, in the API's error shape.
+    let response = post_raw(&app, "/api/auth/setup", "text/plain", credentials).await;
+    assert_eq!(response.status(), 415);
+    assert_eq!(
+        json(response).await["error"],
+        json!("Expected a JSON body (Content-Type: application/json)")
+    );
+    // Invalid JSON, or JSON of the wrong shape, is a 400.
+    for body in ["{nope", r#"{"email": 1}"#, ""] {
+        let response = post_raw(&app, "/api/auth/setup", "application/json", body).await;
+        assert_eq!(response.status(), 400, "{body:?}");
+        assert_eq!(json(response).await["error"], json!("Invalid request body"));
+    }
+    // Nothing was created by any of those; the real thing works.
+    let response = post_raw(&app, "/api/auth/setup", "application/json", credentials).await;
+    assert_eq!(response.status(), 201);
+
+    // A login with a body the API cannot read fails like a wrong password.
+    for (content_type, body) in [("text/plain", credentials), ("application/json", "{nope")] {
+        let response = post_raw(&app, "/api/auth/login", content_type, body).await;
+        assert_eq!(response.status(), 401, "{content_type} {body}");
+    }
+
+    // The tracker's endpoint takes text/plain and JSON, and answers 204 to
+    // anything, garbage included.
+    let hit = r#"{"type":"pageview","host":"nobody.example.com","path":"/"}"#;
+    for (content_type, body) in [
+        ("text/plain", hit),
+        ("application/json", hit),
+        ("text/plain", "garbage"),
+    ] {
+        let response = post_raw(&app, "/api/collect", content_type, body).await;
+        assert_eq!(response.status(), 204, "{content_type} {body}");
+    }
+}

@@ -268,6 +268,7 @@ pub struct SiteStats {
     pub days: i64,
     /// The bucket the chart's byDay rows are aggregated over.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(nullable = false)]
     pub bucket: Option<Bucket>,
     pub pageviews: i64,
     pub visitors: i64,

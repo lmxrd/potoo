@@ -2,6 +2,7 @@ pub mod auth;
 pub mod csv;
 pub mod db;
 pub mod error;
+pub mod extract;
 pub mod filter;
 pub mod frontend;
 pub mod geo;

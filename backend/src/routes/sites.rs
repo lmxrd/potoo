@@ -1,4 +1,5 @@
 use crate::error::{ErrorBody, HttpError};
+use crate::extract::ApiJson;
 use crate::filter;
 use crate::routes::auth::AuthUser;
 use crate::state::AppState;
@@ -27,10 +28,14 @@ pub struct StatsQuery {
     /// Comma separated hostnames, e.g. `blog.example.com,shop.example.com`.
     /// Every site when absent. An unknown hostname is a 400.
     pub sites: Option<String>,
-    /// The start of the window, as an ISO 8601 timestamp. Required.
+    /// The start of the window, as an ISO 8601 timestamp. Required: a request
+    /// without it is a 400 (it is optional here only so that the error is ours).
+    #[param(required = true)]
     pub from: Option<String>,
     /// The end of the window (that instant included), as an ISO 8601
-    /// timestamp. Required; the window spans at most 730 days (two years).
+    /// timestamp. Required, like `from`; the window spans at most 730 days
+    /// (two years).
+    #[param(required = true)]
     pub to: Option<String>,
     /// A filter over the facets (path, country, device, browser, os,
     /// referrer, name): equality, OR (`,`) within a facet and AND (`;`)
@@ -178,19 +183,18 @@ fn default_true() -> bool {
         (status = 401, description = "Not signed in", body = ErrorBody),
         (status = 403, description = "Admin only", body = ErrorBody),
         (status = 409, description = "Conflict", body = ErrorBody),
+        (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
     security(("session" = [])),
 )]
 async fn create(
     State(state): State<AppState>,
     user: AuthUser,
-    body: String,
+    ApiJson(input): ApiJson<SiteInput>,
 ) -> Result<Response, HttpError> {
     if !user.0.is_admin {
         return Err(HttpError::forbidden());
     }
-    let input: SiteInput =
-        serde_json::from_str(&body).map_err(|_| HttpError::bad_request("Invalid request body"))?;
     let hostname = validate_hostname(&input.hostname)?;
     let mut tx = state.db.writer().begin().await?;
     let taken: Option<i64> = sqlx::query_scalar("SELECT 1 FROM sites WHERE hostname = ?1")
@@ -240,6 +244,7 @@ pub struct DntInput {
         (status = 400, description = "The request is invalid", body = ErrorBody),
         (status = 401, description = "Not signed in", body = ErrorBody),
         (status = 403, description = "Admin only", body = ErrorBody),
+        (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
     security(("session" = [])),
 )]
@@ -247,13 +252,11 @@ async fn update(
     State(state): State<AppState>,
     user: AuthUser,
     Path(id): Path<i64>,
-    body: String,
+    ApiJson(input): ApiJson<DntInput>,
 ) -> Result<Response, HttpError> {
     if !user.0.is_admin {
         return Err(HttpError::forbidden());
     }
-    let input: DntInput =
-        serde_json::from_str(&body).map_err(|_| HttpError::bad_request("Invalid request body"))?;
     sqlx::query("UPDATE sites SET honor_dnt = ?1 WHERE id = ?2")
         .bind(input.honor_dnt as i64)
         .bind(id)

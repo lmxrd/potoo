@@ -91,6 +91,14 @@ it** (nothing is committed or served):
   `IntoParams`. The non-JSON endpoints (`/tracker.js`, `/api/pixel`,
   `/api/export`, `/api/health`) are documented too. `openapi.rs` only holds
   the title, the tags and the cookie scheme.
+- Request bodies are JSON only: handlers take `ApiJson<T>` (`src/extract.rs`),
+  which requires `Content-Type: application/json` (a 415 otherwise), answers
+  an unreadable body with a 400 `Invalid request body`, and uses the API's
+  `{"error": "..."}` shape. Never `body: String` plus manual parsing. The one
+  exception is `/api/collect`, which also takes `text/plain` (that is what
+  `sendBeacon` sends) and answers 204 to anything; `/api/auth/login` takes
+  `Result<ApiJson<_>, HttpError>` so that an unreadable body fails like a
+  wrong password. The JSON endpoints document a 415 in their annotations.
 - Flags are booleans in both requests and responses (`is_admin`,
   `honor_dnt`), never 0/1.
 - The spec is written by the `openapi` binary, built with `--features spec`,

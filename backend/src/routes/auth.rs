@@ -3,6 +3,7 @@ use crate::auth::{
     hash_password, verify_password,
 };
 use crate::error::{ErrorBody, HttpError};
+use crate::extract::ApiJson;
 use crate::state::AppState;
 use crate::visitor::client_ip;
 use axum::Json;
@@ -104,10 +105,6 @@ fn secure(headers: &HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
-fn parse_body<T: serde::de::DeserializeOwned>(body: &str) -> Result<T, HttpError> {
-    serde_json::from_str(body).map_err(|_| HttpError::bad_request("Invalid request body"))
-}
-
 fn validate_email(raw: &str) -> Result<String, HttpError> {
     let email = raw.trim().to_lowercase();
     let valid = email.len() <= 254
@@ -145,7 +142,8 @@ pub struct Session {
     /// True while there are no users at all: the next step is `/setup`.
     #[serde(rename = "needsSetup")]
     pub needs_setup: bool,
-    /// The signed-in user, if any.
+    /// The signed-in user: null when nobody is signed in. Always present.
+    #[schema(required = true)]
     pub user: Option<User>,
 }
 
@@ -262,15 +260,15 @@ pub struct Credentials {
         (status = 201, description = "The admin was created and signed in"),
         (status = 400, description = "The request is invalid", body = ErrorBody),
         (status = 409, description = "Conflict", body = ErrorBody),
+        (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
 )]
 async fn setup(
     State(state): State<AppState>,
     jar: CookieJar,
     headers: HeaderMap,
-    body: String,
+    ApiJson(creds): ApiJson<Credentials>,
 ) -> Result<Response, HttpError> {
-    let creds = parse_body::<Credentials>(&body)?;
     let email = validate_email(&creds.email)?;
     let password = validate_password(&creds.password)?;
     let inserted = sqlx::query(
@@ -316,10 +314,10 @@ async fn login(
     jar: CookieJar,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-    body: String,
+    body: Result<ApiJson<Credentials>, HttpError>,
 ) -> Result<Response, HttpError> {
     // A malformed body fails the same way as a wrong password.
-    let Ok(creds) = serde_json::from_str::<Credentials>(&body) else {
+    let Ok(ApiJson(creds)) = body else {
         return Err(HttpError {
             status: StatusCode::UNAUTHORIZED,
             message: "Invalid email or password".into(),
@@ -393,15 +391,15 @@ async fn logout(State(state): State<AppState>, jar: CookieJar) -> Result<Respons
         (status = 400, description = "The request is invalid", body = ErrorBody),
         (status = 401, description = "Not signed in", body = ErrorBody),
         (status = 409, description = "Conflict", body = ErrorBody),
+        (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
     security(("session" = [])),
 )]
 async fn change_email(
     State(state): State<AppState>,
     user: AuthUser,
-    body: String,
+    ApiJson(body): ApiJson<ChangeEmail>,
 ) -> Result<Response, HttpError> {
-    let body = parse_body::<ChangeEmail>(&body)?;
     let email = validate_email(&body.email)?;
     let mut tx = state.db.writer().begin().await?;
     let taken: Option<i64> =
@@ -438,15 +436,15 @@ async fn change_email(
         (status = 204, description = "Changed"),
         (status = 400, description = "The request is invalid", body = ErrorBody),
         (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
     security(("session" = [])),
 )]
 async fn change_settings(
     State(state): State<AppState>,
     user: AuthUser,
-    body: String,
+    ApiJson(body): ApiJson<ChangeSettings>,
 ) -> Result<Response, HttpError> {
-    let body = parse_body::<ChangeSettings>(&body)?;
     if body.date_format.is_none() && body.time_format.is_none() && body.theme.is_none() {
         return Err(HttpError::bad_request("A setting to change is required"));
     }
@@ -500,15 +498,15 @@ async fn change_settings(
         (status = 204, description = "Changed"),
         (status = 400, description = "The request is invalid", body = ErrorBody),
         (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
     security(("session" = [])),
 )]
 async fn change_password(
     State(state): State<AppState>,
     user: AuthUser,
-    body: String,
+    ApiJson(body): ApiJson<ChangePassword>,
 ) -> Result<Response, HttpError> {
-    let body = parse_body::<ChangePassword>(&body)?;
     if body.current_password.len() > 200 {
         return Err(HttpError::bad_request("Invalid password"));
     }
@@ -578,16 +576,16 @@ async fn list_users(
         (status = 401, description = "Not signed in", body = ErrorBody),
         (status = 403, description = "Admin only", body = ErrorBody),
         (status = 409, description = "Conflict", body = ErrorBody),
+        (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
     security(("session" = [])),
 )]
 async fn create_user(
     State(state): State<AppState>,
     user: AuthUser,
-    body: String,
+    ApiJson(body): ApiJson<CreateUser>,
 ) -> Result<Response, HttpError> {
     require_admin(&user)?;
-    let body = parse_body::<CreateUser>(&body)?;
     let email = validate_email(&body.email)?;
     let password = validate_password(&body.password)?;
     let password_hash = hash_password(&password);
@@ -630,6 +628,7 @@ async fn create_user(
         (status = 403, description = "Admin only", body = ErrorBody),
         (status = 404, description = "Not found", body = ErrorBody),
         (status = 409, description = "Conflict", body = ErrorBody),
+        (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
     security(("session" = [])),
 )]
@@ -637,10 +636,9 @@ async fn change_role(
     State(state): State<AppState>,
     user: AuthUser,
     axum::extract::Path(id): axum::extract::Path<i64>,
-    body: String,
+    ApiJson(body): ApiJson<ChangeRole>,
 ) -> Result<Response, HttpError> {
     require_admin(&user)?;
-    let body = parse_body::<ChangeRole>(&body)?;
     let mut tx = state.db.writer().begin().await?;
     let target: Option<i64> = sqlx::query_scalar("SELECT is_admin FROM users WHERE id = ?1")
         .bind(id)
@@ -727,6 +725,7 @@ async fn delete_user(
         (status = 401, description = "Not signed in", body = ErrorBody),
         (status = 403, description = "Admin only", body = ErrorBody),
         (status = 404, description = "Not found", body = ErrorBody),
+        (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
     security(("session" = [])),
 )]
@@ -734,10 +733,9 @@ async fn reset_password(
     State(state): State<AppState>,
     user: AuthUser,
     axum::extract::Path(id): axum::extract::Path<i64>,
-    body: String,
+    ApiJson(body): ApiJson<ResetPassword>,
 ) -> Result<Response, HttpError> {
     require_admin(&user)?;
-    let body = parse_body::<ResetPassword>(&body)?;
     let password = validate_password(&body.new_password)?;
     let updated = sqlx::query("UPDATE users SET password_hash = ?1 WHERE id = ?2")
         .bind(hash_password(&password))
