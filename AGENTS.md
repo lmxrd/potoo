@@ -164,7 +164,10 @@ acceptable.
   (labels): change both together.
 - **Versions.** Node, pnpm and Rust are pinned in `mise.toml`; the Docker
   image (`node:24`, `rust:1.99`) and `frontend/package.json`
-  (`packageManager`) must match them — change them together.
+  (`packageManager`) must match them — change them together. Dependabot
+  (`.github/dependabot.yml`) therefore ignores the `node` and `rust` images
+  of the Dockerfile; every other update arrives as a `chore(deps)` pull
+  request, grouped by ecosystem, and must pass CI.
 - **Generated, do not edit by hand:** `CHANGELOG.md` and the version
   fields (release-please), `frontend/src/routeTree.gen.ts` (TanStack
   Router), `frontend/pnpm-lock.yaml` and `backend/Cargo.lock` (use the
