@@ -5,7 +5,7 @@
 
 ### ⚠ BREAKING CHANGES
 
-* no adoption of databases from before migrations
+* This release breaks all previous databases, so delete the database and start from scratch. Please manually add the data if you need it to a newly initialized database if you need it.
 
 ### Features
 
