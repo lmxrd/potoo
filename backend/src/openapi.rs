@@ -23,7 +23,7 @@ use utoipa::{Modify, OpenApi};
         (name = "Account", description = "The signed-in user's own email, password and preferences"),
         (name = "Users", description = "Managing users (admin only)"),
         (name = "Sites", description = "The sites that are tracked"),
-        (name = "Stats", description = "The numbers of the dashboard, and their export"),
+        (name = "Stats", description = "The numbers of the dashboard, and the export and import of hits"),
         (name = "Tracking", description = "What a visitor's browser calls; public"),
         (name = "System", description = "Operations"),
     ),

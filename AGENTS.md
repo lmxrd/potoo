@@ -87,7 +87,7 @@ it** (nothing is committed or served):
   Request and response bodies are named structs with `ToSchema` (never
   `json!` or a struct declared inside a handler); query parameters are
   `IntoParams`. The non-JSON endpoints (`/tracker.js`, `/api/pixel`,
-  `/api/export`, `/api/health`) are documented too. `openapi.rs` only holds
+  `/api/export`, `/api/import`, `/api/health`) are documented too. `openapi.rs` only holds
   the title, the tags and the cookie scheme.
 - Request bodies are JSON only: handlers take `ApiJson<T>` (`src/extract.rs`),
   which requires `Content-Type: application/json` (a 415 otherwise), answers
@@ -96,7 +96,11 @@ it** (nothing is committed or served):
   exception is `/api/collect`, which also takes `text/plain` (that is what
   `sendBeacon` sends) and answers 204 to anything; `/api/auth/login` takes
   `Result<ApiJson<_>, HttpError>` so that an unreadable body fails like a
-  wrong password. The JSON endpoints document a 415 in their annotations.
+  wrong password. The other exception is `/api/import` (`routes/import.rs`),
+  which takes a multipart `file` part or a `text/csv` / `text/plain` body (up
+  to 256 MB), reads it whole, checks every row, then inserts in one
+  transaction: all or nothing, and `hits.visitor` is NULL for what it adds.
+  The JSON endpoints document a 415 in their annotations.
 - **Facet values are lowercase in the database**: `country` (ISO alpha-2),
   `device`, `browser`, `os`, and the referrer's hostname. A path and a click
   label are as the site wrote them. The frontend owns the display names

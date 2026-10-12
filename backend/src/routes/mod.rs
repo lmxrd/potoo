@@ -8,6 +8,7 @@ use utoipa_axum::routes;
 pub mod auth;
 pub mod collect;
 pub mod export;
+pub mod import;
 pub mod sites;
 pub mod stats;
 
@@ -22,6 +23,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .merge(collect::router())
         .nest("/auth", auth::router())
         .nest("/export", export::router())
+        .nest("/import", import::router())
         .nest("/sites", sites::router())
         .nest("/stats", stats::router())
         .fallback(not_found)

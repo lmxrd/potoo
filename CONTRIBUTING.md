@@ -81,10 +81,10 @@ backend/src/visitor.rs     user agent parsing, client IP, visitor hashes
 backend/src/geo.rs         country lookup + the weekly DB-IP download
 backend/src/stats.rs       ranges, chart buckets, the aggregations
 backend/src/filter.rs      the RSQL filter subset the dashboard uses
-backend/src/csv.rs         the CSV writer + the export download
+backend/src/csv.rs         the CSV writer + the export download (the import reads CSV in routes/import.rs)
 backend/src/tracker.rs     the tracker script and the pixel GIF
 backend/src/util.rs        sha256 and random hex helpers
-backend/src/routes/        auth, users, sites, stats, export, collect
+backend/src/routes/        auth, users, sites, stats, export, import, collect
 backend/src/bin/seed.rs    a year of demo data, for development
 backend/examples/          the load generator behind `mise run loadtest`
 backend/tests/api.rs       the end-to-end tests

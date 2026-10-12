@@ -663,3 +663,165 @@ async fn bodies_are_json_only_except_at_collect() {
         assert_eq!(response.status(), 204, "{content_type} {body}");
     }
 }
+
+async fn post_csv(app: &TestApp, session: &str, content_type: &str, body: &str) -> Response {
+    app.client
+        .post(format!("{}/api/import", app.base))
+        .header("cookie", session)
+        .header("content-type", content_type)
+        .body(body.to_string())
+        .send()
+        .await
+        .unwrap()
+}
+
+/// The import: admin only, all or nothing, and what it adds is cleaned like
+/// a tracked hit and has no visitor.
+#[tokio::test]
+async fn import_adds_every_row_or_none() {
+    let app = spawn_app().await;
+    let credentials = json!({ "email": "a@example.com", "password": "correct horse battery" });
+    let session = cookie(
+        &request(
+            &app,
+            Method::POST,
+            "/api/auth/setup",
+            None,
+            Some(credentials),
+        )
+        .await,
+    );
+    request(
+        &app,
+        Method::POST,
+        "/api/sites",
+        Some(&session),
+        Some(json!({ "hostname": "blog.example.com" })),
+    )
+    .await;
+    let header = "site,created_at,kind,path,name,referrer,country,device,browser,os\r\n";
+    let good = format!(
+        "{header}Blog.Example.com,2026-03-04T12:00:00.000Z,pageview,/a?x=1,,https://news.example.org/post,NO,Desktop,Chrome,macOS\r\n\
+         blog.example.com,2026-03-04T14:00:00+02:00,click,/a,signup,,,mobile,safari,ios\r\n"
+    );
+    let stats = || async {
+        json(
+            request(
+                &app,
+                Method::GET,
+                "/api/stats?sites=blog.example.com&from=2026-03-01T00:00:00.000Z&to=2026-03-10T00:00:00.000Z",
+                Some(&session),
+                None,
+            )
+            .await,
+        )
+        .await
+    };
+
+    // Not signed in, not an admin, wrong type: refused before anything is read.
+    request(
+        &app,
+        Method::POST,
+        "/api/auth/users",
+        Some(&session),
+        Some(json!({ "email": "u@example.com", "password": "another long pass" })),
+    )
+    .await;
+    let member = cookie(
+        &request(
+            &app,
+            Method::POST,
+            "/api/auth/login",
+            None,
+            Some(json!({ "email": "u@example.com", "password": "another long pass" })),
+        )
+        .await,
+    );
+    assert_eq!(
+        post_csv(&app, &member, "text/csv", &good).await.status(),
+        403
+    );
+    assert_eq!(post_csv(&app, "", "text/csv", &good).await.status(), 401);
+    assert_eq!(
+        post_csv(&app, &session, "application/json", &good)
+            .await
+            .status(),
+        415
+    );
+
+    // Unknown sites (once each), a bad date and a bad kind: nothing is added
+    // and every problem is said, with its line.
+    let bad = format!(
+        "{header}nope.com,2026-03-04T12:00:00Z,pageview,/,,,,desktop,chrome,macos\n\
+         nope.com,2026-03-04T12:00:00Z,pageview,/,,,,desktop,chrome,macos\n\
+         blog.example.com,yesterday,pageview,/,,,,desktop,chrome,macos\n\
+         blog.example.com,2026-03-04T12:00:00Z,view,/,,,,desktop,chrome,macos\n"
+    );
+    let response = post_csv(
+        &app,
+        &session,
+        "text/csv",
+        &format!("{good}{}", &bad[header.len()..]),
+    )
+    .await;
+    assert_eq!(response.status(), 400);
+    let body = json(response).await;
+    assert_eq!(body["total_problems"], json!(3));
+    let problems = body["problems"].as_array().unwrap();
+    assert_eq!(problems[0]["line"], json!(4));
+    assert_eq!(problems[0]["column"], json!("site"));
+    assert_eq!(problems[1]["column"], json!("created_at"));
+    assert_eq!(problems[2]["column"], json!("kind"));
+    assert!(
+        body["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("Nothing was imported. line 4:")
+    );
+    assert_eq!(
+        stats().await["pageviews"],
+        json!(0),
+        "the good rows were not added either"
+    );
+
+    // A wrong header, and a file without rows.
+    for wrong in ["site,when\nblog.example.com,now\n", header] {
+        assert_eq!(
+            post_csv(&app, &session, "text/csv", wrong).await.status(),
+            400
+        );
+    }
+
+    // The good file, as the body and as a form.
+    let response = post_csv(&app, &session, "text/csv", &good).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(json(response).await["imported"], json!(2));
+    let form = format!(
+        "--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"hits.csv\"\r\nContent-Type: text/csv\r\n\r\n{good}\r\n--b--\r\n"
+    );
+    let response = post_csv(&app, &session, "multipart/form-data; boundary=b", &form).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(json(response).await["imported"], json!(2));
+
+    // Cleaned like a tracked hit; no visitors, only pageviews.
+    let stats = stats().await;
+    assert_eq!(stats["pageviews"], json!(2));
+    assert_eq!(stats["visitors"], json!(0));
+    let export = request(
+        &app,
+        Method::GET,
+        "/api/export?sites=blog.example.com&from=2026-03-01T00:00:00.000Z&to=2026-03-10T00:00:00.000Z",
+        Some(&session),
+        None,
+    )
+    .await
+    .text()
+    .await
+    .unwrap();
+    assert!(export.contains("blog.example.com,2026-03-04T12:00:00.000Z,pageview,/a,,news.example.org,no,desktop,chrome,macos"));
+    assert!(
+        export.contains(
+            "blog.example.com,2026-03-04T12:00:00.000Z,click,/a,signup,,,mobile,safari,ios"
+        )
+    );
+}

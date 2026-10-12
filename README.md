@@ -32,7 +32,7 @@ identity, and you keep your data.
 - **A snippet generator** on every site's page: a single script tag, with
   optional click tracking, outbound link tracking, and a no-JS pixel fallback.
   SPA navigation via `pushState` is tracked.
-- **CSV export** of all hits, filtered like the dashboard view.
+- **CSV export** of all hits, filtered like the dashboard view, and an admin-only **CSV import** of the same format.
 - **Multiple users, any number of admins**, with role management, password
   resets, and per-user settings (email, password, date and time format, theme).
 
@@ -198,6 +198,14 @@ The export is `GET /api/export` with those params, and returns raw data only:
 one CSV row per recorded hit — site, timestamp, kind, path, name, referrer,
 country, device, browser, operating system — oldest first. It is the same set
 of rows the dashboard view is computed from, so what you see is what you get.
+
+The import (admins only; "Import hits" in the account menu) is
+`POST /api/import` with a file in the export's format, as a multipart `file`
+part or as a `text/csv` body, up to 256 MB. It is all or nothing: if a row
+cannot be read, or names a site that does not exist, nothing is added and
+the answer says what is wrong and on which line. Imported hits have no
+visitor (it cannot be rebuilt from an export), so they add pageviews but no
+unique visitors, and rows are not checked for duplicates.
 
 ## Configuration
 

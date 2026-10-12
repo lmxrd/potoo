@@ -42,7 +42,7 @@ fn host_of(raw: Option<&str>) -> Option<String> {
 
 /// Paths may contain personal data in their query/fragment, so those are
 /// dropped.
-fn clean_path(raw: Option<&str>) -> String {
+pub(crate) fn clean_path(raw: Option<&str>) -> String {
     let raw = raw.unwrap_or("/");
     let path = raw.split(['?', '#']).next().unwrap_or("/");
     let path = &path[..path.len().min(500)];
@@ -54,7 +54,7 @@ fn clean_path(raw: Option<&str>) -> String {
 }
 
 /// Only the referring hostname is kept, and never the site itself.
-fn clean_referrer(raw: Option<&str>, host: &str) -> Option<String> {
+pub(crate) fn clean_referrer(raw: Option<&str>, host: &str) -> Option<String> {
     let referrer = host_of(raw)?;
     if referrer == host {
         return None;

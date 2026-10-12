@@ -92,9 +92,14 @@ function UserMenu({ user }: { user: User }) {
               Settings
             </Link>
             {user.is_admin && (
-              <Link to="/users" className={item} onClick={close}>
-                Admin settings
-              </Link>
+              <>
+                <Link to="/users" className={item} onClick={close}>
+                  Admin settings
+                </Link>
+                <Link to="/import" className={item} onClick={close}>
+                  Import hits
+                </Link>
+              </>
             )}
             <hr className="my-1 border-line" />
             <button
