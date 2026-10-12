@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/lmxrd/potoo/compare/v0.2.0...v0.3.0) (2026-10-12)
+
+
+### Features
+
+* admins can import hits from an export's CSV ([5c58cc2](https://github.com/lmxrd/potoo/commit/5c58cc2913ad815e4c80e340eb757ee0269e1082))
+
 ## [0.2.0](https://github.com/lmxrd/potoo/compare/v0.1.0...v0.2.0) (2026-10-12)
 
 
