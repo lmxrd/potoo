@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.2.0](https://github.com/lmxrd/potoo/compare/v0.1.0...v0.2.0) (2026-10-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* no adoption of databases from before migrations
+
+### Features
+
+* an OpenAPI spec drives the frontend's API client ([4b11e9f](https://github.com/lmxrd/potoo/commit/4b11e9ff021010af9610adaf70ff217505ff529f))
+* ApiJson is the JSON request body extractor ([8bf8c3a](https://github.com/lmxrd/potoo/commit/8bf8c3afbd95fe7e68cbd71d60150610ca4ab68e))
+* facet values are stored as lowercase keys ([3870465](https://github.com/lmxrd/potoo/commit/3870465cc296c464100d2caaea3e43320167dae8))
+* no adoption of databases from before migrations ([3972ca7](https://github.com/lmxrd/potoo/commit/3972ca7eb9150680212f210f2e821c38ce97c6c9))
+* the export's filename carries its timestamp ([6c24b12](https://github.com/lmxrd/potoo/commit/6c24b124e707c07a2b353fa0ad042f446563370e))
+* the page views chart is a visx chart ([8bb2597](https://github.com/lmxrd/potoo/commit/8bb2597ee833801adcb45e6e9fea70160b66229e))
+* the stats and the export select sites by hostname ([971c809](https://github.com/lmxrd/potoo/commit/971c809c782aa0ff3046282601bede66fa5e40df))
+
+
+### Bug Fixes
+
+* a duration range is the exact window it names ([670cf16](https://github.com/lmxrd/potoo/commit/670cf16ad876521e9d505001dd079fc3170680df))
+* seconds in the export's ISO timestamp ([4115755](https://github.com/lmxrd/potoo/commit/4115755c11ddb67ddd3c06eb13a2a134ed45afec))
+* speed up db writes by using WAL and sunchronous mode ([2404522](https://github.com/lmxrd/potoo/commit/24045225697e151a598dcd62d076e3e7a23e563a))
+* the export's timestamp is plain ISO ([cc84156](https://github.com/lmxrd/potoo/commit/cc8415654b2dba80ed2f01871f159b6aa8d1ca50))
+* the GeoIP download knows the month it is in ([d384ad5](https://github.com/lmxrd/potoo/commit/d384ad57f6ea59728a04f0440982de0cd82a17c6))
+* the openapi bin writes to the path argument it is given ([0b87d9d](https://github.com/lmxrd/potoo/commit/0b87d9de606ec06dec27f9bc3620eac4e4b95b34))
+
+
+### Performance Improvements
+
+* a pooled sqlx data layer with a batched write path ([4f9a6b7](https://github.com/lmxrd/potoo/commit/4f9a6b7f29f1152eab3bab051736164a669fca07))
+
 ## [0.1.0](https://github.com/lmxrd/potoo/compare/v0.1.0...v0.1.0) (2026-10-10)
 
 
