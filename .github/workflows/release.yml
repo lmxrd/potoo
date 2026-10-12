@@ -6,7 +6,7 @@ name: Release
 # amd64 and an arm64 runner (no cross compiling, no emulation) they build
 # the Linux binaries, attached to the release, and the image, pushed to
 # the GitHub Container Registry as one multi-arch manifest. CI never
-# pushes.
+# pushes, except the lockfile fix below on the release PR's branch.
 #
 # Needs "Allow GitHub Actions to create and approve pull requests" in the
 # repository's Actions settings.
@@ -30,6 +30,30 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
+
+      # release-please bumps the version in backend/Cargo.toml but cannot
+      # bump the potoo entry of backend/Cargo.lock (its toml updater does
+      # not match it), so cargo does it on the release PR's branch. `-w`
+      # touches only the workspace's own packages, never a dependency.
+      # A push with the default token starts no workflow; the next push to
+      # main makes release-please rewrite the branch, and this runs again.
+      - name: Update Cargo.lock on the release PR
+        if: steps.release.outputs.prs_created == 'true'
+        env:
+          BRANCH: ${{ fromJSON(steps.release.outputs.pr).headBranchName }}
+        run: |
+          git fetch origin "$BRANCH"
+          git checkout "$BRANCH"
+          cargo update --workspace --manifest-path backend/Cargo.toml
+          if git diff --quiet -- backend/Cargo.lock; then
+            echo "Cargo.lock is up to date"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add backend/Cargo.lock
+            git commit -m "chore: update Cargo.lock to the release version"
+            git push origin "$BRANCH"
+          fi
 
   # musl binaries are static and run on any Linux, so they get the plain
   # names; the glibc (gnu) builds are suffixed -gnu.
