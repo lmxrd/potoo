@@ -9,21 +9,19 @@ import { facetLabel } from "../lib/labels";
 export function StatsDashboard({
   stats,
   dateFormat = "YYYY-MM-DD",
-  timeFormat = "24h",
+  use24 = true,
   filters,
   onToggleFilter,
 }: {
   stats: SiteStats;
   dateFormat?: string;
-  timeFormat?: string;
+  use24?: boolean;
   filters: FacetFilters;
   onToggleFilter: (facet: string, value: string) => void;
 }) {
   const maxDay = Math.max(1, ...stats.byDay.map((d) => d.pageviews));
   const label = (day: string) =>
-    stats.bucket
-      ? bucketLabel(day, stats.bucket, timeFormat)
-      : chartLabel(day, stats.days, timeFormat);
+    stats.bucket ? bucketLabel(day, stats.bucket, use24) : chartLabel(day, stats.days, use24);
   return (
     <>
       <div className="grid grid-cols-2 gap-4">
@@ -43,7 +41,7 @@ export function StatsDashboard({
                 className="flex h-24 w-full items-end"
                 title={`${
                   d.day.length > 10
-                    ? `${formatDate(d.day.slice(0, 10), dateFormat)} ${formatTime(d.day.slice(11, 16), timeFormat)}`
+                    ? `${formatDate(d.day.slice(0, 10), dateFormat)} ${formatTime(d.day.slice(11, 16), use24)}`
                     : formatDate(d.day, dateFormat)
                 }: ${d.pageviews}`}
               >

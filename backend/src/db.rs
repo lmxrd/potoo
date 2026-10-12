@@ -350,4 +350,34 @@ mod tests {
             "the facets are lowercase, a missing country stays missing, a path and a click label keep their case"
         );
     }
+
+    #[tokio::test]
+    async fn the_use_24_migration_carries_the_time_format_over() {
+        // The migration adds a column, so it is not replayable: it runs on
+        // the users table of the build before it, not on the already
+        // migrated database.
+        let pool = SqlitePool::connect(":memory:").await.unwrap();
+        sqlx::raw_sql(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, time_format TEXT NOT NULL)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        for format in ["24h", "12h"] {
+            sqlx::query("INSERT INTO users (time_format) VALUES (?1)")
+                .bind(format)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        sqlx::raw_sql(include_str!("../migrations/0003_use_24.sql"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        let flags: Vec<bool> = sqlx::query_scalar("SELECT use_24 FROM users ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(flags, [true, false], "24h is true, 12h is false");
+    }
 }

@@ -9,10 +9,10 @@ export const DATE_FORMATS = [
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /**
- * A `HH:MM` time as configured: 24-hour by default, or 12-hour with AM/PM.
+ * A `HH:MM` time as configured: 24-hour, or 12-hour with AM/PM.
  */
-export function formatTime(time: string, format = "24h"): string {
-  if (format !== "12h") return time;
+export function formatTime(time: string, use24 = true): string {
+  if (use24) return time;
   const [hour, minute] = time.split(":").map(Number);
   const ampm = hour < 12 ? "AM" : "PM";
   const h12 = hour % 12 || 12;
@@ -24,8 +24,8 @@ export function formatTime(time: string, format = "24h"): string {
  * the hour for hourly buckets, the month for a year, and "9 Oct" style
  * days otherwise.
  */
-export function chartLabel(day: string, range: number, timeFormat = "24h"): string {
-  if (range === 1) return formatTime(day.slice(11, 16), timeFormat);
+export function chartLabel(day: string, range: number, use24 = true): string {
+  if (range === 1) return formatTime(day.slice(11, 16), use24);
   if (range > 90) {
     const [, month, year] = day.split("-");
     return Number(month) === 1 ? `${MONTHS[0]} ${year.slice(2)}` : MONTHS[Number(month) - 1];
@@ -42,9 +42,9 @@ export function chartLabel(day: string, range: number, timeFormat = "24h"): stri
 export function bucketLabel(
   day: string,
   bucket: "hour" | "day" | "week" | "month",
-  timeFormat = "24h",
+  use24 = true,
 ): string {
-  if (bucket === "hour") return formatTime(day.slice(11, 16), timeFormat);
+  if (bucket === "hour") return formatTime(day.slice(11, 16), use24);
   if (bucket === "month") {
     const [, month] = day.split("-");
     return MONTHS[Number(month) - 1];

@@ -115,12 +115,12 @@ export function localInput(date: Date): string {
 }
 
 /** The range as one line of local text, e.g. "9 Oct 2026 14:30 – 16:00". */
-export function rangeSummary(range: DateRange, format = "YYYY-MM-DD", timeFormat = "24h"): string {
+export function rangeSummary(range: DateRange, format = "YYYY-MM-DD", use24 = true): string {
   const window = rangeWindow(range);
   if (!window) return "Invalid range: the start must be before the end.";
   const p = (n: number) => String(n).padStart(2, "0");
   const day = (d: Date) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-  const time = (d: Date) => formatTime(`${p(d.getHours())}:${p(d.getMinutes())}`, timeFormat);
+  const time = (d: Date) => formatTime(`${p(d.getHours())}:${p(d.getMinutes())}`, use24);
   return `${formatDate(
     day(window.from),
     format,

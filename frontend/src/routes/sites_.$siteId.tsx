@@ -62,7 +62,7 @@ function SitePage() {
         onRange={setRange}
         stats={stats}
         dateFormat={session.user?.date_format}
-        timeFormat={session.user?.time_format}
+        use24={session.user?.use_24}
         filters={filters}
         onFilters={setFilters}
         exportUrl={params ? exportHref(params) : undefined}
@@ -73,7 +73,7 @@ function SitePage() {
         <StatsDashboard
           stats={stats}
           dateFormat={session.user?.date_format}
-          timeFormat={session.user?.time_format}
+          use24={session.user?.use_24}
           filters={filters}
           onToggleFilter={toggle}
         />

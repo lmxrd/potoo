@@ -1,6 +1,6 @@
 use crate::auth::{
-    COOKIE, DATE_FORMATS, TIME_FORMATS, User, create_session, current_user, destroy_session,
-    hash_password, verify_password,
+    COOKIE, DATE_FORMATS, User, create_session, current_user, destroy_session, hash_password,
+    verify_password,
 };
 use crate::error::{ErrorBody, HttpError};
 use crate::extract::ApiJson;
@@ -158,8 +158,8 @@ pub struct ChangeEmail {
 pub struct ChangeSettings {
     /// One of `YYYY-MM-DD`, `DD/MM/YYYY`, `MM/DD/YYYY`, `DD.MM.YYYY`.
     pub date_format: Option<String>,
-    /// `24h` or `12h`.
-    pub time_format: Option<String>,
+    /// Whether times are shown in 24-hour format.
+    pub use_24: Option<bool>,
     /// A JSON object as text: `{"base":"light"|"dark","accent":"#rrggbb"}`.
     pub theme: Option<String>,
 }
@@ -445,16 +445,11 @@ async fn change_settings(
     user: AuthUser,
     ApiJson(body): ApiJson<ChangeSettings>,
 ) -> Result<Response, HttpError> {
-    if body.date_format.is_none() && body.time_format.is_none() && body.theme.is_none() {
+    if body.date_format.is_none() && body.use_24.is_none() && body.theme.is_none() {
         return Err(HttpError::bad_request("A setting to change is required"));
     }
     if let Some(format) = &body.date_format
         && !DATE_FORMATS.contains(&format.as_str())
-    {
-        return Err(HttpError::bad_request("Invalid setting"));
-    }
-    if let Some(format) = &body.time_format
-        && !TIME_FORMATS.contains(&format.as_str())
     {
         return Err(HttpError::bad_request("Invalid setting"));
     }
@@ -468,9 +463,9 @@ async fn change_settings(
             .execute(&mut *tx)
             .await?;
     }
-    if let Some(format) = &body.time_format {
-        sqlx::query("UPDATE users SET time_format = ?1 WHERE id = ?2")
-            .bind(format)
+    if let Some(use_24) = body.use_24 {
+        sqlx::query("UPDATE users SET use_24 = ?1 WHERE id = ?2")
+            .bind(use_24)
             .bind(user.0.id)
             .execute(&mut *tx)
             .await?;

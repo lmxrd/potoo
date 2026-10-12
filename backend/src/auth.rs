@@ -17,9 +17,6 @@ const SESSION_DAYS: u64 = 30;
 /// The date formats a user can pick from, for displaying dates.
 pub const DATE_FORMATS: [&str; 4] = ["YYYY-MM-DD", "DD/MM/YYYY", "MM/DD/YYYY", "DD.MM.YYYY"];
 
-/// The time formats a user can pick from, for displaying times.
-pub const TIME_FORMATS: [&str; 2] = ["24h", "12h"];
-
 /// The signed-in user, as the session endpoint returns them.
 #[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct User {
@@ -28,8 +25,8 @@ pub struct User {
     pub is_admin: bool,
     /// One of the date formats of the settings, e.g. `YYYY-MM-DD`.
     pub date_format: String,
-    /// `24h` or `12h`.
-    pub time_format: String,
+    /// Whether times are shown in 24-hour (`14:30`) or 12-hour (`2:30 PM`) format.
+    pub use_24: bool,
     /// A JSON object as text: `{"base":"light"|"dark","accent":"#rrggbb"}`.
     pub theme: String,
 }
@@ -57,7 +54,7 @@ pub fn verify_password(password: &str, stored: &str) -> bool {
 pub async fn current_user<'e>(db: impl SqliteExecutor<'e>, token: Option<&str>) -> Option<User> {
     let token = token?;
     sqlx::query_as::<_, User>(
-        "SELECT u.id, u.email, u.is_admin, u.date_format, u.time_format, u.theme
+        "SELECT u.id, u.email, u.is_admin, u.date_format, u.use_24, u.theme
          FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = ?1 AND s.expires_at > ?2",
     )

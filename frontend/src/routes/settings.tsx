@@ -38,7 +38,7 @@ function Settings() {
         <DateFormat current={user.date_format} />
       </Card>
       <Card title="Time format">
-        <TimeFormat current={user.time_format} />
+        <TimeFormat current={user.use_24} />
       </Card>
       <Card title="Theme">
         <ThemePicker current={parseTheme(user.theme)} />
@@ -91,10 +91,38 @@ function DateFormat({ current }: { current: string }) {
   );
 }
 
-const TIME_FORMATS = [
-  { value: "24h", label: "24 hours (14:30)" },
-  { value: "12h", label: "12 hours (2:30 PM)" },
-];
+function TimeFormat({ current }: { current: boolean }) {
+  const [value, setValue] = useState(current);
+  const [error, setError] = useState<string>();
+  const router = useRouter();
+  const change = useMutation(changeSettingsMutation());
+  return (
+    <div className="space-y-2">
+      <label className="flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={value}
+          onChange={async (e) => {
+            const next = e.target.checked;
+            setValue(next);
+            setError(undefined);
+            try {
+              await change.mutateAsync({ body: { use_24: next } });
+              await router.invalidate();
+            } catch (err) {
+              setError(errorMessage(err, "Failed"));
+            }
+          }}
+        />
+        24-hour time
+      </label>
+      <p className="text-xs text-muted">
+        Times across the app, for example {formatTime("14:30", value)}.
+      </p>
+      <ErrorText>{error}</ErrorText>
+    </div>
+  );
+}
 
 function sameTheme(a: Theme, b: Theme): boolean {
   return a.base === b.base && a.accent.toLowerCase() === b.accent.toLowerCase();
@@ -178,42 +206,6 @@ function ThemePicker({ current }: { current: Theme }) {
         />
       </div>
       <p className="text-xs text-muted">Applies to the whole app, for your account.</p>
-      <ErrorText>{error}</ErrorText>
-    </div>
-  );
-}
-
-function TimeFormat({ current }: { current: string }) {
-  const [value, setValue] = useState(current);
-  const [error, setError] = useState<string>();
-  const router = useRouter();
-  const change = useMutation(changeSettingsMutation());
-  return (
-    <div className="space-y-2">
-      <select
-        className="rounded border border-line-strong px-2 py-2 text-sm"
-        value={value}
-        onChange={async (e) => {
-          const next = e.target.value;
-          setValue(next);
-          setError(undefined);
-          try {
-            await change.mutateAsync({ body: { time_format: next } });
-            await router.invalidate();
-          } catch (err) {
-            setError(errorMessage(err, "Failed"));
-          }
-        }}
-      >
-        {TIME_FORMATS.map((f) => (
-          <option key={f.value} value={f.value}>
-            {f.label}
-          </option>
-        ))}
-      </select>
-      <p className="text-xs text-muted">
-        Times across the app, for example {formatTime("14:30", value)}.
-      </p>
       <ErrorText>{error}</ErrorText>
     </div>
   );

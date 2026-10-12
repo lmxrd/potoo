@@ -29,7 +29,7 @@ export function DateRangeBar({
   onRange,
   stats = null,
   dateFormat,
-  timeFormat,
+  use24,
   filters,
   onFilters,
   exportUrl,
@@ -38,7 +38,7 @@ export function DateRangeBar({
   onRange: (range: DateRange) => void;
   stats?: SiteStats | null;
   dateFormat?: string;
-  timeFormat?: string;
+  use24?: boolean;
   filters: FacetFilters;
   onFilters: (filters: FacetFilters) => void;
   /** Where the view downloads as CSV; none while the range is invalid. */
@@ -183,7 +183,7 @@ export function DateRangeBar({
       </div>
 
       <p className="mt-2 text-xs text-muted">
-        {rangeSummary(range, dateFormat, timeFormat)}
+        {rangeSummary(range, dateFormat, use24)}
         {stats &&
           ` \u00b7 ${stats.pageviews.toLocaleString()} page views \u00b7 ${stats.visitors.toLocaleString()} visitors`}
       </p>
