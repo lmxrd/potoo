@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/lmxrd/potoo/compare/v0.3.0...v0.4.0) (2026-10-12)
+
+
+### Features
+
+* a facet with no value shows as unknown ([4520ace](https://github.com/lmxrd/potoo/commit/4520acea38e27fabccc0f202a4507be9ad756a5b))
+
 ## [0.3.0](https://github.com/lmxrd/potoo/compare/v0.2.0...v0.3.0) (2026-10-12)
 
 
