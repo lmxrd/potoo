@@ -28,7 +28,8 @@ function Import() {
   const importHits = useMutation(importHitsMutation());
   const [file, setFile] = useState<File | null>(null);
   const [text, setText] = useState("");
-  const [done, setDone] = useState<number>();
+  const [createSites, setCreateSites] = useState(false);
+  const [done, setDone] = useState<{ imported: number; sitesCreated: number }>();
   const [failure, setFailure] = useState<unknown>();
   const problems = problemsOf(failure);
 
@@ -51,10 +52,11 @@ function Import() {
             try {
               const result = await importHits.mutateAsync({
                 body: { file: csv },
+                query: { create_sites: createSites },
                 // The generated schema takes a binary part for a string.
                 requestValidator: async (data) => data,
               });
-              setDone(result.imported);
+              setDone({ imported: result.imported, sitesCreated: result.sites_created });
               setFile(null);
               setText("");
               queryClient.invalidateQueries();
@@ -66,9 +68,11 @@ function Import() {
           <p className="text-sm text-muted">
             A CSV in the format of the export:{" "}
             <code>site,created_at,kind,path,name,referrer,country,device,browser,os</code>, with
-            that header row. Every site must already exist. Nothing is added if any row has a
-            problem. Imported hits count as pageviews but add no unique visitors, and rows are not
-            checked for duplicates: importing a file twice adds its hits twice. Up to 256 MB.
+            that header row, optionally followed by a <code>visitor</code> column. Every site must
+            already exist, unless you allow creating them. Nothing is added if any row has a
+            problem. Hits without a visitor count as page views but add no unique visitors, and rows
+            are not checked for duplicates: importing a file twice adds its hits twice. Up to 256
+            MB.
           </p>
           <label className="block space-y-1 text-sm">
             <span className="font-medium">CSV file</span>
@@ -90,6 +94,14 @@ function Import() {
               className="block w-full rounded border border-line-strong px-3 py-2 font-mono text-xs disabled:opacity-50"
             />
           </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={createSites}
+              onChange={(e) => setCreateSites(e.target.checked)}
+            />
+            Create the sites that do not exist
+          </label>
           <Button type="submit" disabled={importHits.isPending}>
             {importHits.isPending ? "Importing…" : "Import"}
           </Button>
@@ -98,7 +110,10 @@ function Import() {
       {done !== undefined && (
         <Card>
           <p className="text-sm">
-            Imported {done} {done === 1 ? "hit" : "hits"}.
+            Imported {done.imported} {done.imported === 1 ? "hit" : "hits"}
+            {done.sitesCreated > 0 &&
+              ` and created ${done.sitesCreated} ${done.sitesCreated === 1 ? "site" : "sites"}`}
+            .
           </p>
         </Card>
       )}

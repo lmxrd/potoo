@@ -342,9 +342,9 @@ async fn setup_users_sites_collection_stats_and_exports() {
     .await;
     assert_eq!(export.status(), 200);
     let csv = export.text().await.unwrap();
-    assert!(
-        csv.starts_with("site,created_at,kind,path,name,referrer,country,device,browser,os\r\n")
-    );
+    assert!(csv.starts_with(
+        "site,created_at,kind,path,name,referrer,country,device,browser,os,visitor\r\n"
+    ));
     assert_eq!(csv.lines().count(), 3); // the header, the pageview and the click
     assert!(csv.contains("blog.example.com,"));
     assert!(csv.contains("pageview,/a,,"));
@@ -705,7 +705,7 @@ async fn import_adds_every_row_or_none() {
          blog.example.com,2026-03-04T14:00:00+02:00,click,/a,signup,,,mobile,safari,ios\r\n\
          blog.example.com,2026-03-04T15:00:00Z,pageview,/c,,,,,,\r\n"
     );
-    let stats = || async {
+    let fetch_stats = || async {
         json(
             request(
                 &app,
@@ -780,7 +780,7 @@ async fn import_adds_every_row_or_none() {
             .starts_with("Nothing was imported. line 5:")
     );
     assert_eq!(
-        stats().await["pageviews"],
+        fetch_stats().await["pageviews"],
         json!(0),
         "the good rows were not added either"
     );
@@ -805,7 +805,7 @@ async fn import_adds_every_row_or_none() {
     assert_eq!(json(response).await["imported"], json!(3));
 
     // Cleaned like a tracked hit; no visitors, only pageviews.
-    let stats = stats().await;
+    let stats = fetch_stats().await;
     assert_eq!(stats["pageviews"], json!(4));
     assert_eq!(stats["visitors"], json!(0));
     // Unknown device, browser and os show as `unknown`, and can be filtered on.
@@ -865,5 +865,77 @@ async fn import_adds_every_row_or_none() {
         export.contains(
             "blog.example.com,2026-03-04T12:00:00.000Z,click,/a,signup,,,mobile,safari,ios"
         )
+    );
+
+    // A file with the visitor column: the same visitor counts once, and an
+    // empty one is no visitor. A header with another column is refused.
+    let with_visitor = "site,created_at,kind,path,name,referrer,country,device,browser,os,visitor\r\n\
+         blog.example.com,2026-03-05T10:00:00Z,pageview,/a,,,no,desktop,chrome,macos,0123456789abcdef0123456789abcdef\r\n\
+         blog.example.com,2026-03-05T11:00:00Z,pageview,/b,,,no,desktop,chrome,macos,0123456789abcdef0123456789abcdef\r\n\
+         blog.example.com,2026-03-05T12:00:00Z,pageview,/a,,,us,mobile,safari,ios,fedcba9876543210fedcba9876543210\r\n\
+         blog.example.com,2026-03-05T13:00:00Z,pageview,/a,,,,,,,\r\n";
+    let response = post_csv(&app, &session, "text/csv", with_visitor).await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(json(response).await["imported"], json!(4));
+    let stats = fetch_stats().await;
+    assert_eq!(stats["pageviews"], json!(8));
+    assert_eq!(stats["visitors"], json!(2));
+    // Sites that do not exist are refused, unless the import may create them;
+    // an invalid hostname is refused either way, and nothing is created then.
+    let new_site = "site,created_at,kind,path,name,referrer,country,device,browser,os\r\n\
+         new.example.com,2026-03-05T10:00:00Z,pageview,/a,,,,,,\r\n\
+         new.example.com,2026-03-05T11:00:00Z,pageview,/a,,,,,,\r\n\
+         blog.example.com,2026-03-05T12:00:00Z,pageview,/a,,,,,,\r\n";
+    let create = |body: String| {
+        let (app, session) = (&app, &session);
+        async move {
+            app.client
+                .post(format!("{}/api/import?create_sites=true", app.base))
+                .header("cookie", session)
+                .header("content-type", "text/csv")
+                .body(body)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(
+        post_csv(&app, &session, "text/csv", new_site)
+            .await
+            .status(),
+        400
+    );
+    let invalid = new_site.replace("new.example.com", "not a host");
+    let response = create(invalid).await;
+    assert_eq!(response.status(), 400);
+    assert!(
+        json(response).await["error"]
+            .as_str()
+            .unwrap()
+            .contains("not a valid hostname")
+    );
+    let sites = || async {
+        json(request(&app, Method::GET, "/api/sites", Some(&session), None).await).await
+    };
+    assert_eq!(
+        sites().await.as_array().unwrap().len(),
+        1,
+        "nothing was created"
+    );
+    let response = create(new_site.to_string()).await;
+    assert_eq!(response.status(), 200);
+    let body = json(response).await;
+    assert_eq!(
+        (body["imported"].clone(), body["sites_created"].clone()),
+        (json!(3), json!(1))
+    );
+    assert_eq!(sites().await.as_array().unwrap().len(), 2);
+    let again = json(create(new_site.to_string()).await).await;
+    assert_eq!(again["sites_created"], json!(0), "the site exists now");
+
+    let wrong = with_visitor.replace(",visitor\r\n", ",who\r\n");
+    assert_eq!(
+        post_csv(&app, &session, "text/csv", &wrong).await.status(),
+        400
     );
 }
