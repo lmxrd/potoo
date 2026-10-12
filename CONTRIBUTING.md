@@ -142,6 +142,14 @@ footer) the major; `ci:`, `chore:`, `docs:` and the like release nothing.
    musl, and glibc suffixed `-gnu`, for amd64 and arm64) and attaches them,
    and pushes the multi-arch image as `1.2.3`, `1.2` and `latest`.
 
+The commit that lands on `main` is what counts, and pull requests are
+squash merged with the pull request's title as the message. So **the title of
+a pull request must be a Conventional Commit** (`feat: ...`, `fix(auth): ...`),
+not the branch name GitHub fills in; a `PR title` check fails the pull request
+otherwise. A merge commit that is not conventional is skipped by
+release-please: nothing is released for it, and the log says "commit could
+not be parsed".
+
 `CHANGELOG.md` is written by release-please: do not edit it by hand. The
 release PR needs "Allow GitHub Actions to create and approve pull
 requests" turned on in the repository's Actions settings.

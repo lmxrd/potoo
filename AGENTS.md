@@ -179,7 +179,11 @@ acceptable.
 
 Commit messages are **Conventional Commits** (`feat:`, `fix:`, `perf:`,
 `ci:`, `docs:`, ...): release-please reads them to bump the version and
-write the changelog. Do not commit unless asked, and work on a branch, not
+write the changelog. So are **pull request titles**: pull requests are
+squash merged, the commit on main takes the title, and release-please
+skips one that is not conventional (`Feat/import visitor (#6)` released
+nothing). GitHub fills a new pull request's title from the branch name:
+rewrite it. The `PR title` workflow fails a title that does not parse. Do not commit unless asked, and work on a branch, not
 `main`. Releases are automated (see CONTRIBUTING.md); never tag by hand.
 
 ## Manual tooling (not run by CI)
