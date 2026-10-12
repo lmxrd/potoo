@@ -1,5 +1,6 @@
 import { Card } from "./card";
 import { BarList } from "./bar-list";
+import { PageViewsChart } from "./page-views-chart";
 import { bucketLabel, chartLabel, formatDate, formatTime } from "../lib/dates";
 import type { SiteStats } from "../client";
 import type { FacetFilters } from "../lib/filter";
@@ -19,7 +20,6 @@ export function StatsDashboard({
   filters: FacetFilters;
   onToggleFilter: (facet: string, value: string) => void;
 }) {
-  const maxDay = Math.max(1, ...stats.byDay.map((d) => d.pageviews));
   const label = (day: string) =>
     stats.bucket ? bucketLabel(day, stats.bucket, use24) : chartLabel(day, stats.days, use24);
   return (
@@ -34,31 +34,15 @@ export function StatsDashboard({
       </div>
 
       <Card title="Page views">
-        <div className="flex items-end gap-1">
-          {stats.byDay.map((d, i) => (
-            <div key={d.day} className="flex flex-1 flex-col items-center gap-1">
-              <div
-                className="flex h-24 w-full items-end"
-                title={`${
-                  d.day.length > 10
-                    ? `${formatDate(d.day.slice(0, 10), dateFormat)} ${formatTime(d.day.slice(11, 16), use24)}`
-                    : formatDate(d.day, dateFormat)
-                }: ${d.pageviews}`}
-              >
-                <div
-                  className="w-full rounded-t bg-accent"
-                  style={{ height: `${(d.pageviews / maxDay) * 100}%` }}
-                />
-              </div>
-              {/* Thin the labels, so at most about 12 of them show. */}
-              <span className="h-3 text-[10px] text-faint">
-                {i % Math.max(1, Math.ceil(stats.byDay.length / 12)) === 0
-                  ? label(d.day)
-                  : "\u00a0"}
-              </span>
-            </div>
-          ))}
-        </div>
+        <PageViewsChart
+          rows={stats.byDay}
+          axisLabel={label}
+          describe={(day) =>
+            day.length > 10
+              ? `${formatDate(day.slice(0, 10), dateFormat)} ${formatTime(day.slice(11, 16), use24)}`
+              : formatDate(day, dateFormat)
+          }
+        />
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2">

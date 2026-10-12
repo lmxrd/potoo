@@ -166,7 +166,9 @@ acceptable.
   fields (release-please), `frontend/src/routeTree.gen.ts` (TanStack
   Router), `frontend/pnpm-lock.yaml` and `backend/Cargo.lock` (use the
   package managers).
-- **Frontend:** React 19, TanStack Router (file-based), Tailwind 4, oxlint
+- **Frontend:** React 19, TanStack Router (file-based), Tailwind 4, visx
+  for the chart (SVG, styled only with the theme classes such as `fill-accent`,
+  never hard-coded colors, so a theme or accent change shows at once), oxlint
   and oxfmt, TypeScript. There are **no frontend tests yet** (planned);
   the backend end-to-end tests in `backend/tests/api.rs` cover the API.
 
