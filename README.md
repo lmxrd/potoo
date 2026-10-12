@@ -67,8 +67,9 @@ services:
     volumes:
       - ./data:/data
     environment:
-      # Behind a reverse proxy that sets X-Forwarded-For and terminates
-      # TLS; see the configuration table below for everything else.
+      # To register the IP of the app sits behind a reverse proxy that sets 
+      # X-Forwarded-For and terminates TLS; see the configuration table below 
+      # for everything else.
       TRUST_PROXY: "1"
       # RETENTION_DAYS: "365"   # delete hits older than a year
 ```
