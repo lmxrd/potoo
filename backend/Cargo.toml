@@ -1,6 +1,6 @@
 [package]
 name = "potoo"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 # `cargo run` without --bin: the server, not the seed.
 default-run = "potoo"
