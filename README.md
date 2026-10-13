@@ -1,5 +1,7 @@
 # Potoo
 
+> A [potoo](https://en.wikipedia.org/wiki/Potoo) is a funny looking bird with huge eyes, that stares at your analytics data
+
 A small, privacy-friendly web analytics tool you host yourself. One binary
 serves the dashboard and collects the numbers; your visitors keep their
 identity, and you keep your data.
