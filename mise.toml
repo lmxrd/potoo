@@ -1,8 +1,8 @@
 # Node and pnpm match the Docker image (node:24, and the pnpm of
 # frontend/package.json's packageManager): change them together.
 [tools]
-node = "24"
-pnpm = "12.11.2"
+node = "26"
+pnpm = "12"
 # The host target comes with the toolchain; the release also builds the
 # static musl binary, so its std is installed for either architecture.
 rust = {
@@ -33,11 +33,11 @@ sources = ["package.json", "pnpm-lock.yaml"]
 outputs = ["node_modules/.pnpm/lock.yaml"]
 dir = "{{ config_root }}/frontend"
 
-# The OpenAPI spec, written by the backend without the frontend embedded
-# (--features spec): the frontend's API client is generated from it, so the
-# spec comes first. The frontend tasks below depend on it.
+# The OpenAPI spec: the frontend's API client is generated from it, so the
+# spec comes first — the `openapi` binary builds the library alone, with no
+# frontend bundle and no database. The frontend tasks below depend on it.
 [tasks."gen:spec"]
-run = "cargo run --features spec --bin openapi"
+run = "cargo run --bin openapi"
 sources = [
   "src/**/*",
   "migrations/**/*",
@@ -112,13 +112,13 @@ run = "podman build --build-arg PROFILE=profiling --build-arg FEATURES=profiling
 [tasks.check]
 depends = ["check:frontend", "check:backend"]
 
-# rust-embed needs frontend/dist to exist to compile, hence the build.
+# rust-embed needs frontend/dist to exist to compile the main binary (the
+# library and the tests build without it), hence the build.
 [tasks."check:backend"]
 depends = ["build:frontend"]
 run = """
 cargo fmt --check \
-  && cargo clippy -- -D warnings \
-  && cargo clippy --features spec --all-targets -- -D warnings
+  && cargo clippy --all-targets -- -D warnings
 """
 dir = "{{ config_root }}/backend"
 

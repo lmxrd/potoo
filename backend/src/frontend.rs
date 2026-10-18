@@ -1,21 +1,23 @@
 //! The embedded frontend: the built files of `frontend/dist`, served with
 //! the cache policy they need, and the SPA fallback to index.html.
+//!
+//! A module of the main binary only, never of the library: the library (and
+//! with it cargo test, clippy and the `openapi` spec binary) builds without
+//! `frontend/dist` — the frontend is generated from the spec, so the spec
+//! comes first. Only the main binary embeds the bundle, and its build fails
+//! when the folder is missing: no build can ship an empty frontend.
 
-use crate::state::AppState;
 use axum::Router;
 use axum::http::{HeaderMap, StatusCode, Uri, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
+use potoo::state::AppState;
 use rust_embed::RustEmbed;
 
 /// The built frontend, embedded in the binary (and read from disk in
 /// debug builds, so a dev server needs no rebuild).
 #[derive(RustEmbed)]
 #[folder = "../frontend/dist"]
-// The spec build (the `openapi` binary) happens before the frontend is
-// built, because the frontend is generated from the spec: it must compile
-// without `frontend/dist`. No other build may, or it would embed nothing.
-#[cfg_attr(feature = "spec", allow_missing = true)]
 struct Dist;
 
 /// Serve the frontend for every path the router does not handle itself,

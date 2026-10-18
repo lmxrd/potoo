@@ -1,4 +1,8 @@
-use potoo::{app, db, geo, state::AppState};
+// The embedded frontend bundle — a module of this binary, not the
+// library, so the library (and cargo test) builds without frontend/dist.
+mod frontend;
+
+use potoo::{db, geo, state::AppState};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -86,9 +90,16 @@ async fn main() {
     // On SIGINT or SIGTERM the server stops accepting, finishes the requests
     // in flight, and the writer then drains the queue: no accepted hit is
     // lost to a clean stop (`docker stop`, a deploy).
+    // The API routes, with the embedded frontend as the fallback.
+    let app = {
+        let (router, _) = potoo::api().split_for_parts();
+        frontend::mount(router)
+            .layer(tower_http::trace::TraceLayer::new_for_http())
+            .with_state(state)
+    };
     axum::serve(
         listener,
-        app(state).into_make_service_with_connect_info::<SocketAddr>(),
+        app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(stop_signal())
     .await

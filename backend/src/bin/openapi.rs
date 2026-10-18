@@ -1,6 +1,7 @@
 //! Writes the OpenAPI spec to a file (default `target/specs/openapi.json`,
 //! or the path given as the first argument), for the frontend's client
-//! generator. Built with `--features spec`; see `mise run gen:spec`.
+//! generator. Run with `mise run gen:spec`; it builds the library alone —
+//! no frontend bundle, no database.
 
 fn main() {
     let path = std::env::args()
