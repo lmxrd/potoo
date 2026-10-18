@@ -1,7 +1,7 @@
 //! End-to-end tests over real HTTP, against an in-memory database.
 
 use chrono::{Duration, Utc};
-use potoo::{app, auth, db, geo, state::AppState};
+use potoo::{auth, db, geo, state::AppState};
 use reqwest::{Client, Method, Response};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -26,9 +26,15 @@ async fn spawn_app() -> TestApp {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move {
+        // The API alone: the embedded frontend is a module of the main
+        // binary, which these tests never build.
+        let app = {
+            let (router, _) = potoo::api().split_for_parts();
+            router.with_state(state)
+        };
         axum::serve(
             listener,
-            app(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
         .await
         .unwrap();

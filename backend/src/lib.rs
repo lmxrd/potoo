@@ -4,7 +4,6 @@ pub mod db;
 pub mod error;
 pub mod extract;
 pub mod filter;
-pub mod frontend;
 pub mod geo;
 pub mod ingest;
 pub mod openapi;
@@ -16,24 +15,16 @@ pub mod tracker;
 pub mod util;
 pub mod visitor;
 
-use axum::Router;
 use state::AppState;
 
 /// Every route of the API with its OpenAPI document: the tracker script at
 /// the root, and everything else under /api. The app serves the routes; the
-/// `openapi` binary writes the document (`openapi::spec`).
+/// `openapi` binary writes the document (`openapi::spec`). The main binary
+/// mounts the embedded frontend as the fallback (`mod frontend` there).
 pub fn api() -> utoipa_axum::router::OpenApiRouter<AppState> {
     utoipa_axum::router::OpenApiRouter::with_openapi(openapi::base())
         .merge(routes::collect::tracker_router())
         .nest("/api", routes::router())
-}
-
-/// The whole app: the API routes, then the embedded frontend.
-pub fn app(state: AppState) -> Router {
-    let (router, _spec) = api().split_for_parts();
-    frontend::mount(router)
-        .layer(tower_http::trace::TraceLayer::new_for_http())
-        .with_state(state)
 }
 
 /// Install ring as the process TLS provider. reqwest is built with
