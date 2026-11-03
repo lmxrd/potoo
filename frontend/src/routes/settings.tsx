@@ -46,8 +46,8 @@ function Settings() {
       <Card title="Change email">
         <ChangeEmail current={user.email} />
       </Card>
-      <Card title="Change password">
-        <ChangePassword />
+      <Card title={user.has_password ? "Change password" : "Set a password"}>
+        <ChangePassword hasPassword={user.has_password} />
       </Card>
     </div>
   );
@@ -248,11 +248,16 @@ function ChangeEmail({ current }: { current: string }) {
   );
 }
 
-function ChangePassword() {
+/**
+ * A user who signs in through single sign-on only has no password: they
+ * can set one, without a current one, to sign in with it too.
+ */
+function ChangePassword({ hasPassword }: { hasPassword: boolean }) {
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
+  const router = useRouter();
   const changePassword = useMutation(changePasswordMutation());
   return (
     <form
@@ -263,23 +268,33 @@ function ChangePassword() {
         setSaved(false);
         try {
           await changePassword.mutateAsync({
-            body: { current_password: current, new_password: next },
+            body: hasPassword
+              ? { current_password: current, new_password: next }
+              : { new_password: next },
           });
           setCurrent("");
           setNext("");
           setSaved(true);
+          // Whether there is a password comes from the session.
+          if (!hasPassword) await router.invalidate();
         } catch (err) {
           setError(errorMessage(err));
         }
       }}
     >
-      <Input
-        type="password"
-        placeholder="Current password"
-        required
-        value={current}
-        onChange={(e) => setCurrent(e.target.value)}
-      />
+      {hasPassword ? (
+        <Input
+          type="password"
+          placeholder="Current password"
+          required
+          value={current}
+          onChange={(e) => setCurrent(e.target.value)}
+        />
+      ) : (
+        <p className="text-xs text-muted">
+          You sign in with single sign-on. A password lets you sign in without it too.
+        </p>
+      )}
       <Input
         type="password"
         placeholder="New password (min. 10 characters)"
@@ -290,7 +305,7 @@ function ChangePassword() {
       />
       <ErrorText>{error}</ErrorText>
       {saved && <p className="text-sm text-ok">Password updated.</p>}
-      <Button type="submit">Update password</Button>
+      <Button type="submit">{hasPassword ? "Update password" : "Set password"}</Button>
     </form>
   );
 }

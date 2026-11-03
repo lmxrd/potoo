@@ -22,6 +22,7 @@ use utoipa::{Modify, OpenApi};
         (name = "Auth", description = "Signing in and out, and the first-run setup"),
         (name = "Account", description = "The signed-in user's own email, password and preferences"),
         (name = "Users", description = "Managing users (admin only)"),
+        (name = "Admin", description = "Settings of the whole instance, such as single sign-on (admin only)"),
         (name = "Sites", description = "The sites that are tracked"),
         (name = "Stats", description = "The numbers of the dashboard, and the export and import of hits"),
         (name = "Tracking", description = "What a visitor's browser calls; public"),
