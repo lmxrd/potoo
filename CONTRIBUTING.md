@@ -56,10 +56,15 @@ with hey-api, and uses TanStack Query and zod; it is not committed.
 
 ## Changing the schema
 
-Add a new numbered file to `backend/migrations/` (`0002_what_it_does.sql`).
+Add a new numbered file to `backend/migrations/` (`0003_what_it_does.sql`).
 It is applied, in order, when the server or the seed starts, and recorded in
 the `_sqlx_migrations` table. Never edit a migration that has shipped: its
 checksum is recorded, and a changed file stops the server from starting.
+
+SQLite cannot change a column: a change like that rebuilds the table, with
+foreign keys off, or `ON DELETE CASCADE` empties the tables that point at it.
+`0002_oidc.sql` shows how (`-- no-transaction`, then its own transaction), and
+`db.rs` has a test that runs it on a real file with data in it.
 
 ## The code
 
@@ -77,6 +82,7 @@ backend/src/openapi.rs     the OpenAPI document: title, tags, the cookie scheme 
 backend/src/bin/openapi.rs writes the spec to a file (`mise run gen:spec`)
 backend/migrations/        the schema, one numbered SQL file per change (sqlx migrations)
 backend/src/auth.rs        password hashing, sessions, the login throttle
+backend/src/oidc.rs        single sign-on: the settings (env over stored), the OIDC flow, the signed login cookie
 backend/src/visitor.rs     user agent parsing, client IP, visitor hashes
 backend/src/geo.rs         country lookup + the weekly DB-IP download
 backend/src/stats.rs       ranges, chart buckets, the aggregations
@@ -84,12 +90,12 @@ backend/src/filter.rs      the RSQL filter subset the dashboard uses
 backend/src/csv.rs         the CSV writer + the export download (the import reads CSV in routes/import.rs)
 backend/src/tracker.rs     the tracker script and the pixel GIF
 backend/src/util.rs        sha256 and random hex helpers
-backend/src/routes/        auth, users, sites, stats, export, import, collect
+backend/src/routes/        auth, users, oidc (login, callback, admin settings), sites, stats, export, import, collect
 backend/src/bin/seed.rs    a year of demo data, for development
 backend/examples/          the load generator behind `mise run loadtest`
-backend/tests/api.rs       the end-to-end tests
+backend/tests/api.rs       the end-to-end tests (with a stand-in OpenID provider; its test keys in tests/fixtures/)
 scripts/                   the load test script and its generator image
-frontend/src/routes/       dashboard, sites table, site page, users, settings
+frontend/src/routes/       dashboard, sites table, site page, admin settings (users.tsx), settings
 frontend/src/components/   the shared UI pieces
 frontend/src/client/       the generated API client (hey-api; gitignored, never edited)
 frontend/src/lib/          error messages, ranges, filters, date formatting
