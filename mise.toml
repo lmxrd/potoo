@@ -1,5 +1,5 @@
-# Node and pnpm match the Docker image (node:24, and the pnpm of
-# frontend/package.json's packageManager): change them together.
+# pnpm matches the pnpm of frontend/package.json's packageManager: change
+# them together. The Docker image builds nothing (see the Dockerfile).
 [tools]
 node = "24"
 pnpm = "12.11.2"

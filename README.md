@@ -37,6 +37,9 @@ identity, and you keep your data.
 - **CSV export** of all hits, filtered like the dashboard view, and an admin-only **CSV import** of the same format.
 - **Multiple users, any number of admins**, with role management, password
   resets, and per-user settings (email, password, date and time format, theme).
+- **Single sign-on** with any OpenID Connect provider (Authentik, Keycloak,
+  Authelia, Google, ...), next to passwords; set up in the admin settings or
+  with environment variables.
 
 ![A site's page: its snippet and settings](docs/screenshots/site.png)
 
@@ -228,8 +231,57 @@ are not checked for duplicates.
 | `GEOIP_URL`          | unset               | Override the download URL, e.g. your own mirror. Empty string disables downloading; a missing file then leaves country empty                |
 | `TRUST_PROXY`        | unset               | Set to `1` to read the client IP from `X-Forwarded-For` (behind a reverse proxy)                                                            |
 | `RETENTION_DAYS`     | unset               | Delete hits older than this                                                                                                                 |
+| `OIDC_ISSUER`        | unset               | Single sign-on: the provider's issuer URL (`https://`). With `OIDC_CLIENT_ID`, turns single sign-on on; see [Single sign-on](#single-sign-on) |
+| `OIDC_CLIENT_ID`     | unset               | Single sign-on: the client id registered with the provider                                                                                  |
+| `OIDC_CLIENT_SECRET` | unset               | Single sign-on: the client secret, if the provider gave one                                                                                 |
+| `OIDC_SCOPES`        | `openid email`      | Single sign-on: the scopes asked for, space separated                                                                                       |
+| `OIDC_LABEL`         | `Single sign-on`    | Single sign-on: the login button says "Sign in with" this                                                                                   |
+| `OIDC_REDIRECT_URL`  | unset               | Single sign-on: the callback URL, when the one Potoo works out from the request is not right (`https://…/api/auth/oidc/callback`)           |
+| `OIDC_AUTO_CREATE`   | `0`                 | Single sign-on: `1` (or `true`, `yes`, `on`) creates a regular user for a verified email that has no account; `0` (`false`, `no`, `off`) does not. Any other value stops Potoo at start |
 
 This site or product includes IP data from db-ip.com, licensed under CC BY 4.0.
+
+### Single sign-on
+
+Users can sign in with an OpenID Connect provider as well as with a password.
+Set it up under **Admin settings** (the account menu, admins only) or with the
+`OIDC_*` variables above. A variable that is set wins over its field, which the
+admin settings then show as locked; changes made there apply at once.
+
+1. Register Potoo with the provider as a confidential (or public) client using
+   the authorization code flow, with the callback URL the admin settings show:
+   `https://<your potoo>/api/auth/oidc/callback`.
+2. Enter the issuer URL, the client id and the secret. Saving checks that the
+   provider answers, over https (its own endpoints too). A new issuer drops
+   the old provider's secret unless you enter one with it; while the secret
+   comes from `OIDC_CLIENT_SECRET`, set the issuer with `OIDC_ISSUER` too.
+
+Who may sign in:
+
+- a user already linked to the provider account (the provider's `sub`);
+- else the user whose email is the one the provider gives, when the provider
+  says it is verified (`email_verified`); they are linked from then on, so a
+  later email change at the provider does not matter. A user already linked
+  to another account at that provider is not (a recycled address, say);
+- else, with auto-create on, a new regular (not admin) user without a password.
+
+The first admin is still created with a password on `/setup`; until then,
+single sign-on signs nobody in. A user without a password can set one in
+their settings; an admin can create a user without a password while single
+sign-on is on.
+
+Behind a reverse proxy that terminates TLS, the callback URL Potoo works out
+needs `TRUST_PROXY=1` and the proxy's `X-Forwarded-Proto` (and
+`X-Forwarded-Host`, or the original `Host` header); without them, set
+`OIDC_REDIRECT_URL`. The callback must be on the scheme (http or https) Potoo
+is reached over: a login where it is not is refused at once (the log says
+why). A sign-in in progress lives in a cookie for ten minutes,
+signed with a key made when Potoo starts: a restart, or a second sign-in
+started in another tab, makes it fail, and trying again works.
+
+Some providers (Microsoft Entra, for one) do not say that an email is
+verified. Potoo then can neither match nor create the user, so their users
+cannot sign in through it yet.
 
 ### How hits are stored
 

@@ -64,6 +64,43 @@ before the hit is on disk.
   change to a site, call `db.forget_sites()`.
 - A clean stop (SIGTERM/SIGINT) drains the queue and closes the pools; a
   crash loses the hits still queued. A full queue answers `503`.
+- A migration that rebuilds a table (SQLite cannot change a column) runs
+  with foreign keys off, as `0002_oidc.sql` does (`-- no-transaction`, then
+  its own `BEGIN`/`COMMIT`): with them on, dropping `users` would delete
+  every session. Test it on a real file with data, like
+  `the_single_sign_on_migration_keeps_users_and_sessions` in `db.rs`.
+- `users.password_hash` is NULL for a user who has no password (single
+  sign-on only): anything that reads it must treat NULL as "no password",
+  never as a hash.
+
+**Single sign-on** (`oidc.rs`, `routes/oidc.rs`): OpenID Connect through
+the `openidconnect` crate, without its default features (it would bring a
+second reqwest); our reqwest is handed to it (`Http` in `oidc.rs`, redirects
+off). The settings are the `oidc_settings` row with the `OIDC_*`
+environment variables on top (a variable locks its field); they live in
+memory in `state.oidc` and are replaced when an admin saves, after the
+provider answered. A login in progress (state, nonce, PKCE verifier,
+callback URL) is not kept on the server: it is the `potoo_oidc` cookie
+(`__Host-potoo_oidc` over https), signed with a key made at start
+(`oidc.key()`), good for ten minutes, so a flood of logins fills nothing.
+The provider's metadata is cached by issuer (the last two) for an hour, and
+fetched at once for a token signed with a key it does not have; a provider
+that failed to answer is not asked again for 30 seconds, and only one fetch
+runs at a time (logins and saves alike). Its endpoints must be https (or on
+this machine), and its answers at most 1 MB. A save of the settings runs as
+its own task holding `oidc.lock_saves()` from reading the row to putting it
+in effect, so a dropped request cannot store it without applying it; a new
+issuer drops the stored secret unless one is sent with it. Nobody is signed
+in through the provider before the first admin exists (`/setup`). A
+provider account is linked to a user in `user_identities` (issuer +
+subject); an unlinked one is matched only by an email the provider says is
+verified, and not to a user linked to another account at that provider.
+Forwarded headers count for the callback URL only with `TRUST_PROXY`. The
+callback never redirects anywhere but `/` and `/login?error=<code>`, and
+always clears the login cookie (even one it did not sign), with the
+attributes it was set with: a browser ignores a `__Host-` removal without
+`Secure`. The tests in `tests/api.rs` run a stand-in provider
+that signs real ID tokens with the keys in `tests/fixtures/` (test only).
 
 **Tests run on an in-memory database**, where the reader and the writer
 pools are one and the same single connection. Two consequences: a write
@@ -127,7 +164,9 @@ it** (nothing is committed or served):
   the mise tasks, or `pnpm run gen:api` after `mise run gen:spec`.
 - Frontend code calls the API through the generated query options and
   mutations (`../client/@tanstack/react-query.gen`) with TanStack Query,
-  and shows errors with `errorMessage` from `lib/api.ts`.
+  and shows errors with `errorMessage` from `lib/api.ts`. The one
+  exception is the single sign-on button on the login page: a plain link to
+  `/api/auth/oidc/login`, because the browser must go to the provider.
 - `frontend/.pnpmfile.cjs` gives hey-api its own TypeScript 6: the project
   type-checks with TypeScript 7, which has no compiler API for the generator
   to use.
@@ -142,6 +181,7 @@ build:frontend`.
 No cookies or localStorage for visitors, no fingerprinting. The IP and the
 user agent exist in memory only, to derive country, device, browser, OS
 and the per-day, per-site visitor hash — never stored, logged or queued.
+Single sign-on is for dashboard users only and changes none of this.
 The one thing taken from a user agent that is not a known family is the
 short name of the product or platform it announces (`product_name` /
 `platform_name` in `visitor.rs`): at most 32 plain characters, lowercase,
@@ -155,13 +195,16 @@ acceptable.
 - **Simple.** No ORM, no abstraction layers, no new dependency without
   checking the naive version first. Comment the *why*, not the what.
 - **Endpoints.** Static files at the root (`/tracker.js`); everything that
-  writes or processes lives under `/api/`.
+  writes or processes lives under `/api/`. Settings of the whole instance
+  (single sign-on so far) are under `/api/admin/`, tagged `Admin`.
 - **One range spec.** Time-filtered endpoints take `range` (ISO 8601
   duration) or `from`/`to`, plus `sites` and `q`; reuse `parse_range` /
   `range_and_filter`, do not invent a new syntax.
 - **Duplicated lists.** The date and time format lists are in
   `backend/src/auth.rs` (validation) and `frontend/src/lib/dates.ts`
-  (labels): change both together.
+  (labels): change both together. So are the single sign-on error codes:
+  `Failure` in `backend/src/oidc.rs` and `SSO_ERRORS` in
+  `frontend/src/routes/login.tsx`.
 - **Versions.** Node, pnpm, Rust, zig and cargo-zigbuild are pinned in
   `mise.toml`; `frontend/package.json` (`packageManager`) must match pnpm.
   The image builds nothing: it is `alpine:3` and the binary built outside
