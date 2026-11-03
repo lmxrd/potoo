@@ -20,7 +20,7 @@ it provides Rust, Node and pnpm at the pinned versions).
 | `mise run seed` | A year of demo data (wipes every hit) into `data/potoo.db` |
 | `mise run gen:spec` | Writes the OpenAPI spec to `backend/target/specs/openapi.json` |
 | `mise run gen:client` | Generates the frontend API client (`frontend/src/client`) from the spec |
-| `mise run build` / `build:docker` | Release binary / image (podman) |
+| `mise run build` / `build:linux` / `build:docker` | Release binary (`dist/potoo`) / static Linux binary (`dist/potoo-linux-<arch>`, zig cross-compiles) / image (podman) that copies it |
 
 Run `mise run check` and `mise run test` before you call a change done
 (`--force` runs a task that would be skipped).
@@ -159,7 +159,7 @@ it** (nothing is committed or served):
   fetch client, TanStack Query, zod, with request/response validation)
   into `frontend/src/client`, which is gitignored: never edit or commit it.
   The order is always spec → client → frontend build → backend build with
-  the frontend embedded (the Dockerfile has a `spec` stage for the first).
+  the frontend embedded (the mise tasks keep it).
   The package scripts `build`, `check` and `dev` do not regenerate it: use
   the mise tasks, or `pnpm run gen:api` after `mise run gen:spec`.
 - Frontend code calls the API through the generated query options and
@@ -205,12 +205,18 @@ acceptable.
   (labels): change both together. So are the single sign-on error codes:
   `Failure` in `backend/src/oidc.rs` and `SSO_ERRORS` in
   `frontend/src/routes/login.tsx`.
-- **Versions.** Node, pnpm and Rust are pinned in `mise.toml`; the Docker
-  image (`node:24`, `rust:1.99`) and `frontend/package.json`
-  (`packageManager`) must match them — change them together. Dependabot
-  (`.github/dependabot.yml`) therefore ignores the `node` and `rust` images
-  of the Dockerfile; every other update arrives as a `chore(deps)` pull
+- **Versions.** Node, pnpm, Rust, zig and cargo-zigbuild are pinned in
+  `mise.toml`; `frontend/package.json` (`packageManager`) must match pnpm.
+  The image builds nothing: it is `alpine:3` and the binary built outside
+  it (`scripts/build-linux.sh`), so no toolchain version lives in the
+  Dockerfile. Every dependency update arrives as a `chore(deps)` pull
   request, grouped by ecosystem, and must pass CI.
+- **The image copies a prebuilt binary.** `mise run build:linux` builds
+  `dist/potoo-linux-<arch>` with the machine's cargo cache and target
+  directory (copied out of it: cargo has no stable flag to put one artifact
+  elsewhere), and the Dockerfile copies it in. `.dockerignore` lets only
+  those binaries of `dist/` through; the load generator's image still
+  builds from the sources in the same context.
 - **Generated, do not edit by hand:** `CHANGELOG.md` and the version
   fields (release-please), `frontend/src/routeTree.gen.ts` (TanStack
   Router), `frontend/pnpm-lock.yaml` and `backend/Cargo.lock` (use the
