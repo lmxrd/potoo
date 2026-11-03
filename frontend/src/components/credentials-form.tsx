@@ -9,10 +9,12 @@ import { errorMessage } from "../lib/api";
 export function CredentialsForm({
   kind,
   submit,
+  onSubmit,
   onDone,
 }: {
   kind: "login" | "setup";
   submit: string;
+  onSubmit?: () => void;
   onDone: () => void;
 }) {
   const [email, setEmail] = useState("");
@@ -26,6 +28,7 @@ export function CredentialsForm({
       onSubmit={async (e) => {
         e.preventDefault();
         setError(undefined);
+        onSubmit?.();
         try {
           await (kind === "login" ? login : setup).mutateAsync({ body: { email, password } });
           onDone();

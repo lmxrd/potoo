@@ -40,6 +40,9 @@ async fn main() {
             .map(|v| v == "1")
             .unwrap_or(false),
         throttle: Arc::new(potoo::auth::LoginThrottle::default()),
+        // Single sign-on: the stored settings, with the OIDC_* environment
+        // variables on top.
+        oidc: Arc::new(potoo::oidc::Oidc::load(&db, potoo::oidc::Env::from_env()).await),
     };
 
     // Optional data retention: delete hits older than RETENTION_DAYS.

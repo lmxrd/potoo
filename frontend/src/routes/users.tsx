@@ -13,6 +13,7 @@ import { Button } from "../components/button";
 import { Card } from "../components/card";
 import { ErrorText } from "../components/error-text";
 import { Input } from "../components/input";
+import { OidcSettingsForm } from "../components/oidc-settings";
 import { errorMessage } from "../lib/api";
 
 export const Route = createFileRoute("/users")({
@@ -23,6 +24,9 @@ export const Route = createFileRoute("/users")({
 });
 
 function Users() {
+  const { session } = Route.useRouteContext();
+  // With single sign-on on, a user may have no password.
+  const passwordOptional = session.oidc !== null;
   const { data: users, error } = useQuery(listUsersOptions());
   const queryClient = useQueryClient();
   const reload = () => queryClient.invalidateQueries({ queryKey: listUsersQueryKey() });
@@ -48,15 +52,19 @@ function Users() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Users</h1>
+      <h1 className="text-xl font-semibold">Admin settings</h1>
       <ErrorText>{error && errorMessage(error)}</ErrorText>
-      <Card>
+      <Card title="Users">
         <ul className="divide-y divide-line">
           {users?.map((u) => (
             <li key={u.id} className="py-2">
               <div className="flex items-center justify-between">
                 <span>
                   {u.email} {u.is_admin && <span className="ml-2 text-xs text-muted">admin</span>}
+                  {u.single_sign_on && (
+                    <span className="ml-2 text-xs text-muted">single sign-on</span>
+                  )}
+                  {!u.has_password && <span className="ml-2 text-xs text-muted">no password</span>}
                 </span>
                 <span className="flex gap-2">
                   <Button
@@ -147,7 +155,7 @@ function Users() {
             setFormError(undefined);
             try {
               await createUser.mutateAsync({
-                body: { email, password, is_admin: admin },
+                body: { email, password: password || undefined, is_admin: admin },
               });
               setEmail("");
               setPassword("");
@@ -167,8 +175,8 @@ function Users() {
           />
           <Input
             type="password"
-            placeholder="Password (min. 10)"
-            required
+            placeholder={passwordOptional ? "Password (optional)" : "Password (min. 10)"}
+            required={!passwordOptional}
             minLength={10}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -180,6 +188,14 @@ function Users() {
           <Button type="submit">Create</Button>
         </form>
         <ErrorText>{formError}</ErrorText>
+        {passwordOptional && (
+          <p className="mt-2 text-xs text-muted">
+            Without a password, the user signs in with single sign-on.
+          </p>
+        )}
+      </Card>
+      <Card title="Single sign-on">
+        <OidcSettingsForm />
       </Card>
     </div>
   );
