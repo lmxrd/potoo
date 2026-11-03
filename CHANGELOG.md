@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/lmxrd/potoo/compare/v0.5.0...v0.6.0) (2026-11-03)
+
+
+### Features
+
+* add OpenID Connect single sign-on ([113431b](https://github.com/lmxrd/potoo/commit/113431b4d6a5994c5d994ce65b47f7def9b56fec))
+
 ## [0.5.0](https://github.com/lmxrd/potoo/compare/v0.4.0...v0.5.0) (2026-10-12)
 
 
