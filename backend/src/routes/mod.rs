@@ -9,6 +9,7 @@ pub mod auth;
 pub mod collect;
 pub mod export;
 pub mod import;
+pub mod oidc;
 pub mod sites;
 pub mod stats;
 
@@ -21,7 +22,8 @@ pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(health))
         .merge(collect::router())
-        .nest("/auth", auth::router())
+        .nest("/admin", oidc::admin_router())
+        .nest("/auth", auth::router().merge(oidc::router()))
         .nest("/export", export::router())
         .nest("/import", import::router())
         .nest("/sites", sites::router())

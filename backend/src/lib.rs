@@ -7,6 +7,7 @@ pub mod filter;
 pub mod frontend;
 pub mod geo;
 pub mod ingest;
+pub mod oidc;
 pub mod openapi;
 pub mod profile;
 pub mod routes;
