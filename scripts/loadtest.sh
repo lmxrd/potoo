@@ -36,6 +36,8 @@ if [ "$TARGET" = goatcounter ]; then
 elif [ -z "$IMAGE" ]; then
   IMAGE=potoo:loadtest
   echo "building $IMAGE"
+  # The image copies the binary built outside it (see the Dockerfile).
+  mise run build:linux >/dev/null
   podman build -q -t "$IMAGE" . >/dev/null
 fi
 echo "building the load generator"

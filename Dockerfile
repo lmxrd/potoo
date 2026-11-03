@@ -1,74 +1,24 @@
-# The image has four stages: the OpenAPI spec, the frontend build (which
-# generates its API client from the spec), the cargo build of the binary
-# (which embeds the frontend), and the runtime, which is Alpine with just
-# the static binary.
+# The image is the runtime only: Alpine and the static (musl) binary,
+# which is built beforehand, outside the image, so that the build uses the
+# machine's own cargo cache rather than a cold one in a container:
 #
-# Build:   mise run build:docker — for the architecture of the machine,
-# natively, so an Apple Silicon Mac gets arm64 without emulation. The
-# release builds amd64 and arm64 on native runners.
-
-# The OpenAPI spec: the frontend's API client is generated from it, so the
-# backend builds first, without the frontend (--features spec) and only far
-# enough to write the spec. It shares the cargo caches with the compile
-# stage.
-FROM rust:1.99-slim AS spec
-WORKDIR /app/backend
-COPY backend/Cargo.toml backend/Cargo.lock ./
-COPY backend/build.rs ./
-COPY backend/migrations migrations/
-COPY backend/src src/
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/backend/target \
-    cargo run --features spec --bin openapi -- /openapi.json
-
-# The frontend: the client is generated from the spec, Vite builds the
-# app, and rust-embed embeds the result.
-FROM node:24-bookworm-slim AS frontend
-WORKDIR /app
-COPY frontend/package.json frontend/pnpm-lock.yaml frontend/.pnpmfile.cjs ./
-RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
-    corepack enable && pnpm install --frozen-lockfile
-COPY frontend/ .
-COPY --from=spec /openapi.json /openapi.json
-ENV OPENAPI_SPEC=/openapi.json
-RUN pnpm run gen:api && pnpm run build
-
-# The compile: a single static binary (musl) with the frontend embedded.
-# musl-tools provides the C toolchain for the C parts (sqlite, ring).
-FROM rust:1.99-slim AS compile
-WORKDIR /app/backend
-
-# A profiling image is built with --build-arg PROFILE=profiling
-# --build-arg FEATURES=profiling (mise run build:profiling); the default
-# is the production build.
-ARG PROFILE=release
-ARG FEATURES=
-
-# The target follows the build architecture, so one file builds amd64 and
-# arm64 natively. rust-embed wants ../frontend/dist next to the crate. The
-# cargo registry and target directory are cache mounts: a source change
-# recompiles only the crate.
-COPY backend/Cargo.toml backend/Cargo.lock ./
-COPY backend/build.rs ./
-COPY backend/migrations migrations/
-COPY backend/src src/
-COPY --from=frontend /app/dist /app/frontend/dist
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/app/backend/target \
-    target="$(uname -m)-unknown-linux-musl" \
-    && apt-get update && apt-get install -y --no-install-recommends musl-tools \
-    && rustup target add "$target" \
-    && cargo build --profile "$PROFILE" --features "$FEATURES" --target "$target" \
-    && cp "target/$target/$PROFILE/potoo" /potoo
-
-# The runtime: Alpine, the static binary, and a writable /data for the
-# database and the GeoIP database. ca-certificates is what the GeoIP
-# download needs.
+#   mise run build:docker   (builds dist/potoo-linux-<arch>, then this)
+#
+# The binary embeds the frontend and the database schema. TARGETARCH
+# (amd64 or arm64) is set by podman and buildx for the platform built for;
+# `mise run build:linux` with ARCH=amd64 or arm64 builds either one, on a
+# Mac too. A profiling image passes its own binary with --build-arg BINARY
+# (mise run build:profiling).
 FROM alpine:3
+ARG TARGETARCH
+ARG BINARY=dist/potoo-linux-${TARGETARCH}
+
+# A writable /data for the database and the GeoIP database.
+# ca-certificates is what the GeoIP download needs.
 RUN apk add --no-cache ca-certificates \
   && addgroup -S potoo && adduser -S -G potoo potoo \
   && mkdir /data && chown potoo /data
-COPY --from=compile /potoo /usr/local/bin/potoo
+COPY ${BINARY} /usr/local/bin/potoo
 ENV PORT=8000 \
     DATABASE_PATH=/data/potoo.db \
     GEOIP_DB_PATH=/data/country.mmdb

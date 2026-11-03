@@ -1,6 +1,10 @@
+# The image copies only the prebuilt binary of dist/ (see the Dockerfile);
+# the load generator's image (scripts/loadtest.Containerfile) builds from
+# the sources, so those stay in the context.
 .git
 data
-dist
+dist/*
+!dist/potoo-linux-*
 frontend/dist
 frontend/node_modules
 node_modules

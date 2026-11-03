@@ -83,14 +83,17 @@ docker compose up -d
 To build the image yourself:
 
 ```bash
-docker build -t potoo .
+mise run build:docker
 docker run -d --name potoo -p 8000:8000 -v potoo-data:/data potoo
 ```
 
 The image is Alpine holding a single static binary: the frontend and
 the database schema are embedded in it. The database and the GeoIP database
-live in the `/data` volume. Build it yourself with `mise run build:docker`
-(podman); it builds natively for the architecture of your machine.
+live in the `/data` volume. `mise run build:docker` builds the binary first,
+outside the image and with your own cargo cache (`mise run build:linux`,
+into `dist/potoo-linux-<arch>`), then the image (podman) for the
+architecture of your machine. The binary is cross-compiled with zig, so a
+Mac builds it too; `ARCH=amd64` or `arm64` builds the other architecture.
 
 Behind a reverse proxy, set `TRUST_PROXY=1` so the client IP is read from
 `X-Forwarded-For`, and terminate TLS there.
@@ -102,7 +105,7 @@ installed:
 
 ```bash
 mise run build
-./backend/target/release/potoo
+./dist/potoo
 ```
 
 The task builds the frontend and compiles everything into one binary: the

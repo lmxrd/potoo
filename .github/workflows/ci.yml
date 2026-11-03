@@ -46,11 +46,21 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-build-${{ hashFiles('backend/Cargo.lock') }}
       - run: mise run build
 
-  # The image builds from source inside the Dockerfile, which brings its
-  # own toolchains, so no mise here. Built, never pushed.
+  # The image copies the static binary built just before it, with the
+  # same task and cargo cache as locally (the Dockerfile builds nothing).
+  # Built, never pushed.
   docker:
     needs: checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v4
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            backend/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-linux-${{ hashFiles('backend/Cargo.lock') }}
+      - run: mise run build:linux
       - run: docker build .

@@ -25,8 +25,9 @@ backend).
 | `mise run start`           | Builds, then runs the server (never a stale binary)                                                            |
 | `mise run gen:spec`        | Writes the OpenAPI spec to `backend/target/specs/openapi.json`                                                 |
 | `mise run gen:client`      | Generates the frontend API client from the spec (`frontend/src/client`, not committed)                         |
-| `mise run build`           | Builds the frontend and compiles the backend binary                                                            |
-| `mise run build:docker`    | Builds the Docker image (podman), natively for your machine                                                    |
+| `mise run build`           | Builds the frontend and the release binary for this machine, copied to `dist/potoo`                            |
+| `mise run build:linux`     | The static Linux binary the image copies, `dist/potoo-linux-<arch>` (zig cross-compiles; `ARCH=amd64`/`arm64`) |
+| `mise run build:docker`    | `build:linux`, then the Docker image (podman), which only copies that binary                                   |
 | `mise run build:profiling` | The image with per-phase timers and an opt-in CPU flamegraph (never published)                                 |
 | `mise run loadtest`        | Write load against the image in a 2 CPU, 2 GB container (`scripts/loadtest.sh`; `TARGET=goatcounter` compares) |
 | `mise run check`           | Format, lint and type checks for backend and frontend                                                          |

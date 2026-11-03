@@ -10,6 +10,10 @@ rust = {
   components = ["clippy", "llvm-tools", "rustfmt"],
   targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"],
 }
+# The C compiler and linker of the static Linux binary (scripts/build-linux.sh),
+# so that it builds on a Mac too.
+zig = "0.15.2"
+"github:rust-cross/cargo-zigbuild" = "0.24.0"
 
 # Development: the Rust backend on :8000 (with the Vite proxy in front of
 # the frontend for /api), or the frontend dev server alone.
@@ -87,9 +91,16 @@ sources = [
 ]
 dir = "{{ config_root }}/frontend"
 
+# The release binary for this machine, copied to dist/potoo out of the
+# target directory, wherever cargo is configured to put it (cargo has no
+# stable flag to put one artifact elsewhere).
 [tasks."build:backend"]
 depends = ["build:frontend"]
-run = "cargo build --release"
+run = """
+cargo build --release
+mkdir -p ../dist
+cp "$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)/release/potoo" ../dist/potoo
+"""
 sources = [
   "src/**/*",
   "migrations/**/*",
@@ -98,16 +109,31 @@ sources = [
   "build.rs",
   "../frontend/dist/**/*",
 ]
-outputs = ["target/release/potoo"]
+outputs = ["../dist/potoo"]
 dir = "{{ config_root }}/backend"
 
+# The static Linux binary (musl) the image copies, dist/potoo-linux-<arch>:
+# built outside the image, with this machine's cargo cache. ARCH=amd64 or
+# arm64 picks the architecture (default: this machine's).
+[tasks."build:linux"]
+depends = ["build:frontend"]
+run = "scripts/build-linux.sh"
+
+# The image: Alpine and the binary above, for the architecture of this
+# machine (ARCH=amd64 with --platform linux/amd64 builds the other one).
 [tasks."build:docker"]
+depends = ["build:linux"]
 run = "podman build -t potoo ."
 
 # The image with a CPU profiler: stop the container (SIGTERM) and the
 # flamegraph is written to /data/flamegraph.svg. Never push this one.
 [tasks."build:profiling"]
-run = "podman build --build-arg PROFILE=profiling --build-arg FEATURES=profiling -t potoo:profiling ."
+depends = ["build:frontend"]
+run = """
+PROFILE=profiling FEATURES=profiling scripts/build-linux.sh
+arch=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
+podman build --build-arg BINARY=dist/potoo-linux-$arch-profiling -t potoo:profiling .
+"""
 
 [tasks.check]
 depends = ["check:frontend", "check:backend"]
@@ -165,7 +191,7 @@ dir = "{{ config_root }}/backend"
 [tasks.clean]
 dir = "{{ config_root }}"
 run = """
-rm -rf backend/target backend/data data
+rm -rf backend/target backend/data data dist
 rm -rf frontend/node_modules frontend/dist frontend/src/client
 rm -f frontend/openapi-ts-error-*.log
 """
