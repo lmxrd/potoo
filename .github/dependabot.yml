@@ -52,9 +52,8 @@ updates:
       actions:
         patterns: ["*"]
 
-  # The images of the Dockerfile. Node and Rust are left to a person: their
-  # versions are pinned in mise.toml too (and Node's must be an LTS), and
-  # the three places change together. alpine:3 follows its own tag.
+  # The image of the Dockerfile: alpine:3, which follows its own tag. The
+  # binary is built outside it (with the toolchains of mise.toml).
   - package-ecosystem: docker
     directory: /
     schedule:
@@ -63,6 +62,3 @@ updates:
     commit-message:
       prefix: chore
       include: scope
-    ignore:
-      - dependency-name: node
-      - dependency-name: rust
