@@ -234,6 +234,136 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// 0002 rebuilds the users table (a nullable password) with foreign keys
+    /// off: on a real file, with sessions in it, nothing may be lost.
+    #[tokio::test]
+    async fn the_single_sign_on_migration_keeps_users_and_sessions() {
+        let dir = std::env::temp_dir().join(format!("potoo-migrate-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.db");
+
+        // The database as it was before: the first migration only, two
+        // users (a third one deleted), and a session.
+        let options = SqliteConnectOptions::new()
+            .filename(&path)
+            .create_if_missing(true)
+            .journal_mode(SqliteJournalMode::Wal)
+            .foreign_keys(true);
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
+        let all = sqlx::migrate!("./migrations");
+        let before = sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(all.migrations[..1].to_vec()),
+            ..sqlx::migrate!("./migrations")
+        };
+        before.run(&pool).await.unwrap();
+        for email in ["a@example.com", "b@example.com", "c@example.com"] {
+            sqlx::query(
+                "INSERT INTO users (email, password_hash, is_admin) VALUES (?1, 'hash', 1)",
+            )
+            .bind(email)
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+        sqlx::query("DELETE FROM users WHERE id = 3")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "INSERT INTO sessions (token_hash, user_id, expires_at) VALUES ('t', 2, '2999-01-01')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+
+        let db = open(path.to_str().unwrap()).await;
+        let users: Vec<(i64, String, Option<String>, bool)> =
+            sqlx::query_as("SELECT id, email, password_hash, is_admin FROM users ORDER BY id")
+                .fetch_all(db.reader())
+                .await
+                .unwrap();
+        assert_eq!(
+            users,
+            [
+                (1, "a@example.com".into(), Some("hash".into()), true),
+                (2, "b@example.com".into(), Some("hash".into()), true),
+            ]
+        );
+        let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions WHERE user_id = 2")
+            .fetch_one(db.reader())
+            .await
+            .unwrap();
+        assert_eq!(sessions, 1, "the sessions survive the rebuild");
+        let foreign_keys: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
+            .fetch_one(db.writer())
+            .await
+            .unwrap();
+        assert_eq!(foreign_keys, 1, "foreign keys are on again");
+        let broken: Vec<(String, i64)> = sqlx::query_as("PRAGMA foreign_key_check")
+            .fetch_all(db.writer())
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row: (String, i64, String, i64)| (row.0, row.1))
+            .collect();
+        assert!(broken.is_empty(), "{broken:?}");
+
+        // A user without a password; the id of the deleted one is not
+        // given out again.
+        let id =
+            sqlx::query("INSERT INTO users (email, password_hash) VALUES ('d@example.com', NULL)")
+                .execute(db.writer())
+                .await
+                .unwrap()
+                .last_insert_rowid();
+        assert_eq!(id, 4);
+        // And a deleted user still takes their sessions along.
+        sqlx::query("DELETE FROM users WHERE id = 2")
+            .execute(db.writer())
+            .await
+            .unwrap();
+        let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
+            .fetch_one(db.reader())
+            .await
+            .unwrap();
+        assert_eq!(sessions, 0);
+        db.close().await;
+
+        // A crash after the migration ran but before sqlx recorded it runs
+        // it again on the next start: that must work, and keep everything.
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(SqliteConnectOptions::new().filename(&path))
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM _sqlx_migrations WHERE version = 2")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        let db = open(path.to_str().unwrap()).await;
+        let emails: Vec<String> = sqlx::query_scalar("SELECT email FROM users ORDER BY id")
+            .fetch_all(db.reader())
+            .await
+            .unwrap();
+        assert_eq!(emails, ["a@example.com", "d@example.com"]);
+        let password: Option<String> =
+            sqlx::query_scalar("SELECT password_hash FROM users WHERE id = 4")
+                .fetch_one(db.reader())
+                .await
+                .unwrap();
+        assert_eq!(password, None);
+
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[tokio::test]
     async fn synchronous_is_normal_by_default_and_configurable() {
         let mode = |db: Db| async move {

@@ -56,7 +56,7 @@ impl FromRequestParts<AppState> for AuthUser {
     }
 }
 
-fn require_admin(user: &AuthUser) -> Result<(), HttpError> {
+pub(crate) fn require_admin(user: &AuthUser) -> Result<(), HttpError> {
     if user.0.is_admin {
         Ok(())
     } else {
@@ -97,7 +97,7 @@ fn dummy_hash() -> &'static str {
 }
 
 /// The cookie is secure behind an https proxy that says so.
-fn secure(headers: &HeaderMap) -> bool {
+pub(crate) fn secure(headers: &HeaderMap) -> bool {
     headers
         .get("x-forwarded-proto")
         .and_then(|v| v.to_str().ok())
@@ -105,7 +105,7 @@ fn secure(headers: &HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
-fn validate_email(raw: &str) -> Result<String, HttpError> {
+pub(crate) fn validate_email(raw: &str) -> Result<String, HttpError> {
     let email = raw.trim().to_lowercase();
     let valid = email.len() <= 254
         && !email.contains(char::is_whitespace)
@@ -145,6 +145,16 @@ pub struct Session {
     /// The signed-in user: null when nobody is signed in. Always present.
     #[schema(required = true)]
     pub user: Option<User>,
+    /// Single sign-on, when it is on: null when it is off. Always present.
+    #[schema(required = true)]
+    pub oidc: Option<OidcLogin>,
+}
+
+/// How the login page offers single sign-on.
+#[derive(Serialize, ToSchema)]
+pub struct OidcLogin {
+    /// What the button says, e.g. "Single sign-on".
+    pub label: String,
 }
 
 /// A new email address for the signed-in user.
@@ -166,7 +176,9 @@ pub struct ChangeSettings {
 
 #[derive(Deserialize, ToSchema)]
 pub struct ChangePassword {
-    pub current_password: String,
+    /// Required when the user has a password; left out to set a first one.
+    #[serde(default)]
+    pub current_password: Option<String>,
     /// 10 to 200 characters.
     pub new_password: String,
 }
@@ -174,8 +186,10 @@ pub struct ChangePassword {
 #[derive(Deserialize, ToSchema)]
 pub struct CreateUser {
     pub email: String,
-    /// 10 to 200 characters.
-    pub password: String,
+    /// 10 to 200 characters. May be left out while single sign-on is on:
+    /// the user then signs in through the provider.
+    #[serde(default)]
+    pub password: Option<String>,
     #[serde(default)]
     pub is_admin: bool,
 }
@@ -198,6 +212,9 @@ pub struct UserRow {
     pub email: String,
     pub is_admin: bool,
     pub created_at: String,
+    pub has_password: bool,
+    /// Whether the user is linked to a single sign-on account.
+    pub single_sign_on: bool,
 }
 
 async fn has_users(state: &AppState) -> Result<bool, HttpError> {
@@ -236,7 +253,15 @@ async fn session(
     } else {
         current_user(state.db.reader(), jar.get(COOKIE).map(|c| c.value())).await
     };
-    Ok(Json(Session { needs_setup, user }))
+    let settings = state.oidc.settings();
+    let oidc = settings.enabled().then(|| OidcLogin {
+        label: settings.label().to_string(),
+    });
+    Ok(Json(Session {
+        needs_setup,
+        user,
+        oidc,
+    }))
 }
 
 /// An email and a password, to sign in or to create the first admin.
@@ -341,15 +366,16 @@ async fn login(
             .into_response());
     }
 
-    let stored: Option<(i64, String)> =
+    let stored: Option<(i64, Option<String>)> =
         sqlx::query_as("SELECT id, password_hash FROM users WHERE email = ?1")
             .bind(&email)
             .fetch_optional(state.db.reader())
             .await?;
-    // Same work and same response whether or not the user exists.
+    // Same work and same response whether or not the user exists, or has
+    // a password.
     let (id, stored) = match stored {
-        Some(found) => (found.0, found.1),
-        None => (0, dummy_hash().to_string()),
+        Some((id, Some(hash))) => (id, hash),
+        _ => (0, dummy_hash().to_string()),
     };
     if !verify_password(&creds.password, &stored) || id == 0 {
         state.throttle.record_failure(&key);
@@ -481,13 +507,14 @@ async fn change_settings(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-// Change the signed-in user's own password.
+// Change the signed-in user's own password, or set a first one.
 #[utoipa::path(
     post,
     path = "/password",
     tag = "Account",
     operation_id = "changePassword",
     summary = "Change your own password",
+    description = "The current password is required, except for a user who has none (single sign-on): they set a first one.",
     request_body(content = ChangePassword, content_type = "application/json"),
     responses(
         (status = 204, description = "Changed"),
@@ -502,33 +529,42 @@ async fn change_password(
     user: AuthUser,
     ApiJson(body): ApiJson<ChangePassword>,
 ) -> Result<Response, HttpError> {
-    if body.current_password.len() > 200 {
+    let invalid = || HttpError {
+        status: StatusCode::UNAUTHORIZED,
+        message: "Invalid password".into(),
+    };
+    let current = body.current_password.unwrap_or_default();
+    if current.len() > 200 {
         return Err(HttpError::bad_request("Invalid password"));
     }
     let new_password = validate_password(&body.new_password)?;
     // The hashing below takes a while: no connection is held meanwhile.
-    let stored: Option<String> =
+    let stored: Option<Option<String>> =
         sqlx::query_scalar("SELECT password_hash FROM users WHERE id = ?1")
             .bind(user.0.id)
             .fetch_optional(state.db.reader())
             .await?;
     let Some(stored) = stored else {
-        return Err(HttpError {
-            status: StatusCode::UNAUTHORIZED,
-            message: "Invalid password".into(),
-        });
+        return Err(invalid());
     };
-    if !verify_password(&body.current_password, &stored) {
-        return Err(HttpError {
-            status: StatusCode::UNAUTHORIZED,
-            message: "Invalid password".into(),
-        });
+    if let Some(stored) = &stored
+        && !verify_password(&current, stored)
+    {
+        return Err(invalid());
     }
-    sqlx::query("UPDATE users SET password_hash = ?1 WHERE id = ?2")
-        .bind(hash_password(&new_password))
-        .bind(user.0.id)
-        .execute(state.db.writer())
-        .await?;
+    // Only if the password is still the one checked (or still none): a
+    // change in between fails like a wrong password.
+    let updated =
+        sqlx::query("UPDATE users SET password_hash = ?1 WHERE id = ?2 AND password_hash IS ?3")
+            .bind(hash_password(&new_password))
+            .bind(user.0.id)
+            .bind(stored)
+            .execute(state.db.writer())
+            .await?
+            .rows_affected();
+    if updated == 0 {
+        return Err(invalid());
+    }
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -551,10 +587,14 @@ async fn list_users(
     user: AuthUser,
 ) -> Result<Json<Vec<UserRow>>, HttpError> {
     require_admin(&user)?;
-    let rows: Vec<UserRow> =
-        sqlx::query_as("SELECT id, email, is_admin, created_at FROM users ORDER BY id")
-            .fetch_all(state.db.reader())
-            .await?;
+    let rows: Vec<UserRow> = sqlx::query_as(
+        "SELECT id, email, is_admin, created_at, password_hash IS NOT NULL AS has_password,
+                    EXISTS (SELECT 1 FROM user_identities i WHERE i.user_id = users.id)
+                      AS single_sign_on
+             FROM users ORDER BY id",
+    )
+    .fetch_all(state.db.reader())
+    .await?;
     Ok(Json(rows))
 }
 
@@ -564,6 +604,7 @@ async fn list_users(
     tag = "Users",
     operation_id = "createUser",
     summary = "Create a user",
+    description = "The password may be left out while single sign-on is on.",
     request_body(content = CreateUser, content_type = "application/json"),
     responses(
         (status = 201, description = "Created"),
@@ -582,8 +623,16 @@ async fn create_user(
 ) -> Result<Response, HttpError> {
     require_admin(&user)?;
     let email = validate_email(&body.email)?;
-    let password = validate_password(&body.password)?;
-    let password_hash = hash_password(&password);
+    // Without a password the user can only sign in through the provider.
+    let password_hash = match body.password.as_deref().filter(|p| !p.is_empty()) {
+        Some(password) => Some(hash_password(&validate_password(password)?)),
+        None if state.oidc.settings().enabled() => None,
+        None => {
+            return Err(HttpError::bad_request(
+                "Expected a password of 10 to 200 characters",
+            ));
+        }
+    };
     let mut tx = state.db.writer().begin().await?;
     let taken: Option<i64> = sqlx::query_scalar("SELECT 1 FROM users WHERE email = ?1")
         .bind(&email)

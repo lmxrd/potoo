@@ -29,6 +29,9 @@ pub struct User {
     pub use_24: bool,
     /// A JSON object as text: `{"base":"light"|"dark","accent":"#rrggbb"}`.
     pub theme: String,
+    /// False for a user who signs in through single sign-on only: they can
+    /// set a password without giving a current one.
+    pub has_password: bool,
 }
 
 /// Hash a password with argon2id; the PHC string is what gets stored.
@@ -54,7 +57,8 @@ pub fn verify_password(password: &str, stored: &str) -> bool {
 pub async fn current_user<'e>(db: impl SqliteExecutor<'e>, token: Option<&str>) -> Option<User> {
     let token = token?;
     sqlx::query_as::<_, User>(
-        "SELECT u.id, u.email, u.is_admin, u.date_format, u.use_24, u.theme
+        "SELECT u.id, u.email, u.is_admin, u.date_format, u.use_24, u.theme,
+                u.password_hash IS NOT NULL AS has_password
          FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = ?1 AND s.expires_at > ?2",
     )
