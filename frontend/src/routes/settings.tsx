@@ -2,6 +2,7 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { Button } from "../components/button";
+import { ApiKeys } from "../components/api-keys";
 import { Card } from "../components/card";
 import { ErrorText } from "../components/error-text";
 import { Input } from "../components/input";
@@ -60,6 +61,9 @@ function Settings() {
           <TotpSettings enabled={user.totp_enabled} />
         </Card>
       )}
+      <Card title="API keys">
+        <ApiKeys isAdmin={user.is_admin} dateFormat={user.date_format} />
+      </Card>
     </div>
   );
 }

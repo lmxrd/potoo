@@ -342,7 +342,7 @@ fn view(state: &AppState, headers: &HeaderMap) -> OidcSettings {
         (status = 401, description = "Not signed in", body = ErrorBody),
         (status = 403, description = "Admin only", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn get_settings(
     State(state): State<AppState>,
@@ -368,7 +368,7 @@ async fn get_settings(
         (status = 403, description = "Admin only", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn update_settings(
     State(state): State<AppState>,

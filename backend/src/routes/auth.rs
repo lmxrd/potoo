@@ -1,6 +1,6 @@
 use crate::auth::{
-    COOKIE, DATE_FORMATS, User, create_session, current_user, destroy_session, hash_password,
-    verify_password,
+    COOKIE, DATE_FORMATS, KeyUse, Scope, User, create_session, current_user, destroy_session,
+    hash_password, iso, key_user, verify_password,
 };
 use crate::error::{ErrorBody, HttpError};
 use crate::extract::ApiJson;
@@ -17,6 +17,7 @@ use serde_json::json;
 use sqlx::SqliteExecutor;
 use std::net::SocketAddr;
 use std::sync::OnceLock;
+use std::time::{Duration, SystemTime};
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -35,9 +36,21 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(reset_password))
 }
 
-/// The signed-in user, as a request extractor: a valid session cookie or
-/// a 401.
-pub struct AuthUser(pub User);
+/// How a request is signed in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Access {
+    /// The session cookie: everything the user may do.
+    Session,
+    /// An API key (`Authorization: Bearer`), capped by its scope.
+    Key(Scope),
+}
+
+/// The signed-in user, as a request extractor: a valid session cookie, or
+/// an API key, or a 401. A read key is refused anything but GET and HEAD
+/// here (403); admin endpoints check the rest in `require_admin`. The
+/// account's own settings (email, password, two-factor authentication, API
+/// keys) take a `SessionUser` instead: no key reaches them.
+pub struct AuthUser(pub User, pub Access);
 
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = HttpError;
@@ -46,6 +59,19 @@ impl FromRequestParts<AppState> for AuthUser {
         parts: &mut axum::http::request::Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
+        if let Some(token) = bearer(&parts.headers) {
+            let (user, key) = key_user(state.db.reader(), token)
+                .await
+                .ok_or_else(HttpError::unauthorized)?;
+            if key.scope == Scope::Read && !parts.method.is_safe() {
+                return Err(HttpError {
+                    status: StatusCode::FORBIDDEN,
+                    message: "This API key can only read".into(),
+                });
+            }
+            note_key_use(state, &key).await;
+            return Ok(AuthUser(user, Access::Key(key.scope)));
+        }
         let jar = CookieJar::from_request_parts(parts, state)
             .await
             .map_err(|_| HttpError::unauthorized())?;
@@ -53,15 +79,66 @@ impl FromRequestParts<AppState> for AuthUser {
         let user = current_user(state.db.reader(), token)
             .await
             .ok_or_else(HttpError::unauthorized)?;
-        Ok(AuthUser(user))
+        Ok(AuthUser(user, Access::Session))
     }
 }
 
+/// The signed-in user of a session cookie only: an API key is refused
+/// (403), so a leaked key cannot change the account or make more keys.
+pub struct SessionUser(pub User);
+
+impl FromRequestParts<AppState> for SessionUser {
+    type Rejection = HttpError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        match AuthUser::from_request_parts(parts, state).await? {
+            AuthUser(user, Access::Session) => Ok(SessionUser(user)),
+            AuthUser(_, Access::Key(_)) => Err(HttpError {
+                status: StatusCode::FORBIDDEN,
+                message: "Not with an API key: sign in".into(),
+            }),
+        }
+    }
+}
+
+/// The token of an `Authorization: Bearer` header.
+fn bearer(headers: &HeaderMap) -> Option<&str> {
+    let value = headers.get("authorization")?.to_str().ok()?;
+    let (scheme, token) = value.split_once(' ')?;
+    scheme.eq_ignore_ascii_case("bearer").then(|| token.trim())
+}
+
+/// Records when a key was used, at most once a minute, so that a busy
+/// script does not take the one writer for every request. A failure is
+/// only logged: the request goes on.
+async fn note_key_use(state: &AppState, key: &KeyUse) {
+    let now = SystemTime::now();
+    let stale = iso(now - Duration::from_secs(60));
+    if key
+        .last_used_at
+        .as_deref()
+        .is_some_and(|last| last > stale.as_str())
+    {
+        return;
+    }
+    if let Err(e) = sqlx::query("UPDATE api_keys SET last_used_at = ?1 WHERE id = ?2")
+        .bind(iso(now))
+        .bind(key.id)
+        .execute(state.db.writer())
+        .await
+    {
+        tracing::warn!("cannot record the use of API key {}: {e}", key.id);
+    }
+}
+
+/// Admin only: an admin's session, or an admin's admin-scoped key.
 pub(crate) fn require_admin(user: &AuthUser) -> Result<(), HttpError> {
-    if user.0.is_admin {
-        Ok(())
-    } else {
-        Err(HttpError::forbidden())
+    match user {
+        AuthUser(u, Access::Session | Access::Key(Scope::Admin)) if u.is_admin => Ok(()),
+        _ => Err(HttpError::forbidden()),
     }
 }
 
@@ -453,7 +530,7 @@ async fn logout(State(state): State<AppState>, jar: CookieJar) -> Result<Respons
 )]
 async fn change_email(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: SessionUser,
     ApiJson(body): ApiJson<ChangeEmail>,
 ) -> Result<Response, HttpError> {
     let email = validate_email(&body.email)?;
@@ -498,7 +575,7 @@ async fn change_email(
 )]
 async fn change_settings(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: SessionUser,
     ApiJson(body): ApiJson<ChangeSettings>,
 ) -> Result<Response, HttpError> {
     if body.date_format.is_none() && body.use_24.is_none() && body.theme.is_none() {
@@ -557,7 +634,7 @@ async fn change_settings(
 )]
 async fn change_password(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: SessionUser,
     ApiJson(body): ApiJson<ChangePassword>,
 ) -> Result<Response, HttpError> {
     if !state.oidc.passwords_allowed() {
@@ -614,7 +691,7 @@ async fn change_password(
         (status = 401, description = "Not signed in", body = ErrorBody),
         (status = 403, description = "Admin only", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn list_users(
     State(state): State<AppState>,
@@ -649,7 +726,7 @@ async fn list_users(
         (status = 409, description = "Conflict", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn create_user(
     State(state): State<AppState>,
@@ -714,7 +791,7 @@ async fn create_user(
         (status = 409, description = "Conflict", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn change_role(
     State(state): State<AppState>,
@@ -763,7 +840,7 @@ async fn change_role(
         (status = 403, description = "Admin only", body = ErrorBody),
         (status = 409, description = "Conflict", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn delete_user(
     State(state): State<AppState>,
@@ -812,7 +889,7 @@ async fn delete_user(
         (status = 404, description = "Not found", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn reset_password(
     State(state): State<AppState>,

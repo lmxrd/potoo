@@ -150,7 +150,7 @@ impl IntoResponse for Failure {
         (status = 413, description = "The file is larger than 256 MB", body = ErrorBody),
         (status = 415, description = "Send multipart/form-data, text/csv or text/plain", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn import(
     State(state): State<AppState>,

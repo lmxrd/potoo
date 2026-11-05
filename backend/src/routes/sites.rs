@@ -110,7 +110,7 @@ pub struct CreatedSite {
         (status = 200, description = "All sites, by hostname", body = Vec<SiteRow>),
         (status = 401, description = "Not signed in", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn list(
     State(state): State<AppState>,
@@ -185,7 +185,7 @@ fn default_true() -> bool {
         (status = 409, description = "Conflict", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn create(
     State(state): State<AppState>,
@@ -246,7 +246,7 @@ pub struct DntInput {
         (status = 403, description = "Admin only", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn update(
     State(state): State<AppState>,
@@ -279,7 +279,7 @@ async fn update(
         (status = 401, description = "Not signed in", body = ErrorBody),
         (status = 403, description = "Admin only", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn delete(
     State(state): State<AppState>,
@@ -309,7 +309,7 @@ async fn delete(
         (status = 401, description = "Not signed in", body = ErrorBody),
         (status = 404, description = "Not found", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn get_site(
     State(state): State<AppState>,

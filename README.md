@@ -40,6 +40,7 @@ identity, and you keep your data.
 - **Single sign-on** with any OpenID Connect provider (Authentik, Keycloak,
   Authelia, Google, ...), next to passwords; set up in the admin settings or
   with environment variables.
+- **API keys** per user, read, read & write or admin, for scripts.
 - **Two-factor authentication** for password sign-ins, with any authenticator
   app (TOTP) and single-use recovery codes.
 
@@ -309,6 +310,22 @@ it off for a user who lost both their app and their recovery codes (**Reset
 code: that is the provider's job. The second step must follow the password
 within five minutes, in the same browser; a restart of Potoo makes it start
 over.
+
+### API keys
+
+Each user can create API keys under **Settings** for scripts, and send one as
+`Authorization: Bearer potoo_…` wherever the dashboard's session works. The
+key is shown once, when it is made. A key's permission caps what it may do,
+and never goes beyond its user's role:
+
+- **Read**: GET requests only (stats, sites, exports).
+- **Read & write**: changes too, but no admin endpoints.
+- **Admin** (admins only): everything the admin may do.
+
+No key reaches its user's own account: email, password, two-factor
+authentication and API keys need a signed-in session. A key may expire
+(30 days, 90 days, a year, or never); revoking it, or deleting its user,
+stops it at once. Each key shows when it was last used (to the minute).
 
 ### How hits are stored
 

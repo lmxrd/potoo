@@ -5,6 +5,7 @@ use axum::http::StatusCode;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
 
+pub mod api_keys;
 pub mod auth;
 pub mod collect;
 pub mod export;
@@ -26,7 +27,10 @@ pub fn router() -> OpenApiRouter<AppState> {
         .nest("/admin", oidc::admin_router())
         .nest(
             "/auth",
-            auth::router().merge(oidc::router()).merge(totp::router()),
+            auth::router()
+                .merge(oidc::router())
+                .merge(totp::router())
+                .merge(api_keys::router()),
         )
         .nest("/export", export::router())
         .nest("/import", import::router())

@@ -116,6 +116,16 @@ deleted when used. A password login of a user with it on answers 200
 `/login/totp` finishes it. Wrong codes count in `state.throttle` per user
 (`totp|<id>`), not per address. Single sign-on skips it.
 
+**API keys** (`routes/api_keys.rs`, `key_user` in `auth.rs`): `api_keys`
+holds the SHA-256 of `potoo_<64 hex>` and its scope (`read`/`write`/
+`admin`). `AuthUser(user, Access)` takes the session cookie or
+`Authorization: Bearer`; a read key gets 403 on anything but GET/HEAD there,
+and `require_admin` wants a session or an admin key (and an admin user).
+Account endpoints (email, settings, password, TOTP, API keys) take
+`SessionUser`, which refuses keys: use it for any new endpoint about the
+account itself. A handler that takes `AuthUser` lists `("api_key" = [])` in
+its `security`. `last_used_at` is written at most once a minute.
+
 **Tests run on an in-memory database**, where the reader and the writer
 pools are one and the same single connection. Two consequences: a write
 made through `db.reader()` (read-only on a real file) passes the tests but

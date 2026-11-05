@@ -10,7 +10,7 @@
 use crate::auth::{User, create_session};
 use crate::error::{ErrorBody, HttpError};
 use crate::extract::ApiJson;
-use crate::routes::auth::{AuthUser, require_admin, secure};
+use crate::routes::auth::{AuthUser, SessionUser, require_admin, secure};
 use crate::state::AppState;
 use crate::totp;
 use axum::Json;
@@ -271,7 +271,7 @@ async fn login_totp(
 )]
 async fn setup(
     State(state): State<AppState>,
-    AuthUser(user): AuthUser,
+    SessionUser(user): SessionUser,
 ) -> Result<Json<TotpSetup>, HttpError> {
     let secret = totp::new_secret();
     let updated =
@@ -316,7 +316,7 @@ fn already_on() -> HttpError {
 )]
 async fn enable(
     State(state): State<AppState>,
-    AuthUser(user): AuthUser,
+    SessionUser(user): SessionUser,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
     let key = throttle_key(user.id);
@@ -372,7 +372,7 @@ async fn enable(
 )]
 async fn disable(
     State(state): State<AppState>,
-    AuthUser(user): AuthUser,
+    SessionUser(user): SessionUser,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
     if let Some(retry_after) = state.throttle.locked_out(&throttle_key(user.id)) {
@@ -424,7 +424,7 @@ async fn turn_off(state: &AppState, user_id: i64) -> Result<bool, HttpError> {
 )]
 async fn regenerate_recovery_codes(
     State(state): State<AppState>,
-    AuthUser(user): AuthUser,
+    SessionUser(user): SessionUser,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
     if let Some(retry_after) = state.throttle.locked_out(&throttle_key(user.id)) {
@@ -456,7 +456,7 @@ async fn regenerate_recovery_codes(
         (status = 403, description = "Admin only", body = ErrorBody),
         (status = 404, description = "Not found", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn reset(
     State(state): State<AppState>,
