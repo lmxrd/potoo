@@ -6,7 +6,9 @@ import { Button } from "./button";
 import { ErrorText } from "./error-text";
 import { Input } from "./input";
 import {
+  confirmReplaceTotpMutation,
   disableTotpMutation,
+  replaceTotpMutation,
   enableTotpMutation,
   regenerateRecoveryCodesMutation,
   setupTotpMutation,
@@ -17,8 +19,8 @@ import { errorMessage } from "../lib/api";
 /**
  * Two-factor authentication of the signed-in user: set up an authenticator
  * app (a QR code, or the secret to type), confirm it with a code, and keep
- * the recovery codes; later, new recovery codes or turning it off, each with
- * a code.
+ * the recovery codes; later, new recovery codes, a new app (the old one works
+ * until the new one is confirmed) or turning it off, each with a code.
  */
 export function TotpSettings({ enabled, required }: { enabled: boolean; required: boolean }) {
   const router = useRouter();
@@ -30,6 +32,10 @@ export function TotpSettings({ enabled, required }: { enabled: boolean; required
   const enable = useMutation(enableTotpMutation());
   const disable = useMutation(disableTotpMutation());
   const regenerate = useMutation(regenerateRecoveryCodesMutation());
+  const replace = useMutation(replaceTotpMutation());
+  const confirmReplace = useMutation(confirmReplaceTotpMutation());
+  const [replacement, setReplacement] = useState<TotpSetup>();
+  const [replaced, setReplaced] = useState(false);
 
   const run = async (action: () => Promise<unknown>) => {
     setError(undefined);
@@ -52,20 +58,70 @@ export function TotpSettings({ enabled, required }: { enabled: boolean; required
     />
   );
 
+  // Replacing the app: the new secret, until a code from the new app
+  // confirms it. The old app keeps working until then.
+  if (enabled && replacement) {
+    return (
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          run(async () => {
+            await confirmReplace.mutateAsync({ body: { code } });
+            setReplacement(undefined);
+            setCode("");
+            setReplaced(true);
+          });
+        }}
+      >
+        <QrCode setup={replacement} />
+        {codeInput}
+        <ErrorText>{error}</ErrorText>
+        <div className="flex gap-2">
+          <Button type="submit">Replace</Button>
+          <Button
+            type="button"
+            onClick={() => {
+              setReplacement(undefined);
+              setCode("");
+            }}
+          >
+            Cancel
+          </Button>
+        </div>
+      </form>
+    );
+  }
+
   if (enabled) {
     return (
       <form className="flex flex-col gap-3" onSubmit={(e) => e.preventDefault()}>
         <p className="text-sm text-ok">
           On: a code from your authenticator app is asked for at sign-in.
         </p>
+        {replaced && <p className="text-sm text-ok">Authenticator app replaced.</p>}
         <p className="text-xs text-muted">
           {required
-            ? "A code from the app, or a recovery code, to make new recovery codes. It is required here: it cannot be turned off."
-            : "A code from the app, or a recovery code, to make new recovery codes or to turn it off."}
+            ? "A code from the app, or a recovery code, to make new recovery codes or to move to a new app. It is required here: it cannot be turned off."
+            : "A code from the app, or a recovery code, to make new recovery codes, to move to a new app, or to turn it off."}
         </p>
         {codeInput}
         <ErrorText>{error}</ErrorText>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="submit"
+            onClick={() =>
+              code &&
+              run(async () => {
+                const next = await replace.mutateAsync({ body: { code } });
+                setCode("");
+                setReplaced(false);
+                setReplacement(next);
+              })
+            }
+          >
+            Replace app
+          </Button>
           <Button
             type="submit"
             onClick={() =>

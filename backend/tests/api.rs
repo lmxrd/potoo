@@ -2784,3 +2784,81 @@ async fn totp_required_makes_everyone_set_it_up() {
     let (page, _) = sso_step(&app, &provider, "b@example.com").await;
     assert_eq!(page, "/login?step=totp-setup");
 }
+
+#[tokio::test]
+async fn the_authenticator_app_can_be_replaced() {
+    let app = spawn_app_full(oidc::Env::default(), true).await;
+    let admin = admin_session(&app).await;
+    // With TOTP_REQUIRED it cannot be turned off, but it can be replaced.
+    let old = enable(&app, &admin).await;
+    let key = create_key(&app, &admin, "admin").await["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let body = json!({ "code": totp_code(&old, 1) });
+    let response = with_key(
+        &app,
+        Method::POST,
+        "/api/auth/totp/replace",
+        &key,
+        Some(body),
+    )
+    .await;
+    assert_eq!(response.status(), 403);
+
+    // Confirming needs a replacement started, which needs a current code.
+    let body = json!({ "code": "123456" });
+    assert_eq!(
+        post(&app, "/api/auth/totp/replace/confirm", &admin, Some(body))
+            .await
+            .status(),
+        400
+    );
+    let body = json!({ "code": "abc" });
+    assert_eq!(
+        post(&app, "/api/auth/totp/replace", &admin, Some(body))
+            .await
+            .status(),
+        400
+    );
+    let body = json!({ "code": totp_code(&old, 1) });
+    let response = post(&app, "/api/auth/totp/replace", &admin, Some(body)).await;
+    assert_eq!(response.status(), 200);
+    let new = json(response).await["secret"].as_str().unwrap().to_string();
+    assert_ne!(new, old);
+
+    // A wrong code from the new app changes nothing.
+    let wrong = if totp_code(&new, 0) == "000000" {
+        "111111"
+    } else {
+        "000000"
+    };
+    let body = json!({ "code": wrong });
+    assert_eq!(
+        post(&app, "/api/auth/totp/replace/confirm", &admin, Some(body))
+            .await
+            .status(),
+        400
+    );
+    // Confirmed: the new app works, the old one does not.
+    let body = json!({ "code": totp_code(&new, 0) });
+    assert_eq!(
+        post(&app, "/api/auth/totp/replace/confirm", &admin, Some(body))
+            .await
+            .status(),
+        204
+    );
+    let response = password_login(&app, "admin@example.com").await;
+    let challenge = set_cookie(&response, "potoo_2fa").unwrap();
+    let old_code = totp_code(&old, 1);
+    if old_code != totp_code(&new, 1) {
+        assert_eq!(
+            second_step(&app, Some(&challenge), &old_code)
+                .await
+                .status(),
+            400
+        );
+    }
+    let response = second_step(&app, Some(&challenge), &totp_code(&new, 1)).await;
+    assert_eq!(response.status(), 204);
+}

@@ -38,6 +38,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(enable))
         .routes(routes!(disable))
         .routes(routes!(regenerate_recovery_codes))
+        .routes(routes!(replace))
+        .routes(routes!(confirm_replace))
         .routes(routes!(reset))
 }
 
@@ -554,6 +556,104 @@ async fn turn_off(state: &AppState, user_id: i64) -> Result<bool, HttpError> {
         .await?;
     tx.commit().await?;
     Ok(updated == 1)
+}
+
+#[utoipa::path(
+    post,
+    path = "/totp/replace",
+    tag = "Account",
+    operation_id = "replaceTotp",
+    summary = "Start replacing the authenticator app",
+    description = "For a new phone or app: a code from the current app, or a recovery code, gives a new secret. Two-factor authentication stays on, with the current app, until `/totp/replace/confirm` confirms the new one; so this works while it is required (`TOTP_REQUIRED`) too. Starting again replaces the new secret.",
+    request_body(content = TotpCode, content_type = "application/json"),
+    responses(
+        (status = 200, description = "The new secret", body = TotpSetup),
+        (status = 400, description = "Invalid code, or two-factor authentication is off", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 403, description = "Not with an API key", body = ErrorBody),
+        (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
+        (status = 429, description = "Too many attempts, try again later", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+async fn replace(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiJson(body): ApiJson<TotpCode>,
+) -> Result<Response, HttpError> {
+    if let Some(retry_after) = state.throttle.locked_out(&throttle_key(user.id)) {
+        return Ok(too_many(retry_after));
+    }
+    if !use_code(&state, user.id, &body.code).await? {
+        return Err(invalid_code());
+    }
+    let secret = totp::new_secret();
+    let updated =
+        sqlx::query("UPDATE users SET totp_pending = ?1 WHERE id = ?2 AND totp_secret IS NOT NULL")
+            .bind(&secret)
+            .bind(user.id)
+            .execute(state.db.writer())
+            .await?
+            .rows_affected();
+    if updated == 0 {
+        return Err(HttpError::bad_request("Two-factor authentication is off"));
+    }
+    let uri = totp::uri(&secret, &user.email)
+        .ok_or_else(|| HttpError::internal("Cannot make the authenticator URI"))?;
+    Ok(Json(TotpSetup { uri, secret }).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/totp/replace/confirm",
+    tag = "Account",
+    operation_id = "confirmReplaceTotp",
+    summary = "Finish replacing the authenticator app",
+    description = "A code from the new app: its secret replaces the old one, which stops working. The recovery codes are kept. A wrong code changes nothing.",
+    request_body(content = TotpCode, content_type = "application/json"),
+    responses(
+        (status = 204, description = "Replaced"),
+        (status = 400, description = "Invalid code, or no replacement started", body = ErrorBody),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 403, description = "Not with an API key", body = ErrorBody),
+        (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
+        (status = 429, description = "Too many attempts, try again later", body = ErrorBody),
+    ),
+    security(("session" = [])),
+)]
+async fn confirm_replace(
+    State(state): State<AppState>,
+    SessionUser(user): SessionUser,
+    ApiJson(body): ApiJson<TotpCode>,
+) -> Result<Response, HttpError> {
+    let key = throttle_key(user.id);
+    if let Some(retry_after) = state.throttle.locked_out(&key) {
+        return Ok(too_many(retry_after));
+    }
+    let mut tx = state.db.writer().begin().await?;
+    let (secret, pending): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT totp_secret, totp_pending FROM users WHERE id = ?1")
+            .bind(user.id)
+            .fetch_one(&mut *tx)
+            .await?;
+    let (Some(_), Some(pending)) = (secret, pending) else {
+        return Err(HttpError::bad_request("Start the replacement first"));
+    };
+    let Some(step) = totp::verify(&pending, &body.code, totp::current_step(), 0) else {
+        state.throttle.record_failure(&key);
+        return Err(invalid_code());
+    };
+    sqlx::query(
+        "UPDATE users SET totp_secret = totp_pending, totp_pending = NULL, totp_last_step = ?1
+         WHERE id = ?2",
+    )
+    .bind(step as i64)
+    .bind(user.id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    state.throttle.clear(&key);
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 #[utoipa::path(
