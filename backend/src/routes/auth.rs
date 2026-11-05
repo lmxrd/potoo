@@ -149,6 +149,9 @@ pub struct Session {
     /// Single sign-on, when it is on: null when it is off. Always present.
     #[schema(required = true)]
     pub oidc: Option<OidcLogin>,
+    /// False when single sign-on is the only way in (`OIDC_ONLY`): the
+    /// login page offers no password, and passwords cannot be set.
+    pub password_login: bool,
 }
 
 /// How the login page offers single sign-on.
@@ -264,6 +267,7 @@ async fn session(
         needs_setup,
         user,
         oidc,
+        password_login: state.oidc.passwords_allowed(),
     }))
 }
 
@@ -335,6 +339,7 @@ async fn setup(
         (status = 200, description = "The password is right; a code is needed next", body = TotpRequired),
         (status = 204, description = "Signed in"),
         (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 403, description = "Password sign-in is turned off (`OIDC_ONLY`)", body = ErrorBody),
         (status = 429, description = "Too many attempts, try again later", body = ErrorBody),
     ),
 )]
@@ -345,6 +350,9 @@ async fn login(
     headers: HeaderMap,
     body: Result<ApiJson<Credentials>, HttpError>,
 ) -> Result<Response, HttpError> {
+    if !state.oidc.passwords_allowed() {
+        return Err(HttpError::passwords_off());
+    }
     // A malformed body fails the same way as a wrong password.
     let Ok(ApiJson(creds)) = body else {
         return Err(HttpError {
@@ -536,12 +544,13 @@ async fn change_settings(
     tag = "Account",
     operation_id = "changePassword",
     summary = "Change your own password",
-    description = "The current password is required, except for a user who has none (single sign-on): they set a first one.",
+    description = "The current password is required, except for a user who has none (single sign-on): they set a first one. Refused while password sign-in is turned off (`OIDC_ONLY`).",
     request_body(content = ChangePassword, content_type = "application/json"),
     responses(
         (status = 204, description = "Changed"),
         (status = 400, description = "The request is invalid", body = ErrorBody),
         (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 403, description = "Password sign-in is turned off (`OIDC_ONLY`)", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
     security(("session" = [])),
@@ -551,6 +560,9 @@ async fn change_password(
     user: AuthUser,
     ApiJson(body): ApiJson<ChangePassword>,
 ) -> Result<Response, HttpError> {
+    if !state.oidc.passwords_allowed() {
+        return Err(HttpError::passwords_off());
+    }
     let invalid = || HttpError {
         status: StatusCode::UNAUTHORIZED,
         message: "Invalid password".into(),
@@ -627,7 +639,7 @@ async fn list_users(
     tag = "Users",
     operation_id = "createUser",
     summary = "Create a user",
-    description = "The password may be left out while single sign-on is on.",
+    description = "The password may be left out while single sign-on is on. With `OIDC_ONLY` no password is taken: the user signs in through the provider.",
     request_body(content = CreateUser, content_type = "application/json"),
     responses(
         (status = 201, description = "Created"),
@@ -647,8 +659,13 @@ async fn create_user(
     require_admin(&user)?;
     let email = validate_email(&body.email)?;
     // Without a password the user can only sign in through the provider.
-    let password_hash = match body.password.as_deref().filter(|p| !p.is_empty()) {
+    let password = body.password.as_deref().filter(|p| !p.is_empty());
+    if password.is_some() && !state.oidc.passwords_allowed() {
+        return Err(HttpError::passwords_off());
+    }
+    let password_hash = match password {
         Some(password) => Some(hash_password(&validate_password(password)?)),
+        None if !state.oidc.passwords_allowed() => None,
         None if state.oidc.settings().enabled() => None,
         None => {
             return Err(HttpError::bad_request(
@@ -784,13 +801,14 @@ async fn delete_user(
     tag = "Users",
     operation_id = "resetUserPassword",
     summary = "Set a new password for a user",
+    description = "Refused while password sign-in is turned off (`OIDC_ONLY`).",
     params(("id" = i64, Path, description = "The user id")),
     request_body(content = ResetPassword, content_type = "application/json"),
     responses(
         (status = 204, description = "Changed"),
         (status = 400, description = "The request is invalid", body = ErrorBody),
         (status = 401, description = "Not signed in", body = ErrorBody),
-        (status = 403, description = "Admin only", body = ErrorBody),
+        (status = 403, description = "Admin only, or password sign-in is turned off (`OIDC_ONLY`)", body = ErrorBody),
         (status = 404, description = "Not found", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
@@ -803,6 +821,9 @@ async fn reset_password(
     ApiJson(body): ApiJson<ResetPassword>,
 ) -> Result<Response, HttpError> {
     require_admin(&user)?;
+    if !state.oidc.passwords_allowed() {
+        return Err(HttpError::passwords_off());
+    }
     let password = validate_password(&body.new_password)?;
     let updated = sqlx::query("UPDATE users SET password_hash = ?1 WHERE id = ?2")
         .bind(hash_password(&password))

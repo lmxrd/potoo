@@ -221,6 +221,7 @@ pub struct RecoveryCodes {
         (status = 204, description = "Signed in"),
         (status = 400, description = "Invalid code", body = ErrorBody),
         (status = 401, description = "No password step, or it expired: sign in again", body = ErrorBody),
+        (status = 403, description = "Password sign-in is turned off (`OIDC_ONLY`)", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
         (status = 429, description = "Too many attempts, try again later", body = ErrorBody),
     ),
@@ -231,6 +232,9 @@ async fn login_totp(
     headers: HeaderMap,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
+    if !state.oidc.passwords_allowed() {
+        return Err(HttpError::passwords_off());
+    }
     let Some(user_id) = challenged_user(&state, &headers) else {
         return Err(HttpError {
             status: StatusCode::UNAUTHORIZED,

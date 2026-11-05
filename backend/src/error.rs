@@ -31,6 +31,14 @@ impl HttpError {
         Self::from_status(StatusCode::UNAUTHORIZED)
     }
 
+    /// Password sign-in is turned off (`OIDC_ONLY`).
+    pub fn passwords_off() -> Self {
+        HttpError {
+            status: StatusCode::FORBIDDEN,
+            message: "Password sign-in is turned off: use single sign-on".into(),
+        }
+    }
+
     pub fn forbidden() -> Self {
         Self::from_status(StatusCode::FORBIDDEN)
     }

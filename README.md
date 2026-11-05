@@ -240,6 +240,7 @@ are not checked for duplicates.
 | `OIDC_LABEL`         | `Single sign-on`    | Single sign-on: the login button says "Sign in with" this                                                                                   |
 | `OIDC_REDIRECT_URL`  | unset               | Single sign-on: the callback URL, when the one Potoo works out from the request is not right (`https://…/api/auth/oidc/callback`)           |
 | `OIDC_AUTO_CREATE`   | `0`                 | Single sign-on: `1` (or `true`, `yes`, `on`) creates a regular user for a verified email that has no account; `0` (`false`, `no`, `off`) does not. Any other value stops Potoo at start |
+| `OIDC_ONLY`          | `0`                 | Single sign-on: `1` (or `true`, `yes`, `on`) makes single sign-on the only way in: no password signs in and none can be set. The first admin is still created with a password on `/setup`, then signs in through the provider (matched by their verified email). Any other value stops Potoo at start |
 
 This site or product includes IP data from db-ip.com, licensed under CC BY 4.0.
 
@@ -271,6 +272,14 @@ The first admin is still created with a password on `/setup`; until then,
 single sign-on signs nobody in. A user without a password can set one in
 their settings; an admin can create a user without a password while single
 sign-on is on.
+
+With `OIDC_ONLY=1`, single sign-on is the only way in: the login page shows no
+password form, a password sign-in is refused (403), and no password can be set
+or reset, so new users are created without one. Two-factor authentication is
+then the provider's business. Sessions and API keys keep working. Until single
+sign-on is set up (with the variables, or in the admin settings by the first
+admin, signed in after `/setup`), nobody else can sign in; Potoo logs a
+warning at start.
 
 Behind a reverse proxy that terminates TLS, the callback URL Potoo works out
 needs `TRUST_PROXY=1` and the proxy's `X-Forwarded-Proto` (and

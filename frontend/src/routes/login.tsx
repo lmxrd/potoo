@@ -57,17 +57,24 @@ function Login() {
           >
             Sign in with {session.oidc.label}
           </a>
-          <p className="text-center text-xs text-muted">or with your password</p>
+          {session.password_login && (
+            <p className="text-center text-xs text-muted">or with your password</p>
+          )}
         </div>
       )}
-      <CredentialsForm
-        kind="login"
-        submit="Sign in"
-        // A password attempt is a new try: the single sign-on error is old.
-        onSubmit={() => error && navigate({ search: {}, replace: true })}
-        onDone={() => location.assign("/")}
-        onTotp={() => setTotp(true)}
-      />
+      {session.password_login && (
+        <CredentialsForm
+          kind="login"
+          submit="Sign in"
+          // A password attempt is a new try: the single sign-on error is old.
+          onSubmit={() => error && navigate({ search: {}, replace: true })}
+          onDone={() => location.assign("/")}
+          onTotp={() => setTotp(true)}
+        />
+      )}
+      {!session.password_login && !session.oidc && (
+        <ErrorText>Single sign-on is not set up yet. Ask an admin.</ErrorText>
+      )}
     </div>
   );
 }

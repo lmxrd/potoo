@@ -45,6 +45,15 @@ async fn main() {
         oidc: Arc::new(potoo::oidc::Oidc::load(&db, potoo::oidc::Env::from_env()).await),
     };
 
+    // With OIDC_ONLY and no provider, nobody can sign in (but the first
+    // admin on /setup, who can then set the provider up): say so.
+    if !state.oidc.passwords_allowed() && !state.oidc.settings().enabled() {
+        tracing::warn!(
+            "OIDC_ONLY is set but single sign-on is not set up: nobody can sign in \
+             until it is (set the OIDC_* variables, or set it up in the admin settings)"
+        );
+    }
+
     // Optional data retention: delete hits older than RETENTION_DAYS.
     let retention = std::env::var("RETENTION_DAYS")
         .ok()

@@ -2367,3 +2367,68 @@ async fn two_factor_authentication_is_turned_off_by_the_user_or_an_admin() {
     let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
     assert_eq!(users[1]["totp_enabled"], json!(false));
 }
+
+#[tokio::test]
+async fn single_sign_on_only_refuses_passwords() {
+    let provider = provider::spawn().await;
+    let app = spawn_app_with(oidc::Env {
+        issuer: Some(provider.issuer.clone()),
+        client_id: Some(provider::CLIENT_ID.into()),
+        only: true,
+        ..oidc::Env::default()
+    })
+    .await;
+    // The first admin is still made on /setup, with a password: nobody signs
+    // in through the provider before there is one.
+    let admin = admin_session(&app).await;
+    let session = session_of(&app, None).await;
+    assert_eq!(session["password_login"], json!(false));
+    assert!(session["oidc"].is_object());
+
+    // No password signs in, not even the right one.
+    let response = password_login(&app, "admin@example.com").await;
+    assert_eq!(response.status(), 403);
+    assert_eq!(set_cookie(&response, auth::COOKIE), None);
+    assert_eq!(second_step(&app, None, "123456").await.status(), 403);
+
+    // Passwords cannot be set; users are made without one.
+    let body = json!({ "new_password": "another horse battery", "current_password": "correct horse battery" });
+    assert_eq!(
+        post(&app, "/api/auth/password", &admin, Some(body))
+            .await
+            .status(),
+        403
+    );
+    let body = json!({ "email": "b@example.com", "password": "correct horse battery" });
+    assert_eq!(
+        post(&app, "/api/auth/users", &admin, Some(body))
+            .await
+            .status(),
+        403
+    );
+    let body = json!({ "email": "b@example.com" });
+    assert_eq!(
+        post(&app, "/api/auth/users", &admin, Some(body))
+            .await
+            .status(),
+        201
+    );
+    let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
+    let id = users[1]["id"].as_i64().unwrap();
+    let body = json!({ "new_password": "correct horse battery" });
+    let path = format!("/api/auth/users/{id}/password");
+    assert_eq!(post(&app, &path, &admin, Some(body)).await.status(), 403);
+
+    // Single sign-on signs both in.
+    for email in ["admin@example.com", "b@example.com"] {
+        let session = sign_in(&app, &provider, |login| {
+            provider::Claims::new(&provider, email, email, &login.nonce)
+        })
+        .await
+        .expect("signed in");
+        assert_eq!(
+            session_of(&app, Some(&session)).await["user"]["email"],
+            json!(email)
+        );
+    }
+}

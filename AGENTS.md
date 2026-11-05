@@ -95,7 +95,10 @@ in through the provider before the first admin exists (`/setup`). A
 provider account is linked to a user in `user_identities` (issuer +
 subject); an unlinked one is matched only by an email the provider says is
 verified, and not to a user linked to another account at that provider.
-Forwarded headers count for the callback URL only with `TRUST_PROXY`. The
+`OIDC_ONLY` (`oidc.passwords_allowed()`) refuses every password path with
+403 (`HttpError::passwords_off`: login, its second step, setting or resetting
+a password, a user created with one) but `/setup`; the session's
+`password_login` tells the frontend. Forwarded headers count for the callback URL only with `TRUST_PROXY`. The
 callback never redirects anywhere but `/` and `/login?error=<code>`, and
 always clears the login cookie (even one it did not sign), with the
 attributes it was set with: a browser ignores a `__Host-` removal without
