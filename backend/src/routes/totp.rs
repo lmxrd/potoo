@@ -1,11 +1,13 @@
 //! Two-factor authentication: setting up an authenticator app, the second
-//! step of a password sign-in, recovery codes, and an admin's reset.
+//! step of a sign-in, recovery codes, and an admin's reset.
 //!
-//! A password sign-in of a user with two-factor authentication on does not
-//! start a session: it sets a short-lived signed cookie that names the user
-//! (`challenge_cookie`), and `/login/totp` starts the session once a code
-//! from the app, or a recovery code, is given. Single sign-on asks for no
-//! code: the provider has its own second factor.
+//! A sign-in (password or single sign-on) of a user with two-factor
+//! authentication on does not start a session: it sets a short-lived signed
+//! cookie that names the user (`challenge_cookie`), and `/login/totp` starts
+//! the session once a code from the app, or a recovery code, is given. With
+//! `TOTP_REQUIRED`, a user without it gets that cookie in its enrolment mode
+//! instead: `/login/totp/setup` and `/login/totp/enable` set the app up, and
+//! the latter starts the session.
 
 use crate::auth::{User, create_session};
 use crate::error::{ErrorBody, HttpError};
@@ -21,6 +23,7 @@ use axum_extra::extract::cookie::{Cookie, SameSite};
 use axum_extra::extract::{CookieJar, SignedCookieJar};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::SqliteExecutor;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
@@ -29,6 +32,8 @@ use utoipa_axum::routes;
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(login_totp))
+        .routes(routes!(login_setup))
+        .routes(routes!(login_enable))
         .routes(routes!(setup))
         .routes(routes!(enable))
         .routes(routes!(disable))
@@ -71,27 +76,104 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
-/// The signed cookie that lets this browser finish the sign-in of a user
-/// whose password it gave: `<user id>.<expiry, unix seconds>`. It is signed
-/// with the instance's key (made at start, like the single sign-on cookie's):
-/// a restart makes the user sign in again.
-pub(crate) fn challenge_cookie(state: &AppState, user_id: i64, secure: bool) -> SignedCookieJar {
-    let expires = unix_now() + CHALLENGE_TTL.as_secs();
-    SignedCookieJar::new(state.oidc.key().clone())
-        .add(challenge(format!("{user_id}.{expires}"), secure))
+/// What a sign-in still needs before its session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Step {
+    /// A code from the app (two-factor authentication is on).
+    Code,
+    /// Setting the app up (it is off, and `TOTP_REQUIRED` is set).
+    Enroll,
 }
 
-/// The user of a valid, unexpired challenge cookie.
-fn challenged_user(state: &AppState, headers: &HeaderMap) -> Option<i64> {
+impl Step {
+    fn as_str(self) -> &'static str {
+        match self {
+            Step::Code => "code",
+            Step::Enroll => "enroll",
+        }
+    }
+
+    /// Where single sign-on sends the browser to take this step.
+    pub(crate) fn page(self) -> &'static str {
+        match self {
+            Step::Code => "/login?step=totp",
+            Step::Enroll => "/login?step=totp-setup",
+        }
+    }
+}
+
+/// The step a user who just proved who they are must take next, if any.
+pub(crate) async fn next_step<'e>(
+    db: impl SqliteExecutor<'e>,
+    state: &AppState,
+    user_id: i64,
+) -> sqlx::Result<Option<Step>> {
+    let on: bool = sqlx::query_scalar("SELECT totp_secret IS NOT NULL FROM users WHERE id = ?1")
+        .bind(user_id)
+        .fetch_one(db)
+        .await?;
+    Ok(if on {
+        Some(Step::Code)
+    } else if state.totp_required {
+        Some(Step::Enroll)
+    } else {
+        None
+    })
+}
+
+/// The signed cookie that lets this browser finish the sign-in of a user
+/// who proved who they are: `<user id>.<expiry, unix seconds>.<step>`. It is
+/// signed with the instance's key (made at start, like the single sign-on
+/// cookie's): a restart makes the user sign in again.
+pub(crate) fn challenge_cookie(
+    state: &AppState,
+    user_id: i64,
+    step: Step,
+    secure: bool,
+) -> SignedCookieJar {
+    let expires = unix_now() + CHALLENGE_TTL.as_secs();
+    let value = format!("{user_id}.{expires}.{}", step.as_str());
+    SignedCookieJar::new(state.oidc.key().clone()).add(challenge(value, secure))
+}
+
+/// The user of a valid, unexpired challenge cookie for this step, or a 401.
+fn challenged_user(state: &AppState, headers: &HeaderMap, step: Step) -> Result<i64, HttpError> {
+    let expired = || HttpError {
+        status: StatusCode::UNAUTHORIZED,
+        message: "The sign-in expired, sign in again".into(),
+    };
     let (name, _) = challenge_name(secure(headers));
     let value = SignedCookieJar::from_headers(headers, state.oidc.key().clone())
-        .get(name)?
+        .get(name)
+        .ok_or_else(expired)?
         .value()
         .to_string();
-    let (user, expires) = value.split_once('.')?;
-    let expires: u64 = expires.parse().ok()?;
-    (expires > unix_now()).then_some(())?;
-    user.parse().ok()
+    let mut parts = value.split('.');
+    let (Some(user), Some(expires), Some(kind), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return Err(expired());
+    };
+    let expires: u64 = expires.parse().map_err(|_| expired())?;
+    if expires <= unix_now() || kind != step.as_str() {
+        return Err(expired());
+    }
+    user.parse().map_err(|_| expired())
+}
+
+/// The session of a sign-in that took its last step, with the challenge
+/// cookie used up.
+async fn finish_sign_in(
+    state: &AppState,
+    jar: CookieJar,
+    headers: &HeaderMap,
+    user_id: i64,
+) -> Result<CookieJar, HttpError> {
+    let secure = secure(headers);
+    let jar = create_session(state.db.writer(), jar, user_id, secure).await?;
+    let mut removal = challenge(String::new(), secure);
+    removal.make_removal();
+    Ok(jar.add(removal))
 }
 
 /// The throttle key of a user's codes. Per user, not per address: whoever
@@ -215,13 +297,12 @@ pub struct RecoveryCodes {
     tag = "Auth",
     operation_id = "loginTotp",
     summary = "Sign in: the second step",
-    description = "After `/login` answered `totp_required`: a code from the authenticator app, or a recovery code (used up), sets the session cookie. Needs the cookie that `/login` set, good for five minutes. After five wrong codes for a user within 15 minutes, their codes are refused for a while (429, with a Retry-After header).",
+    description = "After `/login` answered `totp_required` (or single sign-on sent the browser to `/login?step=totp`): a code from the authenticator app, or a recovery code (used up), sets the session cookie. Needs the cookie the first step set, good for five minutes. After five wrong codes for a user within 15 minutes, their codes are refused for a while (429, with a Retry-After header).",
     request_body(content = TotpCode, content_type = "application/json"),
     responses(
         (status = 204, description = "Signed in"),
         (status = 400, description = "Invalid code", body = ErrorBody),
-        (status = 401, description = "No password step, or it expired: sign in again", body = ErrorBody),
-        (status = 403, description = "Password sign-in is turned off (`OIDC_ONLY`)", body = ErrorBody),
+        (status = 401, description = "No first step, or it expired: sign in again", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
         (status = 429, description = "Too many attempts, try again later", body = ErrorBody),
     ),
@@ -232,27 +313,73 @@ async fn login_totp(
     headers: HeaderMap,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
-    if !state.oidc.passwords_allowed() {
-        return Err(HttpError::passwords_off());
-    }
-    let Some(user_id) = challenged_user(&state, &headers) else {
-        return Err(HttpError {
-            status: StatusCode::UNAUTHORIZED,
-            message: "The sign-in expired, sign in again".into(),
-        });
-    };
+    let user_id = challenged_user(&state, &headers, Step::Code)?;
     if let Some(retry_after) = state.throttle.locked_out(&throttle_key(user_id)) {
         return Ok(too_many(retry_after));
     }
     if !use_code(&state, user_id, &body.code).await? {
         return Err(invalid_code());
     }
-    let secure = secure(&headers);
-    let jar = create_session(state.db.writer(), jar, user_id, secure).await?;
-    // The challenge is used up.
-    let mut removal = challenge(String::new(), secure);
-    removal.make_removal();
-    Ok((StatusCode::NO_CONTENT, jar.add(removal)).into_response())
+    let jar = finish_sign_in(&state, jar, &headers, user_id).await?;
+    Ok((StatusCode::NO_CONTENT, jar).into_response())
+}
+
+#[utoipa::path(
+    post,
+    path = "/login/totp/setup",
+    tag = "Auth",
+    operation_id = "loginTotpSetup",
+    summary = "Sign in: set up the authenticator app",
+    description = "With `TOTP_REQUIRED`, after `/login` answered `totp_setup_required` (or single sign-on sent the browser to `/login?step=totp-setup`): a new secret for the app, as `/totp/setup` gives. Starting again replaces it.",
+    responses(
+        (status = 200, description = "The secret", body = TotpSetup),
+        (status = 401, description = "No first step, or it expired: sign in again", body = ErrorBody),
+        (status = 409, description = "Two-factor authentication is already on", body = ErrorBody),
+    ),
+)]
+async fn login_setup(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<TotpSetup>, HttpError> {
+    let user_id = challenged_user(&state, &headers, Step::Enroll)?;
+    let email: String = sqlx::query_scalar("SELECT email FROM users WHERE id = ?1")
+        .bind(user_id)
+        .fetch_optional(state.db.reader())
+        .await?
+        .ok_or_else(HttpError::unauthorized)?;
+    Ok(Json(start_setup(&state, user_id, &email).await?))
+}
+
+#[utoipa::path(
+    post,
+    path = "/login/totp/enable",
+    tag = "Auth",
+    operation_id = "loginTotpEnable",
+    summary = "Sign in: turn two-factor authentication on",
+    description = "Confirms the secret of `/login/totp/setup` with a code from the app, sets the session cookie, and answers the recovery codes, shown this once.",
+    request_body(content = TotpCode, content_type = "application/json"),
+    responses(
+        (status = 200, description = "On, and signed in", body = RecoveryCodes),
+        (status = 400, description = "Invalid code, or no setup started", body = ErrorBody),
+        (status = 401, description = "No first step, or it expired: sign in again", body = ErrorBody),
+        (status = 409, description = "Two-factor authentication is already on", body = ErrorBody),
+        (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
+        (status = 429, description = "Too many attempts, try again later", body = ErrorBody),
+    ),
+)]
+async fn login_enable(
+    State(state): State<AppState>,
+    jar: CookieJar,
+    headers: HeaderMap,
+    ApiJson(body): ApiJson<TotpCode>,
+) -> Result<Response, HttpError> {
+    let user_id = challenged_user(&state, &headers, Step::Enroll)?;
+    if let Some(retry_after) = state.throttle.locked_out(&throttle_key(user_id)) {
+        return Ok(too_many(retry_after));
+    }
+    let codes = confirm_setup(&state, user_id, &body.code).await?;
+    let jar = finish_sign_in(&state, jar, &headers, user_id).await?;
+    Ok((jar, Json(RecoveryCodes { codes })).into_response())
 }
 
 #[utoipa::path(
@@ -273,20 +400,25 @@ async fn setup(
     State(state): State<AppState>,
     SessionUser(user): SessionUser,
 ) -> Result<Json<TotpSetup>, HttpError> {
+    Ok(Json(start_setup(&state, user.id, &user.email).await?))
+}
+
+/// A new pending secret for a user who has two-factor authentication off.
+async fn start_setup(state: &AppState, user_id: i64, email: &str) -> Result<TotpSetup, HttpError> {
     let secret = totp::new_secret();
     let updated =
         sqlx::query("UPDATE users SET totp_pending = ?1 WHERE id = ?2 AND totp_secret IS NULL")
             .bind(&secret)
-            .bind(user.id)
+            .bind(user_id)
             .execute(state.db.writer())
             .await?
             .rows_affected();
     if updated == 0 {
         return Err(already_on());
     }
-    let uri = totp::uri(&secret, &user.email)
+    let uri = totp::uri(&secret, email)
         .ok_or_else(|| HttpError::internal("Cannot make the authenticator URI"))?;
-    Ok(Json(TotpSetup { uri, secret }))
+    Ok(TotpSetup { uri, secret })
 }
 
 fn already_on() -> HttpError {
@@ -319,14 +451,26 @@ async fn enable(
     SessionUser(user): SessionUser,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
-    let key = throttle_key(user.id);
-    if let Some(retry_after) = state.throttle.locked_out(&key) {
+    if let Some(retry_after) = state.throttle.locked_out(&throttle_key(user.id)) {
         return Ok(too_many(retry_after));
     }
+    let codes = confirm_setup(&state, user.id, &body.code).await?;
+    Ok(Json(RecoveryCodes { codes }).into_response())
+}
+
+/// Turn two-factor authentication on with the pending secret, confirmed by
+/// a code of it: the new recovery codes. A wrong code counts towards the
+/// user's throttle.
+async fn confirm_setup(
+    state: &AppState,
+    user_id: i64,
+    code: &str,
+) -> Result<Vec<String>, HttpError> {
+    let key = throttle_key(user_id);
     let mut tx = state.db.writer().begin().await?;
     let (secret, pending): (Option<String>, Option<String>) =
         sqlx::query_as("SELECT totp_secret, totp_pending FROM users WHERE id = ?1")
-            .bind(user.id)
+            .bind(user_id)
             .fetch_one(&mut *tx)
             .await?;
     if secret.is_some() {
@@ -335,7 +479,7 @@ async fn enable(
     let Some(pending) = pending else {
         return Err(HttpError::bad_request("Start the setup first"));
     };
-    let Some(step) = totp::verify(&pending, &body.code, totp::current_step(), 0) else {
+    let Some(step) = totp::verify(&pending, code, totp::current_step(), 0) else {
         state.throttle.record_failure(&key);
         return Err(invalid_code());
     };
@@ -344,13 +488,13 @@ async fn enable(
          WHERE id = ?2",
     )
     .bind(step as i64)
-    .bind(user.id)
+    .bind(user_id)
     .execute(&mut *tx)
     .await?;
-    let codes = new_recovery_codes(&mut tx, user.id).await?;
+    let codes = new_recovery_codes(&mut tx, user_id).await?;
     tx.commit().await?;
     state.throttle.clear(&key);
-    Ok(Json(RecoveryCodes { codes }).into_response())
+    Ok(codes)
 }
 
 #[utoipa::path(
@@ -359,12 +503,13 @@ async fn enable(
     tag = "Account",
     operation_id = "disableTotp",
     summary = "Turn two-factor authentication off",
-    description = "Needs a code from the app, or a recovery code. The recovery codes are deleted.",
+    description = "Needs a code from the app, or a recovery code. The recovery codes are deleted. Refused while `TOTP_REQUIRED` is set.",
     request_body(content = TotpCode, content_type = "application/json"),
     responses(
         (status = 204, description = "Off"),
         (status = 400, description = "Invalid code, or two-factor authentication is off", body = ErrorBody),
         (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 403, description = "Two-factor authentication is required (`TOTP_REQUIRED`)", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
         (status = 429, description = "Too many attempts, try again later", body = ErrorBody),
     ),
@@ -375,6 +520,12 @@ async fn disable(
     SessionUser(user): SessionUser,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
+    if state.totp_required {
+        return Err(HttpError {
+            status: StatusCode::FORBIDDEN,
+            message: "Two-factor authentication is required here".into(),
+        });
+    }
     if let Some(retry_after) = state.throttle.locked_out(&throttle_key(user.id)) {
         return Ok(too_many(retry_after));
     }

@@ -172,7 +172,7 @@ impl Env {
 }
 
 /// A yes or no environment variable.
-fn flag(value: &str) -> Option<bool> {
+pub fn flag(value: &str) -> Option<bool> {
     match value.to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Some(true),
         "0" | "false" | "no" | "off" => Some(false),

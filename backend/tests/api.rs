@@ -19,6 +19,11 @@ async fn spawn_app() -> TestApp {
 
 /// The app, with OIDC_* environment variables as given.
 async fn spawn_app_with(oidc_env: oidc::Env) -> TestApp {
+    spawn_app_full(oidc_env, false).await
+}
+
+/// The app, with OIDC_* environment variables and TOTP_REQUIRED as given.
+async fn spawn_app_full(oidc_env: oidc::Env, totp_required: bool) -> TestApp {
     potoo::install_tls_provider();
     let db = db::open(":memory:").await;
     let state = AppState {
@@ -28,6 +33,7 @@ async fn spawn_app_with(oidc_env: oidc::Env) -> TestApp {
         geo: Arc::new(geo::Geo::open("/nonexistent/country.mmdb", geo::Source::Disabled).await),
         trust_proxy: true,
         throttle: Arc::new(auth::LoginThrottle::default()),
+        totp_required,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -2225,7 +2231,10 @@ async fn two_factor_authentication() {
     assert_eq!(response.status(), 200);
     assert_eq!(set_cookie(&response, auth::COOKIE), None);
     let challenge = set_cookie(&response, "potoo_2fa").expect("the challenge cookie");
-    assert_eq!(json(response).await, json!({ "totp_required": true }));
+    assert_eq!(
+        json(response).await,
+        json!({ "totp_required": true, "totp_setup_required": false })
+    );
 
     // No challenge, or a forged one: sign in again.
     assert_eq!(
@@ -2389,7 +2398,8 @@ async fn single_sign_on_only_refuses_passwords() {
     let response = password_login(&app, "admin@example.com").await;
     assert_eq!(response.status(), 403);
     assert_eq!(set_cookie(&response, auth::COOKIE), None);
-    assert_eq!(second_step(&app, None, "123456").await.status(), 403);
+    // The code step is for single sign-on too: without its cookie, a 401.
+    assert_eq!(second_step(&app, None, "123456").await.status(), 401);
 
     // Passwords cannot be set; users are made without one.
     let body = json!({ "new_password": "another horse battery", "current_password": "correct horse battery" });
@@ -2630,4 +2640,147 @@ async fn api_keys_are_capped_by_their_scope() {
             .status(),
         401
     );
+}
+
+/// A single sign-on login that stops at a step: where it sent the browser,
+/// and the challenge cookie.
+async fn sso_step(app: &TestApp, provider: &provider::Provider, email: &str) -> (String, String) {
+    let login = start_login(app).await;
+    let code = provider.code_for(provider::Claims::new(provider, email, email, &login.nonce));
+    let response = callback(
+        app,
+        &format!("code={code}&state={}", login.state),
+        Some(&login.cookie),
+    )
+    .await;
+    assert_eq!(response.status(), 303);
+    assert_eq!(set_cookie(&response, auth::COOKIE), None);
+    let challenge = set_cookie(&response, "potoo_2fa").expect("the challenge cookie");
+    (location(&response), challenge)
+}
+
+#[tokio::test]
+async fn single_sign_on_asks_for_the_code_too() {
+    let app = spawn_app().await;
+    let admin = admin_session(&app).await;
+    let provider = provider::spawn().await;
+    configure(&app, &admin, &provider, json!({})).await;
+    let secret = enable(&app, &admin).await;
+
+    let (page, challenge) = sso_step(&app, &provider, "admin@example.com").await;
+    assert_eq!(page, "/login?step=totp");
+    // Not the enrolment step: that is for a user without the app.
+    let response = request(
+        &app,
+        Method::POST,
+        "/api/auth/login/totp/setup",
+        Some(&challenge),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), 401);
+    let response = second_step(&app, Some(&challenge), &totp_code(&secret, 1)).await;
+    assert_eq!(response.status(), 204);
+    let session = set_cookie(&response, auth::COOKIE).expect("the session cookie");
+    assert_eq!(
+        session_of(&app, Some(&session)).await["user"]["email"],
+        json!("admin@example.com")
+    );
+}
+
+#[tokio::test]
+async fn totp_required_makes_everyone_set_it_up() {
+    let provider = provider::spawn().await;
+    let app = spawn_app_full(
+        oidc::Env {
+            issuer: Some(provider.issuer.clone()),
+            client_id: Some(provider::CLIENT_ID.into()),
+            ..oidc::Env::default()
+        },
+        true,
+    )
+    .await;
+    // The session /setup made is not touched.
+    let admin = admin_session(&app).await;
+    assert_eq!(session_of(&app, None).await["totp_required"], json!(true));
+
+    // The password leads to setting the app up, not to a session.
+    let response = password_login(&app, "admin@example.com").await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(set_cookie(&response, auth::COOKIE), None);
+    let challenge = set_cookie(&response, "potoo_2fa").unwrap();
+    assert_eq!(
+        json(response).await,
+        json!({ "totp_required": false, "totp_setup_required": true })
+    );
+    // Not the code step: there is no app yet.
+    assert_eq!(
+        second_step(&app, Some(&challenge), "123456").await.status(),
+        401
+    );
+    let enroll = |path: &'static str, body: Option<Value>| {
+        request(&app, Method::POST, path, Some(&challenge), body)
+    };
+    let response = enroll(
+        "/api/auth/login/totp/enable",
+        Some(json!({ "code": "123456" })),
+    )
+    .await;
+    assert_eq!(response.status(), 400);
+    let setup = json(enroll("/api/auth/login/totp/setup", None).await).await;
+    let secret = setup["secret"].as_str().unwrap().to_string();
+    let body = json!({ "code": totp_code(&secret, 0) });
+    let response = enroll("/api/auth/login/totp/enable", Some(body)).await;
+    assert_eq!(response.status(), 200);
+    let session = set_cookie(&response, auth::COOKIE).expect("the session cookie");
+    assert_eq!(json(response).await["codes"].as_array().unwrap().len(), 10);
+    assert_eq!(
+        session_of(&app, Some(&session)).await["user"]["totp_enabled"],
+        json!(true)
+    );
+    // It cannot be turned off.
+    let body = json!({ "code": totp_code(&secret, 1) });
+    assert_eq!(
+        post(&app, "/api/auth/totp/disable", &admin, Some(body))
+            .await
+            .status(),
+        403
+    );
+
+    // Single sign-on: a new user sets it up too; after an admin's reset,
+    // they set it up again.
+    let body = json!({ "email": "b@example.com" });
+    assert_eq!(
+        post(&app, "/api/auth/users", &admin, Some(body))
+            .await
+            .status(),
+        201
+    );
+    let (page, challenge) = sso_step(&app, &provider, "b@example.com").await;
+    assert_eq!(page, "/login?step=totp-setup");
+    let response = request(
+        &app,
+        Method::POST,
+        "/api/auth/login/totp/setup",
+        Some(&challenge),
+        None,
+    )
+    .await;
+    let secret = json(response).await["secret"].as_str().unwrap().to_string();
+    let response = request(
+        &app,
+        Method::POST,
+        "/api/auth/login/totp/enable",
+        Some(&challenge),
+        Some(json!({ "code": totp_code(&secret, 0) })),
+    )
+    .await;
+    assert_eq!(response.status(), 200);
+    let (page, _) = sso_step(&app, &provider, "b@example.com").await;
+    assert_eq!(page, "/login?step=totp");
+    let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
+    let id = users[1]["id"].as_i64().unwrap();
+    assert_eq!(reset_totp(&app, &admin, id).await.status(), 204);
+    let (page, _) = sso_step(&app, &provider, "b@example.com").await;
+    assert_eq!(page, "/login?step=totp-setup");
 }

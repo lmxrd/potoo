@@ -21,8 +21,7 @@ export const Route = createFileRoute("/settings")({ component: Settings });
 function Settings() {
   const { session } = Route.useRouteContext();
   const user = session.user!;
-  // With single sign-on only, there are no passwords, and so no second
-  // factor for them either.
+  // With single sign-on only, there are no passwords.
   const passwords = session.password_login;
   return (
     <div className="max-w-sm space-y-6">
@@ -56,11 +55,9 @@ function Settings() {
           <ChangePassword hasPassword={user.has_password} />
         </Card>
       )}
-      {(passwords || user.totp_enabled) && (
-        <Card title="Two-factor authentication">
-          <TotpSettings enabled={user.totp_enabled} />
-        </Card>
-      )}
+      <Card title="Two-factor authentication">
+        <TotpSettings enabled={user.totp_enabled} required={session.totp_required} />
+      </Card>
       <Card title="API keys">
         <ApiKeys isAdmin={user.is_admin} dateFormat={user.date_format} />
       </Card>

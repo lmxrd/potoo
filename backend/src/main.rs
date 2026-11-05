@@ -43,6 +43,14 @@ async fn main() {
         // Single sign-on: the stored settings, with the OIDC_* environment
         // variables on top.
         oidc: Arc::new(potoo::oidc::Oidc::load(&db, potoo::oidc::Env::from_env()).await),
+        totp_required: std::env::var("TOTP_REQUIRED")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .is_some_and(|v| {
+                potoo::oidc::flag(&v).unwrap_or_else(|| {
+                    panic!("TOTP_REQUIRED must be 1 or 0 (true/false, yes/no, on/off), not {v}")
+                })
+            }),
     };
 
     // With OIDC_ONLY and no provider, nobody can sign in (but the first

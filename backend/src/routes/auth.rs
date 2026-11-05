@@ -4,7 +4,7 @@ use crate::auth::{
 };
 use crate::error::{ErrorBody, HttpError};
 use crate::extract::ApiJson;
-use crate::routes::totp::challenge_cookie;
+use crate::routes::totp::{Step, challenge_cookie, next_step};
 use crate::state::AppState;
 use crate::visitor::client_ip;
 use axum::Json;
@@ -229,6 +229,9 @@ pub struct Session {
     /// False when single sign-on is the only way in (`OIDC_ONLY`): the
     /// login page offers no password, and passwords cannot be set.
     pub password_login: bool,
+    /// Whether every user must have two-factor authentication on
+    /// (`TOTP_REQUIRED`): it cannot be turned off.
+    pub totp_required: bool,
 }
 
 /// How the login page offers single sign-on.
@@ -345,6 +348,7 @@ async fn session(
         user,
         oidc,
         password_login: state.oidc.passwords_allowed(),
+        totp_required: state.totp_required,
     }))
 }
 
@@ -410,10 +414,10 @@ async fn setup(
     tag = "Auth",
     operation_id = "login",
     summary = "Sign in",
-    description = "Sets the session cookie. For a user with two-factor authentication on it answers `totp_required` instead, with a cookie good for five minutes: `/login/totp` with a code finishes the sign-in. After five failed attempts for one IP and email within 15 minutes the pair is locked out (429, with a Retry-After header).",
+    description = "Sets the session cookie. For a user with two-factor authentication on it answers `totp_required` instead, with a cookie good for five minutes: `/login/totp` with a code finishes the sign-in. With `TOTP_REQUIRED`, a user without it gets `totp_setup_required`: `/login/totp/setup` and `/login/totp/enable` set the app up and finish the sign-in. After five failed attempts for one IP and email within 15 minutes the pair is locked out (429, with a Retry-After header).",
     request_body(content = Credentials, content_type = "application/json"),
     responses(
-        (status = 200, description = "The password is right; a code is needed next", body = TotpRequired),
+        (status = 200, description = "The password is right; two-factor authentication is next", body = LoginStep),
         (status = 204, description = "Signed in"),
         (status = 401, description = "Not signed in", body = ErrorBody),
         (status = 403, description = "Password sign-in is turned off (`OIDC_ONLY`)", body = ErrorBody),
@@ -455,17 +459,16 @@ async fn login(
             .into_response());
     }
 
-    let stored: Option<(i64, Option<String>, bool)> = sqlx::query_as(
-        "SELECT id, password_hash, totp_secret IS NOT NULL FROM users WHERE email = ?1",
-    )
-    .bind(&email)
-    .fetch_optional(state.db.reader())
-    .await?;
+    let stored: Option<(i64, Option<String>)> =
+        sqlx::query_as("SELECT id, password_hash FROM users WHERE email = ?1")
+            .bind(&email)
+            .fetch_optional(state.db.reader())
+            .await?;
     // Same work and same response whether or not the user exists, or has
     // a password.
-    let (id, stored, totp) = match stored {
-        Some((id, Some(hash), totp)) => (id, hash, totp),
-        _ => (0, dummy_hash().to_string(), false),
+    let (id, stored) = match stored {
+        Some((id, Some(hash))) => (id, hash),
+        _ => (0, dummy_hash().to_string()),
     };
     if !verify_password(&creds.password, &stored) || id == 0 {
         state.throttle.record_failure(&key);
@@ -475,11 +478,12 @@ async fn login(
         });
     }
     state.throttle.clear(&key);
-    if totp {
+    if let Some(step) = next_step(state.db.reader(), &state, id).await? {
         return Ok((
-            challenge_cookie(&state, id, secure(&headers)),
-            Json(TotpRequired {
-                totp_required: true,
+            challenge_cookie(&state, id, step, secure(&headers)),
+            Json(LoginStep {
+                totp_required: step == Step::Code,
+                totp_setup_required: step == Step::Enroll,
             }),
         )
             .into_response());
@@ -488,12 +492,15 @@ async fn login(
     Ok((StatusCode::NO_CONTENT, jar).into_response())
 }
 
-/// The password was right, and a code from the authenticator app is the
-/// next step (`/login/totp`).
+/// The password was right, and two-factor authentication is the next step.
+/// Exactly one of the two is true.
 #[derive(Serialize, ToSchema)]
-pub struct TotpRequired {
-    /// Always true.
+pub struct LoginStep {
+    /// A code from the authenticator app is next (`/login/totp`).
     pub totp_required: bool,
+    /// Setting the app up is next (`TOTP_REQUIRED`): `/login/totp/setup`,
+    /// then `/login/totp/enable`.
+    pub totp_setup_required: bool,
 }
 
 #[utoipa::path(

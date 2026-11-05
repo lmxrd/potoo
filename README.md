@@ -41,8 +41,8 @@ identity, and you keep your data.
   Authelia, Google, ...), next to passwords; set up in the admin settings or
   with environment variables.
 - **API keys** per user, read, read & write or admin, for scripts.
-- **Two-factor authentication** for password sign-ins, with any authenticator
-  app (TOTP) and single-use recovery codes.
+- **Two-factor authentication** with any authenticator app (TOTP) and
+  single-use recovery codes, optionally required for everyone.
 
 ![A site's page: its snippet and settings](docs/screenshots/site.png)
 
@@ -242,6 +242,7 @@ are not checked for duplicates.
 | `OIDC_REDIRECT_URL`  | unset               | Single sign-on: the callback URL, when the one Potoo works out from the request is not right (`https://…/api/auth/oidc/callback`)           |
 | `OIDC_AUTO_CREATE`   | `0`                 | Single sign-on: `1` (or `true`, `yes`, `on`) creates a regular user for a verified email that has no account; `0` (`false`, `no`, `off`) does not. Any other value stops Potoo at start |
 | `OIDC_ONLY`          | `0`                 | Single sign-on: `1` (or `true`, `yes`, `on`) makes single sign-on the only way in: no password signs in and none can be set. The first admin is still created with a password on `/setup`, then signs in through the provider (matched by their verified email). Any other value stops Potoo at start |
+| `TOTP_REQUIRED`      | `0`                 | `1` (or `true`, `yes`, `on`) makes two-factor authentication required: a user without it sets up an authenticator app at their next sign-in (password or single sign-on), and nobody can turn it off. Sessions made before are kept. Any other value stops Potoo at start |
 
 This site or product includes IP data from db-ip.com, licensed under CC BY 4.0.
 
@@ -299,17 +300,21 @@ cannot sign in through it yet.
 
 Each user can turn it on in **Settings**: scan the QR code with an
 authenticator app (or type the key), confirm with a code, and keep the ten
-recovery codes it shows once. From then on, signing in with a password also
-asks for a code from the app, or a recovery code (each works once). A code is
+recovery codes it shows once. From then on, signing in (with a password or
+with single sign-on) also asks for a code from the app, or a recovery code
+(each works once). A code is
 accepted for 30 seconds either side of its own, and only once. After five
 wrong codes within 15 minutes, the user's codes are refused for a while.
 
 Turning it off, or making new recovery codes, needs a code. An admin can turn
 it off for a user who lost both their app and their recovery codes (**Reset
-2FA** in the admin settings), not for themselves. Single sign-on asks for no
-code: that is the provider's job. The second step must follow the password
-within five minutes, in the same browser; a restart of Potoo makes it start
-over.
+2FA** in the admin settings), not for themselves. The second step must
+follow the first within five minutes, in the same browser; a restart of Potoo
+makes it start over.
+
+With `TOTP_REQUIRED=1`, a user who has not set it up does so at their next
+sign-in, before they get in, and it cannot be turned off; after an admin's
+reset, they set it up again at their next sign-in.
 
 ### API keys
 

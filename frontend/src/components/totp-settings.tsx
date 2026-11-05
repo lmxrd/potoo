@@ -20,7 +20,7 @@ import { errorMessage } from "../lib/api";
  * the recovery codes; later, new recovery codes or turning it off, each with
  * a code.
  */
-export function TotpSettings({ enabled }: { enabled: boolean }) {
+export function TotpSettings({ enabled, required }: { enabled: boolean; required: boolean }) {
   const router = useRouter();
   const [setup, setSetup] = useState<TotpSetup>();
   const [codes, setCodes] = useState<string[]>();
@@ -40,25 +40,7 @@ export function TotpSettings({ enabled }: { enabled: boolean }) {
     }
   };
 
-  if (codes) {
-    return (
-      <div className="space-y-3">
-        <p className="text-sm">
-          Your recovery codes. Each one signs you in once without the app. Keep them somewhere safe:
-          they are not shown again.
-        </p>
-        <ul className="grid grid-cols-2 gap-1 rounded border border-line bg-subtle p-3 font-mono text-sm">
-          {codes.map((c) => (
-            <li key={c}>{c}</li>
-          ))}
-        </ul>
-        <div className="flex gap-2">
-          <Button onClick={() => navigator.clipboard.writeText(codes.join("\n"))}>Copy</Button>
-          <Button onClick={() => setCodes(undefined)}>Done</Button>
-        </div>
-      </div>
-    );
-  }
+  if (codes) return <RecoveryCodeList codes={codes} onDone={() => setCodes(undefined)} />;
 
   const codeInput = (
     <Input
@@ -77,7 +59,9 @@ export function TotpSettings({ enabled }: { enabled: boolean }) {
           On: a code from your authenticator app is asked for at sign-in.
         </p>
         <p className="text-xs text-muted">
-          A code from the app, or a recovery code, to make new recovery codes or to turn it off.
+          {required
+            ? "A code from the app, or a recovery code, to make new recovery codes. It is required here: it cannot be turned off."
+            : "A code from the app, or a recovery code, to make new recovery codes or to turn it off."}
         </p>
         {codeInput}
         <ErrorText>{error}</ErrorText>
@@ -95,20 +79,22 @@ export function TotpSettings({ enabled }: { enabled: boolean }) {
           >
             New recovery codes
           </Button>
-          <Button
-            type="submit"
-            variant="danger"
-            onClick={() =>
-              code &&
-              run(async () => {
-                await disable.mutateAsync({ body: { code } });
-                setCode("");
-                await router.invalidate();
-              })
-            }
-          >
-            Turn off
-          </Button>
+          {!required && (
+            <Button
+              type="submit"
+              variant="danger"
+              onClick={() =>
+                code &&
+                run(async () => {
+                  await disable.mutateAsync({ body: { code } });
+                  setCode("");
+                  await router.invalidate();
+                })
+              }
+            >
+              Turn off
+            </Button>
+          )}
         </div>
       </form>
     );
@@ -129,17 +115,7 @@ export function TotpSettings({ enabled }: { enabled: boolean }) {
           });
         }}
       >
-        <p className="text-sm">
-          Scan this with your authenticator app, then enter the code it shows.
-        </p>
-        {/* Dark on white whatever the theme: what the scanners read best. */}
-        <div className="self-start rounded bg-white p-3">
-          <QRCodeSVG value={setup.uri} size={176} />
-        </div>
-        <p className="text-xs text-muted">
-          Or type this key:{" "}
-          <code className="break-all font-mono text-soft-ink">{setup.secret}</code>
-        </p>
+        <QrCode setup={setup} />
         {codeInput}
         <ErrorText>{error}</ErrorText>
         <div className="flex gap-2">
@@ -155,11 +131,57 @@ export function TotpSettings({ enabled }: { enabled: boolean }) {
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted">
-        Off. With it on, signing in with your password also asks for a code from an authenticator
-        app. (Single sign-on leaves this to your provider.)
+        Off. With it on, signing in also asks for a code from an authenticator app.
       </p>
       <ErrorText>{error}</ErrorText>
       <Button onClick={() => run(async () => setSetup(await start.mutateAsync({})))}>Set up</Button>
+    </div>
+  );
+}
+
+/** The QR code of a new secret, and the key to type instead. */
+export function QrCode({ setup }: { setup: TotpSetup }) {
+  return (
+    <>
+      <p className="text-sm">
+        Scan this with your authenticator app, then enter the code it shows.
+      </p>
+      {/* Dark on white whatever the theme: what the scanners read best. */}
+      <div className="self-start rounded bg-white p-3">
+        <QRCodeSVG value={setup.uri} size={176} />
+      </div>
+      <p className="text-xs text-muted">
+        Or type this key: <code className="break-all font-mono text-soft-ink">{setup.secret}</code>
+      </p>
+    </>
+  );
+}
+
+/** New recovery codes, shown once. */
+export function RecoveryCodeList({
+  codes,
+  onDone,
+  done = "Done",
+}: {
+  codes: string[];
+  onDone: () => void;
+  done?: string;
+}) {
+  return (
+    <div className="space-y-3">
+      <p className="text-sm">
+        Your recovery codes. Each one signs you in once without the app. Keep them somewhere safe:
+        they are not shown again.
+      </p>
+      <ul className="grid grid-cols-2 gap-1 rounded border border-line bg-subtle p-3 font-mono text-sm">
+        {codes.map((c) => (
+          <li key={c}>{c}</li>
+        ))}
+      </ul>
+      <div className="flex gap-2">
+        <Button onClick={() => navigator.clipboard.writeText(codes.join("\n"))}>Copy</Button>
+        <Button onClick={onDone}>{done}</Button>
+      </div>
     </div>
   );
 }

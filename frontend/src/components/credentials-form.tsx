@@ -17,8 +17,8 @@ export function CredentialsForm({
   submit: string;
   onSubmit?: () => void;
   onDone: () => void;
-  /** The password was right, and a code from the authenticator app is next. */
-  onTotp?: () => void;
+  /** The password was right, and two-factor authentication is next. */
+  onTotp?: (step: "totp" | "totp-setup") => void;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -35,7 +35,8 @@ export function CredentialsForm({
         try {
           if (kind === "login") {
             const result = await login.mutateAsync({ body: { email, password } });
-            if (result?.totp_required) return onTotp?.();
+            if (result?.totp_required) return onTotp?.("totp");
+            if (result?.totp_setup_required) return onTotp?.("totp-setup");
           } else {
             await setup.mutateAsync({ body: { email, password } });
           }

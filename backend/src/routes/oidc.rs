@@ -11,6 +11,7 @@ use crate::error::{ErrorBody, HttpError};
 use crate::extract::ApiJson;
 use crate::oidc::{CALLBACK_PATH, Failure, Identity, LOGIN_COOKIE, LOGIN_TTL, Settings};
 use crate::routes::auth::{AuthUser, require_admin, secure, validate_email};
+use crate::routes::totp::{Step, challenge_cookie, next_step};
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Query, State};
@@ -120,7 +121,7 @@ pub struct CallbackParams {
     tag = "Auth",
     operation_id = "oidcCallback",
     summary = "The provider's callback",
-    description = "Where the provider sends the browser back. Signs the user in (the session cookie is set) and redirects to `/`, or redirects to `/login?error=<code>`: `unavailable` (also before the first admin is set up), `state`, `provider`, `token`, `email`, `unknown_user` or `linked` (the user with that email is linked to another account at the provider).",
+    description = "Where the provider sends the browser back. Signs the user in (the session cookie is set) and redirects to `/`; or, for two-factor authentication first, sets the short-lived challenge cookie and redirects to `/login?step=totp` (a code) or `/login?step=totp-setup` (setting the app up, with `TOTP_REQUIRED`); or redirects to `/login?error=<code>`: `unavailable` (also before the first admin is set up), `state`, `provider`, `token`, `email`, `unknown_user` or `linked` (the user with that email is linked to another account at the provider).",
     params(CallbackParams),
     responses(
         (status = 303, description = "Signed in, to `/`; or back to the login page"),
@@ -151,7 +152,10 @@ async fn callback(
         CookieJar::new()
     };
     match sign_in(&state, jar, &headers, params, login).await {
-        Ok(Ok(jar)) => (logins, jar, Redirect::to("/")).into_response(),
+        Ok(Ok(SignedIn::Session(jar))) => (logins, jar, Redirect::to("/")).into_response(),
+        Ok(Ok(SignedIn::Step(challenge, step))) => {
+            (logins, challenge, Redirect::to(step.page())).into_response()
+        }
         Ok(Err(failure)) => (logins, failed(failure)).into_response(),
         Err(error) => (logins, error).into_response(),
     }
@@ -165,7 +169,7 @@ async fn sign_in(
     headers: &HeaderMap,
     params: CallbackParams,
     login: Option<String>,
-) -> Result<Result<CookieJar, Failure>, HttpError> {
+) -> Result<Result<SignedIn, Failure>, HttpError> {
     let Some(login_state) = params.state else {
         return Ok(Err(Failure::State));
     };
@@ -186,9 +190,25 @@ async fn sign_in(
         Ok(id) => id,
         Err(failure) => return Ok(Err(failure)),
     };
+    // Two-factor authentication is asked for after single sign-on too: the
+    // login page takes the step, with the challenge cookie.
+    if let Some(step) = next_step(&mut *tx, state, user_id).await? {
+        tx.commit().await?;
+        return Ok(Ok(SignedIn::Step(
+            challenge_cookie(state, user_id, step, secure(headers)),
+            step,
+        )));
+    }
     let jar = create_session(&mut *tx, jar, user_id, secure(headers)).await?;
     tx.commit().await?;
-    Ok(Ok(jar))
+    Ok(Ok(SignedIn::Session(jar)))
+}
+
+/// What a callback that proved who the user is leads to.
+enum SignedIn {
+    Session(CookieJar),
+    /// Two-factor authentication first, on the login page.
+    Step(SignedCookieJar, Step),
 }
 
 /// The user a provider account signs in as, linking or creating them.

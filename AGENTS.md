@@ -99,7 +99,8 @@ verified, and not to a user linked to another account at that provider.
 403 (`HttpError::passwords_off`: login, its second step, setting or resetting
 a password, a user created with one) but `/setup`; the session's
 `password_login` tells the frontend. Forwarded headers count for the callback URL only with `TRUST_PROXY`. The
-callback never redirects anywhere but `/` and `/login?error=<code>`, and
+callback never redirects anywhere but `/`, `/login?step=<step>` and
+`/login?error=<code>`, and
 always clears the login cookie (even one it did not sign), with the
 attributes it was set with: a browser ignores a `__Host-` removal without
 `Secure`. The tests in `tests/api.rs` run a stand-in provider
@@ -110,11 +111,15 @@ that signs real ID tokens with the keys in `tests/fixtures/` (test only).
 `totp_pending` (a setup not yet confirmed) and `totp_last_step` (a code
 works once: a step is accepted only when it is later, set with a
 conditional UPDATE); recovery codes are SHA-256 hashes in `recovery_codes`,
-deleted when used. A password login of a user with it on answers 200
-`totp_required` and the signed `potoo_2fa` cookie (`__Host-` over https,
-`<user id>.<expiry>`, five minutes, the `oidc.key()`) instead of a session;
-`/login/totp` finishes it. Wrong codes count in `state.throttle` per user
-(`totp|<id>`), not per address. Single sign-on skips it.
+deleted when used. A sign-in (password, or the single sign-on callback)
+of a user with it on gets no session but the signed `potoo_2fa` cookie
+(`__Host-` over https, `<user id>.<expiry>.<step>`, five minutes, the
+`oidc.key()`): the password answers 200 `LoginStep`, the callback redirects
+to `/login?step=totp`; `/login/totp` finishes it. With `TOTP_REQUIRED`
+(`state.totp_required`) a user without it gets the `enroll` step instead
+(`/login?step=totp-setup`, `/login/totp/setup`, `/login/totp/enable`), and
+`/totp/disable` is refused. `next_step` decides, for both paths. Wrong codes count in `state.throttle` per user
+(`totp|<id>`), not per address.
 
 **API keys** (`routes/api_keys.rs`, `key_user` in `auth.rs`): `api_keys`
 holds the SHA-256 of `potoo_<64 hex>` and its scope (`read`/`write`/

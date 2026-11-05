@@ -13,4 +13,7 @@ pub struct AppState {
     pub trust_proxy: bool,
     pub throttle: Arc<LoginThrottle>,
     pub oidc: Arc<Oidc>,
+    /// `TOTP_REQUIRED`: every user must have two-factor authentication on;
+    /// one without it sets it up at their next sign-in.
+    pub totp_required: bool,
 }
