@@ -13,6 +13,7 @@ pub mod profile;
 pub mod routes;
 pub mod state;
 pub mod stats;
+pub mod totp;
 pub mod tracker;
 pub mod util;
 pub mod visitor;

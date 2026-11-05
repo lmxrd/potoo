@@ -102,6 +102,17 @@ attributes it was set with: a browser ignores a `__Host-` removal without
 `Secure`. The tests in `tests/api.rs` run a stand-in provider
 that signs real ID tokens with the keys in `tests/fixtures/` (test only).
 
+**Two-factor authentication** (`totp.rs` on top of `totp-rs`,
+`routes/totp.rs`): `users.totp_secret` (base32, NULL = off),
+`totp_pending` (a setup not yet confirmed) and `totp_last_step` (a code
+works once: a step is accepted only when it is later, set with a
+conditional UPDATE); recovery codes are SHA-256 hashes in `recovery_codes`,
+deleted when used. A password login of a user with it on answers 200
+`totp_required` and the signed `potoo_2fa` cookie (`__Host-` over https,
+`<user id>.<expiry>`, five minutes, the `oidc.key()`) instead of a session;
+`/login/totp` finishes it. Wrong codes count in `state.throttle` per user
+(`totp|<id>`), not per address. Single sign-on skips it.
+
 **Tests run on an in-memory database**, where the reader and the writer
 pools are one and the same single connection. Two consequences: a write
 made through `db.reader()` (read-only on a real file) passes the tests but

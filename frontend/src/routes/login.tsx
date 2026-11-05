@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { CredentialsForm } from "../components/credentials-form";
 import { ErrorText } from "../components/error-text";
+import { TotpForm } from "../components/totp-form";
+import { useState } from "react";
 
 export const Route = createFileRoute("/login")({
   // A failed single sign-on comes back here with a code saying why.
@@ -32,6 +34,16 @@ function Login() {
   const { session } = Route.useRouteContext();
   const { error } = Route.useSearch();
   const navigate = Route.useNavigate();
+  // The password was right; a code from the authenticator app is next.
+  const [totp, setTotp] = useState(false);
+  if (totp) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-xl font-semibold">Two-factor authentication</h1>
+        <TotpForm onDone={() => location.assign("/")} onRestart={() => setTotp(false)} />
+      </div>
+    );
+  }
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Sign in</h1>
@@ -54,6 +66,7 @@ function Login() {
         // A password attempt is a new try: the single sign-on error is old.
         onSubmit={() => error && navigate({ search: {}, replace: true })}
         onDone={() => location.assign("/")}
+        onTotp={() => setTotp(true)}
       />
     </div>
   );

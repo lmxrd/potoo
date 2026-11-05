@@ -4,6 +4,7 @@ use crate::auth::{
 };
 use crate::error::{ErrorBody, HttpError};
 use crate::extract::ApiJson;
+use crate::routes::totp::challenge_cookie;
 use crate::state::AppState;
 use crate::visitor::client_ip;
 use axum::Json;
@@ -215,6 +216,8 @@ pub struct UserRow {
     pub has_password: bool,
     /// Whether the user is linked to a single sign-on account.
     pub single_sign_on: bool,
+    /// Whether the user has two-factor authentication on.
+    pub totp_enabled: bool,
 }
 
 async fn has_users(state: &AppState) -> Result<bool, HttpError> {
@@ -326,9 +329,10 @@ async fn setup(
     tag = "Auth",
     operation_id = "login",
     summary = "Sign in",
-    description = "Sets the session cookie. After five failed attempts for one IP and email within 15 minutes the pair is locked out (429, with a Retry-After header).",
+    description = "Sets the session cookie. For a user with two-factor authentication on it answers `totp_required` instead, with a cookie good for five minutes: `/login/totp` with a code finishes the sign-in. After five failed attempts for one IP and email within 15 minutes the pair is locked out (429, with a Retry-After header).",
     request_body(content = Credentials, content_type = "application/json"),
     responses(
+        (status = 200, description = "The password is right; a code is needed next", body = TotpRequired),
         (status = 204, description = "Signed in"),
         (status = 401, description = "Not signed in", body = ErrorBody),
         (status = 429, description = "Too many attempts, try again later", body = ErrorBody),
@@ -366,16 +370,17 @@ async fn login(
             .into_response());
     }
 
-    let stored: Option<(i64, Option<String>)> =
-        sqlx::query_as("SELECT id, password_hash FROM users WHERE email = ?1")
-            .bind(&email)
-            .fetch_optional(state.db.reader())
-            .await?;
+    let stored: Option<(i64, Option<String>, bool)> = sqlx::query_as(
+        "SELECT id, password_hash, totp_secret IS NOT NULL FROM users WHERE email = ?1",
+    )
+    .bind(&email)
+    .fetch_optional(state.db.reader())
+    .await?;
     // Same work and same response whether or not the user exists, or has
     // a password.
-    let (id, stored) = match stored {
-        Some((id, Some(hash))) => (id, hash),
-        _ => (0, dummy_hash().to_string()),
+    let (id, stored, totp) = match stored {
+        Some((id, Some(hash), totp)) => (id, hash, totp),
+        _ => (0, dummy_hash().to_string(), false),
     };
     if !verify_password(&creds.password, &stored) || id == 0 {
         state.throttle.record_failure(&key);
@@ -385,8 +390,25 @@ async fn login(
         });
     }
     state.throttle.clear(&key);
+    if totp {
+        return Ok((
+            challenge_cookie(&state, id, secure(&headers)),
+            Json(TotpRequired {
+                totp_required: true,
+            }),
+        )
+            .into_response());
+    }
     let jar = create_session(state.db.writer(), jar, id, secure(&headers)).await?;
     Ok((StatusCode::NO_CONTENT, jar).into_response())
+}
+
+/// The password was right, and a code from the authenticator app is the
+/// next step (`/login/totp`).
+#[derive(Serialize, ToSchema)]
+pub struct TotpRequired {
+    /// Always true.
+    pub totp_required: bool,
 }
 
 #[utoipa::path(
@@ -590,7 +612,8 @@ async fn list_users(
     let rows: Vec<UserRow> = sqlx::query_as(
         "SELECT id, email, is_admin, created_at, password_hash IS NOT NULL AS has_password,
                     EXISTS (SELECT 1 FROM user_identities i WHERE i.user_id = users.id)
-                      AS single_sign_on
+                      AS single_sign_on,
+                    totp_secret IS NOT NULL AS totp_enabled
              FROM users ORDER BY id",
     )
     .fetch_all(state.db.reader())

@@ -32,6 +32,8 @@ pub struct User {
     /// False for a user who signs in through single sign-on only: they can
     /// set a password without giving a current one.
     pub has_password: bool,
+    /// Whether a code from an authenticator app is asked for at sign-in.
+    pub totp_enabled: bool,
 }
 
 /// Hash a password with argon2id; the PHC string is what gets stored.
@@ -58,7 +60,8 @@ pub async fn current_user<'e>(db: impl SqliteExecutor<'e>, token: Option<&str>) 
     let token = token?;
     sqlx::query_as::<_, User>(
         "SELECT u.id, u.email, u.is_admin, u.date_format, u.use_24, u.theme,
-                u.password_hash IS NOT NULL AS has_password
+                u.password_hash IS NOT NULL AS has_password,
+                u.totp_secret IS NOT NULL AS totp_enabled
          FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = ?1 AND s.expires_at > ?2",
     )

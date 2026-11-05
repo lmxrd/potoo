@@ -12,6 +12,7 @@ pub mod import;
 pub mod oidc;
 pub mod sites;
 pub mod stats;
+pub mod totp;
 
 /// Every /api route, with the JSON 404 for unknown paths. The routes are
 /// registered together with their `#[utoipa::path]` annotations, so the
@@ -23,7 +24,10 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(health))
         .merge(collect::router())
         .nest("/admin", oidc::admin_router())
-        .nest("/auth", auth::router().merge(oidc::router()))
+        .nest(
+            "/auth",
+            auth::router().merge(oidc::router()).merge(totp::router()),
+        )
         .nest("/export", export::router())
         .nest("/import", import::router())
         .nest("/sites", sites::router())

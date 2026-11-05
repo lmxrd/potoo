@@ -8,6 +8,7 @@ import {
   listUsersOptions,
   listUsersQueryKey,
   resetUserPasswordMutation,
+  resetUserTotpMutation,
 } from "../client/@tanstack/react-query.gen";
 import { Button } from "../components/button";
 import { Card } from "../components/card";
@@ -34,6 +35,7 @@ function Users() {
   const changeRole = useMutation(changeUserRoleMutation());
   const deleteUser = useMutation(deleteUserMutation());
   const resetPassword = useMutation(resetUserPasswordMutation());
+  const resetTotp = useMutation(resetUserTotpMutation());
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [admin, setAdmin] = useState(false);
@@ -65,8 +67,26 @@ function Users() {
                     <span className="ml-2 text-xs text-muted">single sign-on</span>
                   )}
                   {!u.has_password && <span className="ml-2 text-xs text-muted">no password</span>}
+                  {u.totp_enabled && <span className="ml-2 text-xs text-muted">2FA</span>}
                 </span>
                 <span className="flex gap-2">
+                  {/* For someone who lost their app and their recovery codes. */}
+                  {u.totp_enabled && u.id !== session.user?.id && (
+                    <Button
+                      onClick={async () => {
+                        if (!confirm(`Turn off two-factor authentication for ${u.email}?`)) return;
+                        try {
+                          await resetTotp.mutateAsync({ path: { id: u.id } });
+                          setRowError(null);
+                          reload();
+                        } catch (err) {
+                          showRowError(u.id, err);
+                        }
+                      }}
+                    >
+                      Reset 2FA
+                    </Button>
+                  )}
                   <Button
                     onClick={() => setReset(reset?.id === u.id ? null : { id: u.id, password: "" })}
                   >

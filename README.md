@@ -40,6 +40,8 @@ identity, and you keep your data.
 - **Single sign-on** with any OpenID Connect provider (Authentik, Keycloak,
   Authelia, Google, ...), next to passwords; set up in the admin settings or
   with environment variables.
+- **Two-factor authentication** for password sign-ins, with any authenticator
+  app (TOTP) and single-use recovery codes.
 
 ![A site's page: its snippet and settings](docs/screenshots/site.png)
 
@@ -282,6 +284,22 @@ started in another tab, makes it fail, and trying again works.
 Some providers (Microsoft Entra, for one) do not say that an email is
 verified. Potoo then can neither match nor create the user, so their users
 cannot sign in through it yet.
+
+### Two-factor authentication
+
+Each user can turn it on in **Settings**: scan the QR code with an
+authenticator app (or type the key), confirm with a code, and keep the ten
+recovery codes it shows once. From then on, signing in with a password also
+asks for a code from the app, or a recovery code (each works once). A code is
+accepted for 30 seconds either side of its own, and only once. After five
+wrong codes within 15 minutes, the user's codes are refused for a while.
+
+Turning it off, or making new recovery codes, needs a code. An admin can turn
+it off for a user who lost both their app and their recovery codes (**Reset
+2FA** in the admin settings), not for themselves. Single sign-on asks for no
+code: that is the provider's job. The second step must follow the password
+within five minutes, in the same browser; a restart of Potoo makes it start
+over.
 
 ### How hits are stored
 

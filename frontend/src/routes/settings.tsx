@@ -5,6 +5,7 @@ import { Button } from "../components/button";
 import { Card } from "../components/card";
 import { ErrorText } from "../components/error-text";
 import { Input } from "../components/input";
+import { TotpSettings } from "../components/totp-settings";
 import {
   changeEmailMutation,
   changePasswordMutation,
@@ -48,6 +49,9 @@ function Settings() {
       </Card>
       <Card title={user.has_password ? "Change password" : "Set a password"}>
         <ChangePassword hasPassword={user.has_password} />
+      </Card>
+      <Card title="Two-factor authentication">
+        <TotpSettings enabled={user.totp_enabled} />
       </Card>
     </div>
   );
