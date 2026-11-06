@@ -130,8 +130,12 @@ not a change we can take. Concretely:
   code in `stats.rs` and `routes/sites.rs`. Add a new time-filtered
   endpoint by reusing them, not by inventing a new syntax.
 - **Keep it simple.** SQLite through sqlx with run-time queries (one
-  writer connection, read-only readers), no ORM, no abstraction layers. If a change needs a new dependency or a
-  new concept, first check whether the naive version is enough.
+  writer connection, read-only readers), no ORM, no abstraction layers.
+- **Prefer a well-known crate to our own code.** When a maintained,
+  widely used crate or npm package solves the problem, use it instead of
+  writing the same thing; propose it in the pull request (or an issue
+  first) with its name, version and why. Write it yourself only when
+  nothing maintained fits, and say why in a comment.
 - **Comment the why, not the what** — the reasoning behind a decision
   is the part the code cannot show.
 

@@ -222,8 +222,15 @@ acceptable.
 
 ## Conventions
 
-- **Simple.** No ORM, no abstraction layers, no new dependency without
-  checking the naive version first. Comment the *why*, not the what.
+- **Simple.** No ORM, no abstraction layers. Comment the *why*, not the
+  what.
+- **Use the community's crates.** When a well-known, maintained crate (or
+  npm package) solves the problem, use it rather than writing the same
+  thing ourselves: sessions are axum-login and tower-sessions, errors
+  thiserror and anyhow. Propose a new one first (name, version, why) and
+  add it only once it is approved. Write it ourselves only when nothing
+  maintained fits, and say why in a comment (the session store: the sqlx
+  store crate needs sqlx 0.8).
 - **Endpoints.** Static files at the root (`/tracker.js`); everything that
   writes or processes lives under `/api/`. Settings of the whole instance
   (single sign-on so far) are under `/api/admin/`, tagged `Admin`.
