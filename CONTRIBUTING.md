@@ -31,6 +31,8 @@ backend).
 | `mise run build:profiling` | The image with per-phase timers and an opt-in CPU flamegraph (never published)                                 |
 | `mise run loadtest`        | Write load against the image in a 2 CPU, 2 GB container (`scripts/loadtest.sh`; `TARGET=goatcounter` compares) |
 | `mise run check`           | Format, lint and type checks for backend and frontend                                                          |
+| `mise run audit`           | Known vulnerabilities in `Cargo.lock` and `pnpm-lock.yaml` (osv-scanner; also daily in CI)                     |
+| `mise run audit:image`     | Known vulnerabilities in the image's Alpine packages (Trivy); `IMAGE=` picks one, by default the published one |
 | `mise run fix`             | Applies the format and lint fixes                                                                              |
 | `mise run test`            | The backend tests: end-to-end over HTTP, and unit tests                                                        |
 | `mise run seed`            | A year of demo data (wipes every hit; deterministic)                                                           |
@@ -156,6 +158,14 @@ not the branch name GitHub fills in; a `PR title` check fails the pull request
 otherwise. A merge commit that is not conventional is skipped by
 release-please: nothing is released for it, and the log says "commit could
 not be parsed".
+
+Dependencies update themselves: Dependabot opens weekly pull requests (and
+one at once for a security advisory), and the minor, patch and security
+ones merge on their own when CI passes; majors wait for review. Those that
+ship are titled `fix(deps)`, so the release PR picks them up as a patch
+release. Bot merges start no workflow, so the release workflow also runs
+once a day to update the release PR. Merging the release PR is still up to
+a person.
 
 `CHANGELOG.md` is written by release-please: do not edit it by hand. The
 release PR needs "Allow GitHub Actions to create and approve pull

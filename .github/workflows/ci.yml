@@ -63,4 +63,30 @@ jobs:
             backend/target
           key: ${{ runner.os }}-${{ runner.arch }}-cargo-linux-${{ hashFiles('backend/Cargo.lock') }}
       - run: mise run build:linux
-      - run: docker build .
+      - run: docker build -t potoo:ci .
+      # Started once, until its own HEALTHCHECK (`potoo healthcheck`) says
+      # healthy, so a packaging bug fails the PR, not the release. No GeoIP
+      # download.
+      - name: Run the image and check its health check
+        run: |
+          docker run --rm -d --name potoo-ci -e GEOIP_URL= potoo:ci
+          for _ in $(seq 1 30); do
+            status="$(docker inspect -f '{{.State.Health.Status}}' potoo-ci)"
+            [ "$status" = healthy ] && exit 0
+            sleep 2
+          done
+          docker logs potoo-ci
+          exit 1
+      # Its Alpine packages: a fixable HIGH or CRITICAL one fails the PR.
+      # Trivy's database is cached for the day (security.yml scans the
+      # published image every day).
+      - id: day
+        run: echo "day=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/trivy
+          key: trivy-db-${{ steps.day.outputs.day }}
+          restore-keys: trivy-db-
+      - run: mise run audit:image
+        env:
+          IMAGE: potoo:ci

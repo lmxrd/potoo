@@ -18,6 +18,7 @@ it provides Rust, Node and pnpm at the pinned versions).
 | `mise run fix` | Applies the format and lint fixes |
 | `mise run dev` | Backend on :8000 plus the Vite dev server |
 | `mise run seed` | A year of demo data (wipes every hit) into `data/potoo.db` |
+| `mise run audit` / `audit:image` | Known vulnerabilities in the lockfiles (osv-scanner) / in an image's Alpine packages (Trivy; `IMAGE=`, by default the published one) |
 | `mise run gen:spec` | Writes the OpenAPI spec to `backend/target/specs/openapi.json` |
 | `mise run gen:client` | Generates the frontend API client (`frontend/src/client`) from the spec |
 | `mise run build` / `build:linux` / `build:docker` | Release binary (`dist/potoo`) / static Linux binary (`dist/potoo-linux-<arch>`, zig cross-compiles) / image (podman) that copies it |
@@ -234,12 +235,26 @@ acceptable.
   (labels): change both together. So are the single sign-on error codes:
   `Failure` in `backend/src/oidc.rs` and `SSO_ERRORS` in
   `frontend/src/routes/login.tsx`.
-- **Versions.** Node, pnpm, Rust, zig and cargo-zigbuild are pinned in
-  `mise.toml`; `frontend/package.json` (`packageManager`) must match pnpm.
-  The image builds nothing: it is `alpine:3` and the binary built outside
-  it (`scripts/build-linux.sh`), so no toolchain version lives in the
-  Dockerfile. Every dependency update arrives as a `chore(deps)` pull
-  request, grouped by ecosystem, and must pass CI.
+- **Versions.** Node, pnpm, Rust, zig, cargo-zigbuild, osv-scanner and
+  Trivy are pinned in `mise.toml`; `frontend/package.json`
+  (`packageManager`) must match pnpm. The image builds nothing: it is an
+  exact Alpine release (`alpine:3.x.y`, with `apk upgrade`) and the binary
+  built outside it (`scripts/build-linux.sh`), so no toolchain version lives
+  in the Dockerfile. Its healthcheck is `potoo healthcheck` (no wget).
+- **Dependency updates and security fixes** (`.github/dependabot.yml`):
+  Dependabot's pull requests are `fix(deps)` for what ships (crates, the
+  frontend's dependencies, the base image), so merging one releases a
+  patch, and `chore(deps-dev)` for the frontend's devDependencies; `ci` for
+  actions. Routine updates wait 5 days after their release (`cooldown`),
+  security updates do not. Minor, patch and security updates merge on
+  their own once CI passes (`dependabot-auto-merge.yml`); majors wait for a
+  person. That merge is made with a workflow token and so starts no
+  workflow: `release.yml` also runs daily to pick it up. pnpm's own
+  `minimumReleaseAge` (1 day, `frontend/pnpm-workspace.yaml`) must stay
+  shorter than the cooldown, or it would block Dependabot's updates.
+  `security.yml` runs `mise run audit` and scans the published image every
+  day, CI scans the image it builds; a finding to accept goes in
+  `osv-scanner.toml` with its reason.
 - **The image copies a prebuilt binary.** `mise run build:linux` builds
   `dist/potoo-linux-<arch>` with the machine's cargo cache and target
   directory (copied out of it: cargo has no stable flag to put one artifact
