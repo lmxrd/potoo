@@ -3,7 +3,7 @@
 //! authenticator apps' defaults. The crate does not stop a code from being
 //! used twice; `verify` takes the last step used for that.
 
-use crate::util::sha256_hex;
+use crate::auth::sha256_hex;
 use rand::{Rng, RngExt};
 use totp_rs::{Algorithm, Builder, Secret, Totp};
 

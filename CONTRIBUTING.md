@@ -92,7 +92,7 @@ packages/backend/src/profile.rs     per-phase timers, compiled in only with the 
 packages/backend/src/openapi.rs     the OpenAPI document: title, tags, the cookie scheme (paths come from the routers)
 packages/backend/src/bin/specs.rs   writes the spec to files (`mise run gen:spec`)
 packages/backend/migrations/        the schema, one numbered SQL file per change (sqlx migrations)
-packages/backend/src/auth.rs        password hashing, API keys
+packages/backend/src/auth.rs        password hashing, API keys, the signed-in user (CurrentUser), sha256_hex
 packages/backend/src/oidc.rs        single sign-on: the settings (env over stored), the OIDC flow, the signed login cookie
 packages/backend/src/visitor.rs     user agent parsing, client IP, visitor hashes
 packages/backend/src/geo.rs         country lookup + the weekly DB-IP download
@@ -100,7 +100,7 @@ packages/backend/src/stats.rs       ranges, chart buckets, the aggregations
 packages/backend/src/filter.rs      the RSQL filter subset the dashboard uses
 packages/backend/src/csv.rs         the CSV writer + the export download (the import reads CSV in routes/import.rs)
 packages/backend/src/tracker.rs     the tracker script and the pixel GIF
-packages/backend/src/util.rs        sha256 and random hex helpers
+packages/backend/src/random.rs      random bytes for secrets (`random::hex`)
 packages/backend/src/routes/        auth, users, oidc (login, callback, admin settings), sites, stats, export, import, collect
 packages/backend/src/bin/seed.rs    a year of demo data, for development
 packages/backend/examples/          the load generator behind `mise run loadtest`

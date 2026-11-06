@@ -1,6 +1,6 @@
+use crate::auth::sha256_hex;
 use crate::db::Db;
 use crate::profile::{Phase, timed};
-use crate::util::{random_hex, sha256_hex};
 use axum::http::HeaderMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
@@ -254,7 +254,7 @@ async fn daily_salt(db: &Db) -> String {
         let mut tx = db.writer().begin().await?;
         sqlx::query("INSERT OR IGNORE INTO salts (day, salt) VALUES (?1, ?2)")
             .bind(&day)
-            .bind(random_hex(32))
+            .bind(crate::random::hex::<32>())
             .execute(&mut *tx)
             .await?;
         sqlx::query("DELETE FROM salts WHERE day < ?1")

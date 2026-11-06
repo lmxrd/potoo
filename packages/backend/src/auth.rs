@@ -1,7 +1,6 @@
 use crate::error::ApiError;
 use crate::sessions::AuthSession;
 use crate::state::AppState;
-use crate::util::sha256_hex;
 use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier, generate_salt};
@@ -9,9 +8,16 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, header};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::SqliteExecutor;
 use utoipa::ToSchema;
 use uuid::Uuid;
+
+/// The hex-encoded SHA-256 of a string: how API key tokens, recovery codes
+/// and session ids are stored (never the secret itself).
+pub fn sha256_hex(input: &str) -> String {
+    hex::encode(Sha256::digest(input.as_bytes()))
+}
 
 /// The date formats a user can pick from, for displaying dates.
 pub const DATE_FORMATS: [&str; 4] = ["YYYY-MM-DD", "DD/MM/YYYY", "MM/DD/YYYY", "DD.MM.YYYY"];

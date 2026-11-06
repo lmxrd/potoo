@@ -3,11 +3,11 @@
 //! cannot list, make or revoke keys); the token is shown once, on creation.
 
 use crate::auth::SessionUser;
+use crate::auth::sha256_hex;
 use crate::auth::{API_KEY_PREFIX, Scope};
 use crate::error::{ApiError, ErrorBody};
 use crate::extract::ApiJson;
 use crate::state::AppState;
-use crate::util::{random_hex, sha256_hex};
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -162,7 +162,7 @@ async fn create_key(
             ));
         }
     };
-    let token = format!("{API_KEY_PREFIX}{}", random_hex(32));
+    let token = format!("{API_KEY_PREFIX}{}", crate::random::hex::<32>());
     let prefix = token[..API_KEY_PREFIX.len() + 6].to_string();
 
     let mut tx = state.db.writer().begin().await?;

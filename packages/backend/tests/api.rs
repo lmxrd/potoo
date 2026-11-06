@@ -1172,7 +1172,7 @@ mod provider {
                 None,
             )
             .unwrap();
-            let code = potoo::util::random_hex(8);
+            let code = potoo::random::hex::<8>();
             self.codes
                 .lock()
                 .unwrap()

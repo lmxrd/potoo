@@ -122,7 +122,7 @@ impl fmt::Debug for Store {
 
 /// What is stored for a session id: never the id itself.
 fn id_hash(id: &Id) -> String {
-    crate::util::sha256_hex(&id.to_string())
+    crate::auth::sha256_hex(&id.to_string())
 }
 
 fn backend_error(e: impl fmt::Display) -> session_store::Error {

@@ -14,6 +14,7 @@ pub mod limits;
 pub mod oidc;
 pub mod openapi;
 pub mod profile;
+pub mod random;
 pub mod routes;
 pub mod sessions;
 pub mod state;
@@ -21,7 +22,6 @@ pub mod stats;
 pub mod time;
 pub mod totp;
 pub mod tracker;
-pub mod util;
 pub mod visitor;
 
 use axum::Router;
