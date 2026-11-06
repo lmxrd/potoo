@@ -1,10 +1,10 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { getStatsOptions, listSitesOptions } from "potoo-sdk/react-query";
-import { DateRangeBar } from "../components/date-range-bar";
-import { ErrorText } from "../components/error-text";
-import { SiteSelect } from "../components/site-select";
-import { StatsDashboard } from "../components/stats-dashboard";
+import { DateRangeBar } from "../components/stats/date-range-bar";
+import { ErrorText } from "../components/common/error-text";
+import { SiteSelect } from "../components/stats/site-select";
+import { StatsDashboard } from "../components/stats/stats-dashboard";
 import { errorMessage } from "../lib/api";
 import { exportHref, statsQuery } from "../lib/stats-query";
 import { buildFilter, useDashboardFilters } from "../lib/filter";

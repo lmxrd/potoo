@@ -4,7 +4,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { importHitsMutation } from "potoo-sdk/react-query";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { ErrorText } from "../components/error-text";
+import { ErrorText } from "../components/common/error-text";
 import { errorMessage } from "../lib/api";
 import { problemsOf } from "../lib/import";
 import { Checkbox } from "../components/ui/checkbox";

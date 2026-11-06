@@ -1,10 +1,10 @@
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { BarList } from "./bar-list";
 import { PageViewsChart } from "./page-views-chart";
-import { bucketLabel, chartLabel, formatDate, formatTime } from "../lib/dates";
+import { bucketLabel, chartLabel, formatDate, formatTime } from "../../lib/dates";
 import type { SiteStats } from "potoo-sdk";
-import type { FacetFilters } from "../lib/filter";
-import { facetLabel } from "../lib/labels";
+import type { FacetFilters } from "../../lib/filter";
+import { facetLabel } from "../../lib/labels";
 
 /** The dashboard content: totals, the chart and the breakdowns. */
 export function StatsDashboard({

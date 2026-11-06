@@ -1,8 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { CredentialsForm } from "../components/credentials-form";
-import { ErrorText } from "../components/error-text";
-import { TotpEnroll } from "../components/totp-enroll";
-import { TotpForm } from "../components/totp-form";
+import { CredentialsForm } from "../components/auth/credentials-form";
+import { ErrorText } from "../components/common/error-text";
+import { TotpEnroll } from "../components/auth/totp-enroll";
+import { TotpForm } from "../components/auth/totp-form";
 import { useState } from "react";
 
 type Step = "totp" | "totp-setup";

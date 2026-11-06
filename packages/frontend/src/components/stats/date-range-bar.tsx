@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { DownloadIcon } from "lucide-react";
-import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
 import type { SiteStats } from "potoo-sdk";
-import { FACETS, type FacetFilters } from "../lib/filter";
-import { facetLabel } from "../lib/labels";
+import { FACETS, type FacetFilters } from "../../lib/filter";
+import { facetLabel } from "../../lib/labels";
 import {
   RANGE_PRESETS,
   localInput,
@@ -13,7 +13,7 @@ import {
   rangeSummary,
   rangeWindow,
   type DateRange,
-} from "../lib/date-range";
+} from "../../lib/date-range";
 
 /**
  * The toolbar above the dashboard: relative preset chips, a Custom chip

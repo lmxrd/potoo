@@ -8,7 +8,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "./ui/alert-dialog";
+} from "../ui/alert-dialog";
 
 /** What a confirmation asks. `destructive` paints the action red. */
 export type ConfirmOptions = {

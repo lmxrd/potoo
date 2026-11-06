@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Button } from "./ui/button";
-import { ErrorText } from "./error-text";
-import { Input } from "./ui/input";
+import { Button } from "../ui/button";
+import { ErrorText } from "../common/error-text";
+import { Input } from "../ui/input";
 import {
   createApiKeyMutation,
   listApiKeysOptions,
@@ -10,11 +10,11 @@ import {
   revokeApiKeyMutation,
 } from "potoo-sdk/react-query";
 import type { Scope } from "potoo-sdk/types";
-import { errorMessage } from "../lib/api";
-import { formatDate } from "../lib/dates";
-import { Label } from "./ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
-import { useConfirm } from "./confirm";
+import { errorMessage } from "../../lib/api";
+import { formatDate } from "../../lib/dates";
+import { Label } from "../ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
+import { useConfirm } from "../common/confirm-dialog";
 
 const SCOPES: { value: Scope; label: string; help: string }[] = [
   { value: "read", label: "Read", help: "Reads only: stats, sites, exports." },
@@ -34,7 +34,7 @@ const EXPIRIES = [
  * its token once, and revoke them. Keys are sent as
  * `Authorization: Bearer <token>`.
  */
-export function ApiKeys({ isAdmin, dateFormat }: { isAdmin: boolean; dateFormat: string }) {
+export function ApiKeysSection({ isAdmin, dateFormat }: { isAdmin: boolean; dateFormat: string }) {
   const confirm = useConfirm();
   const queryClient = useQueryClient();
   const { data: keys, error: listError } = useQuery(listApiKeysOptions());

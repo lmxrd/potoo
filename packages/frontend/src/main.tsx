@@ -7,7 +7,7 @@ import { toast } from "sonner";
 // Configure the generated API client before any request fires.
 import { setSessionExpiredHandler } from "./lib/api";
 import { queryClient } from "./lib/query-client";
-import { ConfirmProvider } from "./components/confirm";
+import { ConfirmProvider } from "./components/common/confirm-dialog";
 import { Toaster } from "./components/ui/sonner";
 import { router } from "./router";
 import "./index.css";

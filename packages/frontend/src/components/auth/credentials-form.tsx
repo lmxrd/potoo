@@ -1,10 +1,10 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { Button } from "./ui/button";
-import { ErrorText } from "./error-text";
-import { Input } from "./ui/input";
+import { Button } from "../ui/button";
+import { ErrorText } from "../common/error-text";
+import { Input } from "../ui/input";
 import { bootstrapMutation, loginMutation } from "potoo-sdk/react-query";
-import { errorMessage } from "../lib/api";
+import { errorMessage } from "../../lib/api";
 
 export function CredentialsForm({
   kind,

@@ -1,12 +1,12 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { Button } from "./ui/button";
-import { ErrorText } from "./error-text";
-import { Input } from "./ui/input";
-import { QrCode, RecoveryCodeList } from "./totp-settings";
+import { Button } from "../ui/button";
+import { ErrorText } from "../common/error-text";
+import { Input } from "../ui/input";
+import { QrCode, RecoveryCodeList } from "../settings/two-factor-section";
 import { loginTotpEnableMutation, loginTotpSetupMutation } from "potoo-sdk/react-query";
 import type { TotpSetup } from "potoo-sdk/types";
-import { errorMessage } from "../lib/api";
+import { errorMessage } from "../../lib/api";
 
 /**
  * Signing in where two-factor authentication is required (TOTP_REQUIRED)

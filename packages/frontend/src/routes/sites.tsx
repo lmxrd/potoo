@@ -4,7 +4,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { createSiteMutation, listSitesOptions, listSitesQueryKey } from "potoo-sdk/react-query";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
-import { ErrorText } from "../components/error-text";
+import { ErrorText } from "../components/common/error-text";
 import { Input } from "../components/ui/input";
 import { errorMessage } from "../lib/api";
 import { formatDate } from "../lib/dates";

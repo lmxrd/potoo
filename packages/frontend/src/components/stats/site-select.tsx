@@ -1,4 +1,4 @@
-import { Checkbox } from "./ui/checkbox";
+import { Checkbox } from "../ui/checkbox";
 
 /** The site selection chips: "All sites", or any subset of them. */
 export function SiteSelect({

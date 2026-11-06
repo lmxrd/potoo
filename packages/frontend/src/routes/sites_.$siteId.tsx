@@ -10,15 +10,15 @@ import {
 } from "potoo-sdk/react-query";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { DateRangeBar } from "../components/date-range-bar";
-import { ErrorText } from "../components/error-text";
-import { StatsDashboard } from "../components/stats-dashboard";
+import { DateRangeBar } from "../components/stats/date-range-bar";
+import { ErrorText } from "../components/common/error-text";
+import { StatsDashboard } from "../components/stats/stats-dashboard";
 import { errorMessage } from "../lib/api";
 import { exportHref, statsQuery } from "../lib/stats-query";
 import { buildFilter, useDashboardFilters } from "../lib/filter";
 import { useDateRange, validateDashboardSearch } from "../lib/date-range";
 import { Checkbox } from "../components/ui/checkbox";
-import { useConfirm } from "../components/confirm";
+import { useConfirm } from "../components/common/confirm-dialog";
 import { trackingSnippet } from "../lib/snippet";
 
 export const Route = createFileRoute("/sites_/$siteId")({

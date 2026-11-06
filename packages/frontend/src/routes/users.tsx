@@ -12,12 +12,12 @@ import {
 } from "potoo-sdk/react-query";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { ErrorText } from "../components/error-text";
+import { ErrorText } from "../components/common/error-text";
 import { Input } from "../components/ui/input";
-import { OidcSettingsForm } from "../components/oidc-settings";
+import { SsoTab } from "../components/admin/sso-tab";
 import { errorMessage } from "../lib/api";
 import { Checkbox } from "../components/ui/checkbox";
-import { useConfirm } from "../components/confirm";
+import { useConfirm } from "../components/common/confirm-dialog";
 
 export const Route = createFileRoute("/users")({
   beforeLoad: ({ context }) => {
@@ -263,7 +263,7 @@ function Users() {
           <CardTitle>Single sign-on</CardTitle>
         </CardHeader>
         <CardContent>
-          <OidcSettingsForm />
+          <SsoTab />
         </CardContent>
       </Card>
     </div>

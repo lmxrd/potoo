@@ -2,9 +2,9 @@ import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { QRCodeSVG } from "qrcode.react";
 import { useState } from "react";
-import { Button } from "./ui/button";
-import { ErrorText } from "./error-text";
-import { Input } from "./ui/input";
+import { Button } from "../ui/button";
+import { ErrorText } from "../common/error-text";
+import { Input } from "../ui/input";
 import {
   confirmReplaceTotpMutation,
   disableTotpMutation,
@@ -14,7 +14,7 @@ import {
   setupTotpMutation,
 } from "potoo-sdk/react-query";
 import type { TotpSetup } from "potoo-sdk/types";
-import { errorMessage } from "../lib/api";
+import { errorMessage } from "../../lib/api";
 
 /**
  * Two-factor authentication of the signed-in user: set up an authenticator
@@ -22,7 +22,7 @@ import { errorMessage } from "../lib/api";
  * the recovery codes; later, new recovery codes, a new app (the old one works
  * until the new one is confirmed) or turning it off, each with a code.
  */
-export function TotpSettings({ enabled, required }: { enabled: boolean; required: boolean }) {
+export function TwoFactorSection({ enabled, required }: { enabled: boolean; required: boolean }) {
   const router = useRouter();
   const [setup, setSetup] = useState<TotpSetup>();
   const [codes, setCodes] = useState<string[]>();

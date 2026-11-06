@@ -2,11 +2,11 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { Button } from "../components/ui/button";
-import { ApiKeys } from "../components/api-keys";
+import { ApiKeysSection } from "../components/settings/api-keys-section";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { ErrorText } from "../components/error-text";
+import { ErrorText } from "../components/common/error-text";
 import { Input } from "../components/ui/input";
-import { TotpSettings } from "../components/totp-settings";
+import { TwoFactorSection } from "../components/settings/two-factor-section";
 import { changePasswordMutation, updateMeMutation } from "potoo-sdk/react-query";
 import { errorMessage } from "../lib/api";
 import { DATE_FORMATS, formatDate, formatTime } from "../lib/dates";
@@ -95,7 +95,7 @@ function Settings() {
           <CardTitle>Two-factor authentication</CardTitle>
         </CardHeader>
         <CardContent>
-          <TotpSettings enabled={user.totp_enabled} required={session.totp_required} />
+          <TwoFactorSection enabled={user.totp_enabled} required={session.totp_required} />
         </CardContent>
       </Card>
       <Card>
@@ -103,7 +103,7 @@ function Settings() {
           <CardTitle>API keys</CardTitle>
         </CardHeader>
         <CardContent>
-          <ApiKeys isAdmin={user.is_admin} dateFormat={user.date_format} />
+          <ApiKeysSection isAdmin={user.is_admin} dateFormat={user.date_format} />
         </CardContent>
       </Card>
     </div>

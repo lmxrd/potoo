@@ -7,11 +7,11 @@ import {
   getOidcSettingsQueryKey,
   updateOidcSettingsMutation,
 } from "potoo-sdk/react-query";
-import { errorMessage } from "../lib/api";
-import { Button } from "./ui/button";
-import { ErrorText } from "./error-text";
-import { Input } from "./ui/input";
-import { Checkbox } from "./ui/checkbox";
+import { errorMessage } from "../../lib/api";
+import { Button } from "../ui/button";
+import { ErrorText } from "../common/error-text";
+import { Input } from "../ui/input";
+import { Checkbox } from "../ui/checkbox";
 
 type TextField = "issuer" | "client_id" | "scopes" | "label" | "redirect_url";
 
@@ -20,7 +20,7 @@ type TextField = "issuer" | "client_id" | "scopes" | "label" | "redirect_url";
  * OIDC_* environment variable shows, but cannot be changed here. The
  * client secret is never shown: it is replaced when one is typed.
  */
-export function OidcSettingsForm() {
+export function SsoTab() {
   const { data, error } = useQuery(getOidcSettingsOptions());
   // Above the form, which starts over from what the server saved (trimmed
   // values, a secret that is set or not): "Saved." outlives that. Before any
