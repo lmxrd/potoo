@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_THEME, THEMES, accentInk, parseTheme, sameTheme, themeJson } from "./theme";
+import { DEFAULT_THEME, THEMES, accentInk, parseTheme, sameTheme, themeJson } from "./themes";
 
 describe("parseTheme", () => {
   it("reads what themeJson writes", () => {

@@ -10,7 +10,7 @@ import { TwoFactorSection } from "../components/settings/two-factor-section";
 import { changePasswordMutation, updateMeMutation } from "potoo-sdk/react-query";
 import { errorMessage } from "../lib/api";
 import { DATE_FORMATS, formatDate, formatTime } from "../lib/dates";
-import { THEMES, applyTheme, parseTheme, sameTheme, themeJson, type Theme } from "../lib/theme";
+import { THEMES, applyTheme, parseTheme, sameTheme, themeJson, type Theme } from "../lib/themes";
 import { Checkbox } from "../components/ui/checkbox";
 import { Label } from "../components/ui/label";
 import {

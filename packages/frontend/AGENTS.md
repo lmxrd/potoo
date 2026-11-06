@@ -75,7 +75,7 @@ folder:
   `text-success`), never hard-coded, so a theme switch shows at once. A
   theme is a base (light/dark, `data-theme` on the root, which also drives
   `dark:`) and an accent (`--accent-color` and `--on-accent-color`, set by
-  `applyTheme` in `src/lib/theme.ts`); `--primary` is the accent and
+  `applyTheme` in `src/lib/themes.ts`); `--primary` is the accent and
   `--accent` (shadcn's) a wash of it for hovers.
 - **Duplicated lists:** the date formats (`src/lib/dates.ts`) and the single
   sign-on error codes (`src/routes/login.tsx`) are listed in the backend

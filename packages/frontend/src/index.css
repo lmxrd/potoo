@@ -2,14 +2,14 @@
 @import "tw-animate-css";
 
 /* `dark:` follows the base of the theme: `data-theme="dark"` on the root
-   element, set by applyTheme (src/lib/theme.ts). */
+   element, set by applyTheme (src/lib/themes.ts). */
 @custom-variant dark (&:is([data-theme="dark"] *));
 
 /*
  * The theme. shadcn's components (src/components/ui) and the app read only
  * the semantic tokens below, so a theme is nothing but their values. Each
  * base defines the same set; the accent and the color on it are per-user
- * and set at runtime by lib/theme.ts (`--accent-color`, `--on-accent-color`);
+ * and set at runtime by lib/themes.ts (`--accent-color`, `--on-accent-color`);
  * the defaults keep the page presentable before it loads.
  *
  *   primary   = the user's accent: buttons, the chart, what is selected
