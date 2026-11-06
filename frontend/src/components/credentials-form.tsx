@@ -11,11 +11,14 @@ export function CredentialsForm({
   submit,
   onSubmit,
   onDone,
+  onTotp,
 }: {
   kind: "login" | "setup";
   submit: string;
   onSubmit?: () => void;
   onDone: () => void;
+  /** The password was right, and two-factor authentication is next. */
+  onTotp?: (step: "totp" | "totp-setup") => void;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -30,7 +33,13 @@ export function CredentialsForm({
         setError(undefined);
         onSubmit?.();
         try {
-          await (kind === "login" ? login : setup).mutateAsync({ body: { email, password } });
+          if (kind === "login") {
+            const result = await login.mutateAsync({ body: { email, password } });
+            if (result?.totp_required) return onTotp?.("totp");
+            if (result?.totp_setup_required) return onTotp?.("totp-setup");
+          } else {
+            await setup.mutateAsync({ body: { email, password } });
+          }
           onDone();
         } catch (err) {
           setError(errorMessage(err));

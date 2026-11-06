@@ -1,11 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { CredentialsForm } from "../components/credentials-form";
 import { ErrorText } from "../components/error-text";
+import { TotpEnroll } from "../components/totp-enroll";
+import { TotpForm } from "../components/totp-form";
+import { useState } from "react";
+
+type Step = "totp" | "totp-setup";
 
 export const Route = createFileRoute("/login")({
-  // A failed single sign-on comes back here with a code saying why.
-  validateSearch: (search): { error?: string } => ({
+  // A failed single sign-on comes back here with a code saying why; one that
+  // needs two-factor authentication first, with the step to take.
+  validateSearch: (search): { error?: string; step?: Step } => ({
     error: typeof search.error === "string" ? search.error : undefined,
+    step: search.step === "totp" || search.step === "totp-setup" ? search.step : undefined,
   }),
   component: Login,
 });
@@ -30,8 +37,28 @@ const SSO_ERRORS: Record<string, string> = {
 
 function Login() {
   const { session } = Route.useRouteContext();
-  const { error } = Route.useSearch();
+  const search = Route.useSearch();
+  const error = search.error;
   const navigate = Route.useNavigate();
+  // Who the user is was proven (by the password, or single sign-on): two-factor
+  // authentication is next.
+  const [step, setStep] = useState<Step | undefined>(search.step);
+  if (step) {
+    const restart = () => {
+      setStep(undefined);
+      navigate({ search: {}, replace: true });
+    };
+    return (
+      <div className="space-y-4">
+        <h1 className="text-xl font-semibold">Two-factor authentication</h1>
+        {step === "totp" ? (
+          <TotpForm onDone={() => location.assign("/")} onRestart={restart} />
+        ) : (
+          <TotpEnroll onDone={() => location.assign("/")} onRestart={restart} />
+        )}
+      </div>
+    );
+  }
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Sign in</h1>
@@ -45,16 +72,24 @@ function Login() {
           >
             Sign in with {session.oidc.label}
           </a>
-          <p className="text-center text-xs text-muted">or with your password</p>
+          {session.password_login && (
+            <p className="text-center text-xs text-muted">or with your password</p>
+          )}
         </div>
       )}
-      <CredentialsForm
-        kind="login"
-        submit="Sign in"
-        // A password attempt is a new try: the single sign-on error is old.
-        onSubmit={() => error && navigate({ search: {}, replace: true })}
-        onDone={() => location.assign("/")}
-      />
+      {session.password_login && (
+        <CredentialsForm
+          kind="login"
+          submit="Sign in"
+          // A password attempt is a new try: the single sign-on error is old.
+          onSubmit={() => error && navigate({ search: {}, replace: true })}
+          onDone={() => location.assign("/")}
+          onTotp={setStep}
+        />
+      )}
+      {!session.password_login && !session.oidc && (
+        <ErrorText>Single sign-on is not set up yet. Ask an admin.</ErrorText>
+      )}
     </div>
   );
 }

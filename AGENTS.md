@@ -95,12 +95,41 @@ in through the provider before the first admin exists (`/setup`). A
 provider account is linked to a user in `user_identities` (issuer +
 subject); an unlinked one is matched only by an email the provider says is
 verified, and not to a user linked to another account at that provider.
-Forwarded headers count for the callback URL only with `TRUST_PROXY`. The
-callback never redirects anywhere but `/` and `/login?error=<code>`, and
+`OIDC_ONLY` (`oidc.passwords_allowed()`) refuses every password path with
+403 (`HttpError::passwords_off`: login, its second step, setting or resetting
+a password, a user created with one) but `/setup`; the session's
+`password_login` tells the frontend. Forwarded headers count for the callback URL only with `TRUST_PROXY`. The
+callback never redirects anywhere but `/`, `/login?step=<step>` and
+`/login?error=<code>`, and
 always clears the login cookie (even one it did not sign), with the
 attributes it was set with: a browser ignores a `__Host-` removal without
 `Secure`. The tests in `tests/api.rs` run a stand-in provider
 that signs real ID tokens with the keys in `tests/fixtures/` (test only).
+
+**Two-factor authentication** (`totp.rs` on top of `totp-rs`,
+`routes/totp.rs`): `users.totp_secret` (base32, NULL = off),
+`totp_pending` (a setup not yet confirmed) and `totp_last_step` (a code
+works once: a step is accepted only when it is later, set with a
+conditional UPDATE); recovery codes are SHA-256 hashes in `recovery_codes`,
+deleted when used. A sign-in (password, or the single sign-on callback)
+of a user with it on gets no session but the signed `potoo_2fa` cookie
+(`__Host-` over https, `<user id>.<expiry>.<step>`, five minutes, the
+`oidc.key()`): the password answers 200 `LoginStep`, the callback redirects
+to `/login?step=totp`; `/login/totp` finishes it. With `TOTP_REQUIRED`
+(`state.totp_required`) a user without it gets the `enroll` step instead
+(`/login?step=totp-setup`, `/login/totp/setup`, `/login/totp/enable`), and
+`/totp/disable` is refused. `next_step` decides, for both paths. Wrong codes count in `state.throttle` per user
+(`totp|<id>`), not per address.
+
+**API keys** (`routes/api_keys.rs`, `key_user` in `auth.rs`): `api_keys`
+holds the SHA-256 of `potoo_<64 hex>` and its scope (`read`/`write`/
+`admin`). `AuthUser(user, Access)` takes the session cookie or
+`Authorization: Bearer`; a read key gets 403 on anything but GET/HEAD there,
+and `require_admin` wants a session or an admin key (and an admin user).
+Account endpoints (email, settings, password, TOTP, API keys) take
+`SessionUser`, which refuses keys: use it for any new endpoint about the
+account itself. A handler that takes `AuthUser` lists `("api_key" = [])` in
+its `security`. `last_used_at` is written at most once a minute.
 
 **Tests run on an in-memory database**, where the reader and the writer
 pools are one and the same single connection. Two consequences: a write

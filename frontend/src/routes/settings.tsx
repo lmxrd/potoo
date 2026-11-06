@@ -2,9 +2,11 @@ import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { Button } from "../components/button";
+import { ApiKeys } from "../components/api-keys";
 import { Card } from "../components/card";
 import { ErrorText } from "../components/error-text";
 import { Input } from "../components/input";
+import { TotpSettings } from "../components/totp-settings";
 import {
   changeEmailMutation,
   changePasswordMutation,
@@ -19,6 +21,8 @@ export const Route = createFileRoute("/settings")({ component: Settings });
 function Settings() {
   const { session } = Route.useRouteContext();
   const user = session.user!;
+  // With single sign-on only, there are no passwords.
+  const passwords = session.password_login;
   return (
     <div className="max-w-sm space-y-6">
       <h1 className="text-xl font-semibold">Settings</h1>
@@ -46,8 +50,16 @@ function Settings() {
       <Card title="Change email">
         <ChangeEmail current={user.email} />
       </Card>
-      <Card title={user.has_password ? "Change password" : "Set a password"}>
-        <ChangePassword hasPassword={user.has_password} />
+      {passwords && (
+        <Card title={user.has_password ? "Change password" : "Set a password"}>
+          <ChangePassword hasPassword={user.has_password} />
+        </Card>
+      )}
+      <Card title="Two-factor authentication">
+        <TotpSettings enabled={user.totp_enabled} required={session.totp_required} />
+      </Card>
+      <Card title="API keys">
+        <ApiKeys isAdmin={user.is_admin} dateFormat={user.date_format} />
       </Card>
     </div>
   );

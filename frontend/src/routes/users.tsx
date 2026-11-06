@@ -8,6 +8,7 @@ import {
   listUsersOptions,
   listUsersQueryKey,
   resetUserPasswordMutation,
+  resetUserTotpMutation,
 } from "../client/@tanstack/react-query.gen";
 import { Button } from "../components/button";
 import { Card } from "../components/card";
@@ -27,6 +28,8 @@ function Users() {
   const { session } = Route.useRouteContext();
   // With single sign-on on, a user may have no password.
   const passwordOptional = session.oidc !== null;
+  // With single sign-on only (OIDC_ONLY) there are no passwords at all.
+  const passwords = session.password_login;
   const { data: users, error } = useQuery(listUsersOptions());
   const queryClient = useQueryClient();
   const reload = () => queryClient.invalidateQueries({ queryKey: listUsersQueryKey() });
@@ -34,6 +37,7 @@ function Users() {
   const changeRole = useMutation(changeUserRoleMutation());
   const deleteUser = useMutation(deleteUserMutation());
   const resetPassword = useMutation(resetUserPasswordMutation());
+  const resetTotp = useMutation(resetUserTotpMutation());
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [admin, setAdmin] = useState(false);
@@ -65,13 +69,35 @@ function Users() {
                     <span className="ml-2 text-xs text-muted">single sign-on</span>
                   )}
                   {!u.has_password && <span className="ml-2 text-xs text-muted">no password</span>}
+                  {u.totp_enabled && <span className="ml-2 text-xs text-muted">2FA</span>}
                 </span>
                 <span className="flex gap-2">
-                  <Button
-                    onClick={() => setReset(reset?.id === u.id ? null : { id: u.id, password: "" })}
-                  >
-                    Reset password
-                  </Button>
+                  {/* For someone who lost their app and their recovery codes. */}
+                  {u.totp_enabled && u.id !== session.user?.id && (
+                    <Button
+                      onClick={async () => {
+                        if (!confirm(`Turn off two-factor authentication for ${u.email}?`)) return;
+                        try {
+                          await resetTotp.mutateAsync({ path: { id: u.id } });
+                          setRowError(null);
+                          reload();
+                        } catch (err) {
+                          showRowError(u.id, err);
+                        }
+                      }}
+                    >
+                      Reset 2FA
+                    </Button>
+                  )}
+                  {passwords && (
+                    <Button
+                      onClick={() =>
+                        setReset(reset?.id === u.id ? null : { id: u.id, password: "" })
+                      }
+                    >
+                      Reset password
+                    </Button>
+                  )}
                   <Button
                     disabled={u.id === lastAdminId}
                     {...(u.id === lastAdminId ? guarded : {})}
@@ -173,14 +199,16 @@ function Users() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
           />
-          <Input
-            type="password"
-            placeholder={passwordOptional ? "Password (optional)" : "Password (min. 10)"}
-            required={!passwordOptional}
-            minLength={10}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
+          {passwords && (
+            <Input
+              type="password"
+              placeholder={passwordOptional ? "Password (optional)" : "Password (min. 10)"}
+              required={!passwordOptional}
+              minLength={10}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          )}
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={admin} onChange={(e) => setAdmin(e.target.checked)} />
             Admin
@@ -188,7 +216,7 @@ function Users() {
           <Button type="submit">Create</Button>
         </form>
         <ErrorText>{formError}</ErrorText>
-        {passwordOptional && (
+        {passwords && passwordOptional && (
           <p className="mt-2 text-xs text-muted">
             Without a password, the user signs in with single sign-on.
           </p>

@@ -40,6 +40,9 @@ identity, and you keep your data.
 - **Single sign-on** with any OpenID Connect provider (Authentik, Keycloak,
   Authelia, Google, ...), next to passwords; set up in the admin settings or
   with environment variables.
+- **API keys** per user, read, read & write or admin, for scripts.
+- **Two-factor authentication** with any authenticator app (TOTP) and
+  single-use recovery codes, optionally required for everyone.
 
 ![A site's page: its snippet and settings](docs/screenshots/site.png)
 
@@ -237,7 +240,13 @@ are not checked for duplicates.
 | `OIDC_SCOPES`        | `openid email`      | Single sign-on: the scopes asked for, space separated                                                                                       |
 | `OIDC_LABEL`         | `Single sign-on`    | Single sign-on: the login button says "Sign in with" this                                                                                   |
 | `OIDC_REDIRECT_URL`  | unset               | Single sign-on: the callback URL, when the one Potoo works out from the request is not right (`https://…/api/auth/oidc/callback`)           |
-| `OIDC_AUTO_CREATE`   | `0`                 | Single sign-on: `1` (or `true`, `yes`, `on`) creates a regular user for a verified email that has no account; `0` (`false`, `no`, `off`) does not. Any other value stops Potoo at start |
+| `OIDC_AUTO_CREATE`   | `false`             | Single sign-on: `true` creates a regular user for a verified email that has no account; `false` does not |
+| `OIDC_ONLY`          | `false`             | Single sign-on: `true` makes single sign-on the only way in: no password signs in and none can be set. The first admin is still created with a password on `/setup`, then signs in through the provider (matched by their verified email) |
+| `TOTP_REQUIRED`      | `false`             | `true` makes two-factor authentication required: a user without it sets up an authenticator app at their next sign-in (password or single sign-on), and nobody can turn it off. Sessions made before are kept |
+
+`OIDC_AUTO_CREATE`, `OIDC_ONLY` and `TOTP_REQUIRED` take `true` or `false`
+(`1`/`0`, `yes`/`no` and `on`/`off` work too); any other value stops Potoo at
+start.
 
 This site or product includes IP data from db-ip.com, licensed under CC BY 4.0.
 
@@ -270,6 +279,14 @@ single sign-on signs nobody in. A user without a password can set one in
 their settings; an admin can create a user without a password while single
 sign-on is on.
 
+With `OIDC_ONLY=true`, single sign-on is the only way in: the login page shows no
+password form, a password sign-in is refused (403), and no password can be set
+or reset, so new users are created without one. Two-factor authentication is
+then the provider's business. Sessions and API keys keep working. Until single
+sign-on is set up (with the variables, or in the admin settings by the first
+admin, signed in after `/setup`), nobody else can sign in; Potoo logs a
+warning at start.
+
 Behind a reverse proxy that terminates TLS, the callback URL Potoo works out
 needs `TRUST_PROXY=1` and the proxy's `X-Forwarded-Proto` (and
 `X-Forwarded-Host`, or the original `Host` header); without them, set
@@ -282,6 +299,45 @@ started in another tab, makes it fail, and trying again works.
 Some providers (Microsoft Entra, for one) do not say that an email is
 verified. Potoo then can neither match nor create the user, so their users
 cannot sign in through it yet.
+
+### Two-factor authentication
+
+Each user can turn it on in **Settings**: scan the QR code with an
+authenticator app (or type the key), confirm with a code, and keep the ten
+recovery codes it shows once. From then on, signing in (with a password or
+with single sign-on) also asks for a code from the app, or a recovery code
+(each works once). A code is
+accepted for 30 seconds either side of its own, and only once. After five
+wrong codes within 15 minutes, the user's codes are refused for a while.
+
+Turning it off, making new recovery codes, or moving to a new phone or app
+(**Replace app**) needs a code. A replacement shows a new QR code, and the old
+app keeps working until a code from the new one confirms it; the recovery
+codes stay the same. An admin can turn
+it off for a user who lost both their app and their recovery codes (**Reset
+2FA** in the admin settings), not for themselves. The second step must
+follow the first within five minutes, in the same browser; a restart of Potoo
+makes it start over.
+
+With `TOTP_REQUIRED=true`, a user who has not set it up does so at their next
+sign-in, before they get in, and it cannot be turned off; after an admin's
+reset, they set it up again at their next sign-in.
+
+### API keys
+
+Each user can create API keys under **Settings** for scripts, and send one as
+`Authorization: Bearer potoo_…` wherever the dashboard's session works. The
+key is shown once, when it is made. A key's permission caps what it may do,
+and never goes beyond its user's role:
+
+- **Read**: GET requests only (stats, sites, exports).
+- **Read & write**: changes too, but no admin endpoints.
+- **Admin** (admins only): everything the admin may do.
+
+No key reaches its user's own account: email, password, two-factor
+authentication and API keys need a signed-in session. A key may expire
+(30 days, 90 days, a year, or never); revoking it, or deleting its user,
+stops it at once. Each key shows when it was last used (to the minute).
 
 ### How hits are stored
 

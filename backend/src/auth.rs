@@ -4,7 +4,7 @@ use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier, generate_salt};
 use axum_extra::extract::CookieJar;
 use axum_extra::extract::cookie::{Cookie, SameSite};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::SqliteExecutor;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
@@ -32,6 +32,8 @@ pub struct User {
     /// False for a user who signs in through single sign-on only: they can
     /// set a password without giving a current one.
     pub has_password: bool,
+    /// Whether a code from an authenticator app is asked for at sign-in.
+    pub totp_enabled: bool,
 }
 
 /// Hash a password with argon2id; the PHC string is what gets stored.
@@ -58,7 +60,8 @@ pub async fn current_user<'e>(db: impl SqliteExecutor<'e>, token: Option<&str>) 
     let token = token?;
     sqlx::query_as::<_, User>(
         "SELECT u.id, u.email, u.is_admin, u.date_format, u.use_24, u.theme,
-                u.password_hash IS NOT NULL AS has_password
+                u.password_hash IS NOT NULL AS has_password,
+                u.totp_secret IS NOT NULL AS totp_enabled
          FROM sessions s JOIN users u ON u.id = s.user_id
          WHERE s.token_hash = ?1 AND s.expires_at > ?2",
     )
@@ -68,6 +71,87 @@ pub async fn current_user<'e>(db: impl SqliteExecutor<'e>, token: Option<&str>) 
     .await
     .ok()
     .flatten()
+}
+
+/// What an API key may do. Never more than its user may: an admin key of a
+/// user who is no longer an admin reaches no admin endpoint.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Scope {
+    /// Reads only (GET).
+    Read,
+    /// Reads and changes, but no admin endpoints.
+    Write,
+    /// Everything the user may do, admin endpoints included.
+    Admin,
+}
+
+impl Scope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Scope::Read => "read",
+            Scope::Write => "write",
+            Scope::Admin => "admin",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Scope> {
+        match value {
+            "read" => Some(Scope::Read),
+            "write" => Some(Scope::Write),
+            "admin" => Some(Scope::Admin),
+            _ => None,
+        }
+    }
+}
+
+/// The start of every API key, so that one is recognised in a leak.
+pub const API_KEY_PREFIX: &str = "potoo_";
+
+/// An API key in use: its id, scope and when it was last used.
+pub struct KeyUse {
+    pub id: i64,
+    pub scope: Scope,
+    pub last_used_at: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct KeyRow {
+    #[sqlx(flatten)]
+    user: User,
+    key_id: i64,
+    scope: String,
+    last_used_at: Option<String>,
+}
+
+/// The user of a valid, unexpired API key, if any.
+pub async fn key_user<'e>(db: impl SqliteExecutor<'e>, token: &str) -> Option<(User, KeyUse)> {
+    if !token.starts_with(API_KEY_PREFIX) || token.len() > 200 {
+        return None;
+    }
+    let row = sqlx::query_as::<_, KeyRow>(
+        "SELECT u.id, u.email, u.is_admin, u.date_format, u.use_24, u.theme,
+                u.password_hash IS NOT NULL AS has_password,
+                u.totp_secret IS NOT NULL AS totp_enabled,
+                k.id AS key_id, k.scope, k.last_used_at
+         FROM api_keys k JOIN users u ON u.id = k.user_id
+         WHERE k.token_hash = ?1 AND (k.expires_at IS NULL OR k.expires_at > ?2)",
+    )
+    .bind(sha256_hex(token))
+    .bind(now_iso())
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten()?;
+    let scope = Scope::parse(&row.scope)?;
+    Some((
+        row.user,
+        KeyUse {
+            id: row.key_id,
+            scope,
+            last_used_at: row.last_used_at,
+        },
+    ))
 }
 
 /// Create a session and set its cookie, returning the updated jar.
@@ -179,7 +263,7 @@ pub fn now_iso() -> String {
     iso(SystemTime::now())
 }
 
-fn iso(t: SystemTime) -> String {
+pub fn iso(t: SystemTime) -> String {
     let dt: chrono::DateTime<chrono::Utc> = t.into();
     dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }

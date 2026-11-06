@@ -26,7 +26,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         (status = 400, description = "The request is invalid", body = ErrorBody),
         (status = 401, description = "Not signed in", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn stats(
     State(state): State<AppState>,

@@ -110,6 +110,8 @@ pub struct Env {
     pub label: Option<String>,
     pub redirect_url: Option<String>,
     pub auto_create: Option<bool>,
+    /// `OIDC_ONLY`: single sign-on is the only way in, no password sign-in.
+    pub only: bool,
 }
 
 impl Env {
@@ -127,6 +129,11 @@ impl Env {
             auto_create: var("OIDC_AUTO_CREATE").map(|v| {
                 flag(&v).unwrap_or_else(|| {
                     panic!("OIDC_AUTO_CREATE must be 1 or 0 (true/false, yes/no, on/off), not {v}")
+                })
+            }),
+            only: var("OIDC_ONLY").is_some_and(|v| {
+                flag(&v).unwrap_or_else(|| {
+                    panic!("OIDC_ONLY must be 1 or 0 (true/false, yes/no, on/off), not {v}")
                 })
             }),
         }
@@ -165,7 +172,7 @@ impl Env {
 }
 
 /// A yes or no environment variable.
-fn flag(value: &str) -> Option<bool> {
+pub fn flag(value: &str) -> Option<bool> {
     match value.to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Some(true),
         "0" | "false" | "no" | "off" => Some(false),
@@ -308,6 +315,11 @@ impl Oidc {
                     .expect("an HTTP client"),
             ),
         }
+    }
+
+    /// Whether passwords sign anyone in: not with `OIDC_ONLY`.
+    pub fn passwords_allowed(&self) -> bool {
+        !self.env.only
     }
 
     pub fn env(&self) -> &Env {

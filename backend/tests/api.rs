@@ -19,6 +19,11 @@ async fn spawn_app() -> TestApp {
 
 /// The app, with OIDC_* environment variables as given.
 async fn spawn_app_with(oidc_env: oidc::Env) -> TestApp {
+    spawn_app_full(oidc_env, false).await
+}
+
+/// The app, with OIDC_* environment variables and TOTP_REQUIRED as given.
+async fn spawn_app_full(oidc_env: oidc::Env, totp_required: bool) -> TestApp {
     potoo::install_tls_provider();
     let db = db::open(":memory:").await;
     let state = AppState {
@@ -28,6 +33,7 @@ async fn spawn_app_with(oidc_env: oidc::Env) -> TestApp {
         geo: Arc::new(geo::Geo::open("/nonexistent/country.mmdb", geo::Source::Disabled).await),
         trust_proxy: true,
         throttle: Arc::new(auth::LoginThrottle::default()),
+        totp_required,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -2103,4 +2109,756 @@ async fn a_callback_on_another_scheme_is_a_misconfiguration() {
     assert_eq!(set_cookie(&response, "potoo_oidc"), None);
     let response = start("https").await.unwrap();
     assert!(location(&response).starts_with(&provider.issuer));
+}
+
+/// The code an authenticator app shows now, `offset` steps away.
+fn totp_code(secret: &str, offset: i64) -> String {
+    let step = (potoo::totp::current_step() as i64 + offset) as u64;
+    potoo::totp::code_at(secret, step).unwrap()
+}
+
+/// Sign in with a password: the response, and the cookie it set (the session,
+/// or the challenge of the second step).
+async fn password_login(app: &TestApp, email: &str) -> Response {
+    request(
+        app,
+        Method::POST,
+        "/api/auth/login",
+        None,
+        Some(json!({ "email": email, "password": "correct horse battery" })),
+    )
+    .await
+}
+
+async fn second_step(app: &TestApp, challenge: Option<&str>, code: &str) -> Response {
+    request(
+        app,
+        Method::POST,
+        "/api/auth/login/totp",
+        challenge,
+        Some(json!({ "code": code })),
+    )
+    .await
+}
+
+async fn post(app: &TestApp, path: &str, session: &str, body: Option<Value>) -> Response {
+    request(app, Method::POST, path, Some(session), body).await
+}
+
+/// Turn two-factor authentication on for the user of a session: the secret.
+async fn enable(app: &TestApp, session: &str) -> String {
+    let setup = json(post(app, "/api/auth/totp/setup", session, None).await).await;
+    let secret = setup["secret"].as_str().unwrap().to_string();
+    let body = json!({ "code": totp_code(&secret, 0) });
+    let response = post(app, "/api/auth/totp/enable", session, Some(body)).await;
+    assert_eq!(response.status(), 200);
+    secret
+}
+
+async fn reset_totp(app: &TestApp, session: &str, id: i64) -> Response {
+    let path = format!("/api/auth/users/{id}/totp");
+    request(app, Method::DELETE, &path, Some(session), None).await
+}
+
+#[tokio::test]
+async fn two_factor_authentication() {
+    let app = spawn_app().await;
+    let admin = admin_session(&app).await;
+
+    // Off at first: a password signs in.
+    assert_eq!(
+        session_of(&app, Some(&admin)).await["user"]["totp_enabled"],
+        json!(false)
+    );
+    assert_eq!(
+        password_login(&app, "admin@example.com").await.status(),
+        204
+    );
+
+    // Enabling needs a setup first, then a code of its secret.
+    let response = post(
+        &app,
+        "/api/auth/totp/enable",
+        &admin,
+        Some(json!({ "code": "123456" })),
+    )
+    .await;
+    assert_eq!(response.status(), 400);
+    let setup = json(post(&app, "/api/auth/totp/setup", &admin, None).await).await;
+    let secret = setup["secret"].as_str().unwrap().to_string();
+    let uri = setup["uri"].as_str().unwrap();
+    assert!(
+        uri.starts_with("otpauth://totp/Potoo:admin%40example.com?"),
+        "{uri}"
+    );
+    let wrong = if totp_code(&secret, 0) == "000000" {
+        "111111"
+    } else {
+        "000000"
+    };
+    let response = post(
+        &app,
+        "/api/auth/totp/enable",
+        &admin,
+        Some(json!({ "code": wrong })),
+    )
+    .await;
+    assert_eq!(response.status(), 400);
+    let response = post(
+        &app,
+        "/api/auth/totp/enable",
+        &admin,
+        Some(json!({ "code": totp_code(&secret, 0) })),
+    )
+    .await;
+    assert_eq!(response.status(), 200);
+    let codes: Vec<String> = serde_json::from_value(json(response).await["codes"].clone()).unwrap();
+    assert_eq!(codes.len(), 10);
+    assert_eq!(
+        session_of(&app, Some(&admin)).await["user"]["totp_enabled"],
+        json!(true)
+    );
+    // On already: no second setup.
+    assert_eq!(
+        post(&app, "/api/auth/totp/setup", &admin, None)
+            .await
+            .status(),
+        409
+    );
+
+    // The password alone does not sign in any more.
+    let response = password_login(&app, "admin@example.com").await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(set_cookie(&response, auth::COOKIE), None);
+    let challenge = set_cookie(&response, "potoo_2fa").expect("the challenge cookie");
+    assert_eq!(
+        json(response).await,
+        json!({ "totp_required": true, "totp_setup_required": false })
+    );
+
+    // No challenge, or a forged one: sign in again.
+    assert_eq!(
+        second_step(&app, None, &totp_code(&secret, 0))
+            .await
+            .status(),
+        401
+    );
+    assert_eq!(
+        second_step(
+            &app,
+            Some("potoo_2fa=1.99999999999"),
+            &totp_code(&secret, 0)
+        )
+        .await
+        .status(),
+        401
+    );
+    // The code used to enable it (this step) is used up; the next step's
+    // code is in the allowed skew and works, once.
+    assert_eq!(
+        second_step(&app, Some(&challenge), wrong).await.status(),
+        400
+    );
+    let next = totp_code(&secret, 1);
+    let response = second_step(&app, Some(&challenge), &next).await;
+    assert_eq!(response.status(), 204);
+    let session = set_cookie(&response, auth::COOKIE).expect("the session cookie");
+    assert_eq!(
+        session_of(&app, Some(&session)).await["user"]["email"],
+        json!("admin@example.com")
+    );
+    let response = password_login(&app, "admin@example.com").await;
+    let challenge = set_cookie(&response, "potoo_2fa").unwrap();
+    assert_eq!(
+        second_step(&app, Some(&challenge), &next).await.status(),
+        400
+    );
+    assert_eq!(
+        second_step(&app, Some(&challenge), &totp_code(&secret, -1))
+            .await
+            .status(),
+        400
+    );
+
+    // A recovery code works once, typed loosely.
+    let typed = codes[0].to_uppercase().replace('-', " ");
+    assert_eq!(
+        second_step(&app, Some(&challenge), &typed).await.status(),
+        204
+    );
+    assert_eq!(
+        second_step(&app, Some(&challenge), &codes[0])
+            .await
+            .status(),
+        400
+    );
+
+    // New recovery codes replace the old ones.
+    let response = post(
+        &app,
+        "/api/auth/totp/recovery-codes",
+        &admin,
+        Some(json!({ "code": codes[1] })),
+    )
+    .await;
+    assert_eq!(response.status(), 200);
+    let new_codes: Vec<String> =
+        serde_json::from_value(json(response).await["codes"].clone()).unwrap();
+    assert_eq!(
+        second_step(&app, Some(&challenge), &codes[2])
+            .await
+            .status(),
+        400
+    );
+
+    // Five wrong codes in a row (a right one starts the count again) and the
+    // user's codes are refused for a while, even a right one. One failure
+    // just now, four more.
+    for _ in 0..4 {
+        assert_eq!(
+            second_step(&app, Some(&challenge), wrong).await.status(),
+            400
+        );
+    }
+    let response = second_step(&app, Some(&challenge), &new_codes[0]).await;
+    assert_eq!(response.status(), 429);
+    assert!(response.headers().contains_key("retry-after"));
+}
+
+#[tokio::test]
+async fn two_factor_authentication_is_turned_off_by_the_user_or_an_admin() {
+    let app = spawn_app().await;
+    let admin = admin_session(&app).await;
+    let response = request(
+        &app,
+        Method::POST,
+        "/api/auth/users",
+        Some(&admin),
+        Some(json!({ "email": "b@example.com", "password": "correct horse battery" })),
+    )
+    .await;
+    assert_eq!(response.status(), 201);
+    let user = cookie(&password_login(&app, "b@example.com").await);
+
+    // The user turns it off with a code; a wrong one changes nothing.
+    let secret = enable(&app, &user).await;
+    let response = post(
+        &app,
+        "/api/auth/totp/disable",
+        &user,
+        Some(json!({ "code": "abc" })),
+    )
+    .await;
+    assert_eq!(response.status(), 400);
+    let response = post(
+        &app,
+        "/api/auth/totp/disable",
+        &user,
+        Some(json!({ "code": totp_code(&secret, 1) })),
+    )
+    .await;
+    assert_eq!(response.status(), 204);
+    assert_eq!(password_login(&app, "b@example.com").await.status(), 204);
+
+    // An admin turns it off for someone who lost their app, not for
+    // themselves; regular users cannot.
+    enable(&app, &user).await;
+    assert_eq!(password_login(&app, "b@example.com").await.status(), 200);
+    let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
+    let id = users[1]["id"].as_i64().unwrap();
+    assert_eq!(users[1]["totp_enabled"], json!(true));
+    let own = users[0]["id"].as_i64().unwrap();
+    assert_eq!(reset_totp(&app, &user, id).await.status(), 403);
+    assert_eq!(reset_totp(&app, &admin, own).await.status(), 400);
+    assert_eq!(reset_totp(&app, &admin, 999).await.status(), 404);
+    assert_eq!(reset_totp(&app, &admin, id).await.status(), 204);
+    assert_eq!(password_login(&app, "b@example.com").await.status(), 204);
+    let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
+    assert_eq!(users[1]["totp_enabled"], json!(false));
+}
+
+#[tokio::test]
+async fn single_sign_on_only_refuses_passwords() {
+    let provider = provider::spawn().await;
+    let app = spawn_app_with(oidc::Env {
+        issuer: Some(provider.issuer.clone()),
+        client_id: Some(provider::CLIENT_ID.into()),
+        only: true,
+        ..oidc::Env::default()
+    })
+    .await;
+    // The first admin is still made on /setup, with a password: nobody signs
+    // in through the provider before there is one.
+    let admin = admin_session(&app).await;
+    let session = session_of(&app, None).await;
+    assert_eq!(session["password_login"], json!(false));
+    assert!(session["oidc"].is_object());
+
+    // No password signs in, not even the right one.
+    let response = password_login(&app, "admin@example.com").await;
+    assert_eq!(response.status(), 403);
+    assert_eq!(set_cookie(&response, auth::COOKIE), None);
+    // The code step is for single sign-on too: without its cookie, a 401.
+    assert_eq!(second_step(&app, None, "123456").await.status(), 401);
+
+    // Passwords cannot be set; users are made without one.
+    let body = json!({ "new_password": "another horse battery", "current_password": "correct horse battery" });
+    assert_eq!(
+        post(&app, "/api/auth/password", &admin, Some(body))
+            .await
+            .status(),
+        403
+    );
+    let body = json!({ "email": "b@example.com", "password": "correct horse battery" });
+    assert_eq!(
+        post(&app, "/api/auth/users", &admin, Some(body))
+            .await
+            .status(),
+        403
+    );
+    let body = json!({ "email": "b@example.com" });
+    assert_eq!(
+        post(&app, "/api/auth/users", &admin, Some(body))
+            .await
+            .status(),
+        201
+    );
+    let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
+    let id = users[1]["id"].as_i64().unwrap();
+    let body = json!({ "new_password": "correct horse battery" });
+    let path = format!("/api/auth/users/{id}/password");
+    assert_eq!(post(&app, &path, &admin, Some(body)).await.status(), 403);
+
+    // Single sign-on signs both in.
+    for email in ["admin@example.com", "b@example.com"] {
+        let session = sign_in(&app, &provider, |login| {
+            provider::Claims::new(&provider, email, email, &login.nonce)
+        })
+        .await
+        .expect("signed in");
+        assert_eq!(
+            session_of(&app, Some(&session)).await["user"]["email"],
+            json!(email)
+        );
+    }
+}
+
+/// A request with an API key instead of the session.
+async fn with_key(
+    app: &TestApp,
+    method: Method,
+    path: &str,
+    key: &str,
+    body: Option<Value>,
+) -> Response {
+    let mut builder = app
+        .client
+        .request(method, format!("{}{path}", app.base))
+        .header("authorization", format!("Bearer {key}"));
+    if let Some(body) = body {
+        builder = builder.json(&body);
+    }
+    builder.send().await.unwrap()
+}
+
+async fn create_key(app: &TestApp, session: &str, scope: &str) -> Value {
+    let body = json!({ "name": format!("{scope} key"), "scope": scope });
+    let response = post(app, "/api/auth/api-keys", session, Some(body)).await;
+    assert_eq!(response.status(), 201);
+    json(response).await
+}
+
+#[tokio::test]
+async fn api_keys_are_capped_by_their_scope() {
+    let app = spawn_app().await;
+    let admin = admin_session(&app).await;
+
+    let read = create_key(&app, &admin, "read").await;
+    let token = read["token"].as_str().unwrap().to_string();
+    assert!(token.starts_with("potoo_") && token.len() == 70);
+    assert_eq!(read["key"]["prefix"], json!(&token[..12]));
+    assert_eq!(read["key"]["scope"], json!("read"));
+    let write = create_key(&app, &admin, "write").await["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let admin_key = create_key(&app, &admin, "admin").await["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Read: GET only.
+    let site = json!({ "hostname": "example.com" });
+    assert_eq!(
+        with_key(&app, Method::GET, "/api/sites", &token, None)
+            .await
+            .status(),
+        200
+    );
+    assert_eq!(
+        with_key(&app, Method::POST, "/api/sites", &token, Some(site.clone()))
+            .await
+            .status(),
+        403
+    );
+    // Write: changes, but no admin endpoints.
+    assert_eq!(
+        with_key(&app, Method::POST, "/api/sites", &write, Some(site))
+            .await
+            .status(),
+        201
+    );
+    assert_eq!(
+        with_key(&app, Method::GET, "/api/auth/users", &write, None)
+            .await
+            .status(),
+        403
+    );
+    // Admin: what the admin may.
+    assert_eq!(
+        with_key(&app, Method::GET, "/api/auth/users", &admin_key, None)
+            .await
+            .status(),
+        200
+    );
+
+    // No key reaches the account: not its keys, password or 2FA.
+    for key in [&token, &write, &admin_key] {
+        assert_eq!(
+            with_key(&app, Method::GET, "/api/auth/api-keys", key, None)
+                .await
+                .status(),
+            403
+        );
+        let body = json!({ "name": "more", "scope": "read" });
+        assert_eq!(
+            with_key(&app, Method::POST, "/api/auth/api-keys", key, Some(body))
+                .await
+                .status(),
+            403
+        );
+        assert_eq!(
+            with_key(&app, Method::POST, "/api/auth/totp/setup", key, None)
+                .await
+                .status(),
+            403
+        );
+    }
+
+    // Used: the list says when; the token is never listed.
+    let keys =
+        json(request(&app, Method::GET, "/api/auth/api-keys", Some(&admin), None).await).await;
+    assert_eq!(keys.as_array().unwrap().len(), 3);
+    assert!(keys[2]["last_used_at"].is_string());
+    assert!(!keys.to_string().contains(&token));
+
+    // Revoked, unknown or malformed: 401.
+    let id = read["key"]["id"].as_i64().unwrap();
+    let path = format!("/api/auth/api-keys/{id}");
+    assert_eq!(
+        request(&app, Method::DELETE, &path, Some(&admin), None)
+            .await
+            .status(),
+        204
+    );
+    assert_eq!(
+        request(&app, Method::DELETE, &path, Some(&admin), None)
+            .await
+            .status(),
+        404
+    );
+    assert_eq!(
+        with_key(&app, Method::GET, "/api/sites", &token, None)
+            .await
+            .status(),
+        401
+    );
+    assert_eq!(
+        with_key(&app, Method::GET, "/api/sites", "potoo_nope", None)
+            .await
+            .status(),
+        401
+    );
+    assert_eq!(
+        with_key(&app, Method::GET, "/api/sites", "nope", None)
+            .await
+            .status(),
+        401
+    );
+
+    // Bad requests.
+    for body in [
+        json!({ "name": "", "scope": "read" }),
+        json!({ "name": "x", "scope": "owner" }),
+        json!({ "name": "x", "scope": "read", "expires_in_days": 0 }),
+    ] {
+        assert_eq!(
+            post(&app, "/api/auth/api-keys", &admin, Some(body))
+                .await
+                .status(),
+            400
+        );
+    }
+    let body = json!({ "name": "x", "scope": "read", "expires_in_days": 30 });
+    let key = json(post(&app, "/api/auth/api-keys", &admin, Some(body)).await).await;
+    assert!(key["key"]["expires_at"].is_string());
+
+    // A regular user: no admin keys, and an admin key would not help.
+    let body = json!({ "email": "b@example.com", "password": "correct horse battery" });
+    post(&app, "/api/auth/users", &admin, Some(body)).await;
+    let user = cookie(&password_login(&app, "b@example.com").await);
+    let body = json!({ "name": "x", "scope": "admin" });
+    assert_eq!(
+        post(&app, "/api/auth/api-keys", &user, Some(body))
+            .await
+            .status(),
+        403
+    );
+    let user_key = create_key(&app, &user, "write").await["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(
+        with_key(&app, Method::GET, "/api/sites", &user_key, None)
+            .await
+            .status(),
+        200
+    );
+    // A user's keys go with them.
+    let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
+    let id = users[1]["id"].as_i64().unwrap();
+    let path = format!("/api/auth/users/{id}");
+    assert_eq!(
+        request(&app, Method::DELETE, &path, Some(&admin), None)
+            .await
+            .status(),
+        204
+    );
+    assert_eq!(
+        with_key(&app, Method::GET, "/api/sites", &user_key, None)
+            .await
+            .status(),
+        401
+    );
+}
+
+/// A single sign-on login that stops at a step: where it sent the browser,
+/// and the challenge cookie.
+async fn sso_step(app: &TestApp, provider: &provider::Provider, email: &str) -> (String, String) {
+    let login = start_login(app).await;
+    let code = provider.code_for(provider::Claims::new(provider, email, email, &login.nonce));
+    let response = callback(
+        app,
+        &format!("code={code}&state={}", login.state),
+        Some(&login.cookie),
+    )
+    .await;
+    assert_eq!(response.status(), 303);
+    assert_eq!(set_cookie(&response, auth::COOKIE), None);
+    let challenge = set_cookie(&response, "potoo_2fa").expect("the challenge cookie");
+    (location(&response), challenge)
+}
+
+#[tokio::test]
+async fn single_sign_on_asks_for_the_code_too() {
+    let app = spawn_app().await;
+    let admin = admin_session(&app).await;
+    let provider = provider::spawn().await;
+    configure(&app, &admin, &provider, json!({})).await;
+    let secret = enable(&app, &admin).await;
+
+    let (page, challenge) = sso_step(&app, &provider, "admin@example.com").await;
+    assert_eq!(page, "/login?step=totp");
+    // Not the enrolment step: that is for a user without the app.
+    let response = request(
+        &app,
+        Method::POST,
+        "/api/auth/login/totp/setup",
+        Some(&challenge),
+        None,
+    )
+    .await;
+    assert_eq!(response.status(), 401);
+    let response = second_step(&app, Some(&challenge), &totp_code(&secret, 1)).await;
+    assert_eq!(response.status(), 204);
+    let session = set_cookie(&response, auth::COOKIE).expect("the session cookie");
+    assert_eq!(
+        session_of(&app, Some(&session)).await["user"]["email"],
+        json!("admin@example.com")
+    );
+}
+
+#[tokio::test]
+async fn totp_required_makes_everyone_set_it_up() {
+    let provider = provider::spawn().await;
+    let app = spawn_app_full(
+        oidc::Env {
+            issuer: Some(provider.issuer.clone()),
+            client_id: Some(provider::CLIENT_ID.into()),
+            ..oidc::Env::default()
+        },
+        true,
+    )
+    .await;
+    // The session /setup made is not touched.
+    let admin = admin_session(&app).await;
+    assert_eq!(session_of(&app, None).await["totp_required"], json!(true));
+
+    // The password leads to setting the app up, not to a session.
+    let response = password_login(&app, "admin@example.com").await;
+    assert_eq!(response.status(), 200);
+    assert_eq!(set_cookie(&response, auth::COOKIE), None);
+    let challenge = set_cookie(&response, "potoo_2fa").unwrap();
+    assert_eq!(
+        json(response).await,
+        json!({ "totp_required": false, "totp_setup_required": true })
+    );
+    // Not the code step: there is no app yet.
+    assert_eq!(
+        second_step(&app, Some(&challenge), "123456").await.status(),
+        401
+    );
+    let enroll = |path: &'static str, body: Option<Value>| {
+        request(&app, Method::POST, path, Some(&challenge), body)
+    };
+    let response = enroll(
+        "/api/auth/login/totp/enable",
+        Some(json!({ "code": "123456" })),
+    )
+    .await;
+    assert_eq!(response.status(), 400);
+    let setup = json(enroll("/api/auth/login/totp/setup", None).await).await;
+    let secret = setup["secret"].as_str().unwrap().to_string();
+    let body = json!({ "code": totp_code(&secret, 0) });
+    let response = enroll("/api/auth/login/totp/enable", Some(body)).await;
+    assert_eq!(response.status(), 200);
+    let session = set_cookie(&response, auth::COOKIE).expect("the session cookie");
+    assert_eq!(json(response).await["codes"].as_array().unwrap().len(), 10);
+    assert_eq!(
+        session_of(&app, Some(&session)).await["user"]["totp_enabled"],
+        json!(true)
+    );
+    // It cannot be turned off.
+    let body = json!({ "code": totp_code(&secret, 1) });
+    assert_eq!(
+        post(&app, "/api/auth/totp/disable", &admin, Some(body))
+            .await
+            .status(),
+        403
+    );
+
+    // Single sign-on: a new user sets it up too; after an admin's reset,
+    // they set it up again.
+    let body = json!({ "email": "b@example.com" });
+    assert_eq!(
+        post(&app, "/api/auth/users", &admin, Some(body))
+            .await
+            .status(),
+        201
+    );
+    let (page, challenge) = sso_step(&app, &provider, "b@example.com").await;
+    assert_eq!(page, "/login?step=totp-setup");
+    let response = request(
+        &app,
+        Method::POST,
+        "/api/auth/login/totp/setup",
+        Some(&challenge),
+        None,
+    )
+    .await;
+    let secret = json(response).await["secret"].as_str().unwrap().to_string();
+    let response = request(
+        &app,
+        Method::POST,
+        "/api/auth/login/totp/enable",
+        Some(&challenge),
+        Some(json!({ "code": totp_code(&secret, 0) })),
+    )
+    .await;
+    assert_eq!(response.status(), 200);
+    let (page, _) = sso_step(&app, &provider, "b@example.com").await;
+    assert_eq!(page, "/login?step=totp");
+    let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
+    let id = users[1]["id"].as_i64().unwrap();
+    assert_eq!(reset_totp(&app, &admin, id).await.status(), 204);
+    let (page, _) = sso_step(&app, &provider, "b@example.com").await;
+    assert_eq!(page, "/login?step=totp-setup");
+}
+
+#[tokio::test]
+async fn the_authenticator_app_can_be_replaced() {
+    let app = spawn_app_full(oidc::Env::default(), true).await;
+    let admin = admin_session(&app).await;
+    // With TOTP_REQUIRED it cannot be turned off, but it can be replaced.
+    let old = enable(&app, &admin).await;
+    let key = create_key(&app, &admin, "admin").await["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let body = json!({ "code": totp_code(&old, 1) });
+    let response = with_key(
+        &app,
+        Method::POST,
+        "/api/auth/totp/replace",
+        &key,
+        Some(body),
+    )
+    .await;
+    assert_eq!(response.status(), 403);
+
+    // Confirming needs a replacement started, which needs a current code.
+    let body = json!({ "code": "123456" });
+    assert_eq!(
+        post(&app, "/api/auth/totp/replace/confirm", &admin, Some(body))
+            .await
+            .status(),
+        400
+    );
+    let body = json!({ "code": "abc" });
+    assert_eq!(
+        post(&app, "/api/auth/totp/replace", &admin, Some(body))
+            .await
+            .status(),
+        400
+    );
+    let body = json!({ "code": totp_code(&old, 1) });
+    let response = post(&app, "/api/auth/totp/replace", &admin, Some(body)).await;
+    assert_eq!(response.status(), 200);
+    let new = json(response).await["secret"].as_str().unwrap().to_string();
+    assert_ne!(new, old);
+
+    // A wrong code from the new app changes nothing.
+    let wrong = if totp_code(&new, 0) == "000000" {
+        "111111"
+    } else {
+        "000000"
+    };
+    let body = json!({ "code": wrong });
+    assert_eq!(
+        post(&app, "/api/auth/totp/replace/confirm", &admin, Some(body))
+            .await
+            .status(),
+        400
+    );
+    // Confirmed: the new app works, the old one does not.
+    let body = json!({ "code": totp_code(&new, 0) });
+    assert_eq!(
+        post(&app, "/api/auth/totp/replace/confirm", &admin, Some(body))
+            .await
+            .status(),
+        204
+    );
+    let response = password_login(&app, "admin@example.com").await;
+    let challenge = set_cookie(&response, "potoo_2fa").unwrap();
+    let old_code = totp_code(&old, 1);
+    if old_code != totp_code(&new, 1) {
+        assert_eq!(
+            second_step(&app, Some(&challenge), &old_code)
+                .await
+                .status(),
+            400
+        );
+    }
+    let response = second_step(&app, Some(&challenge), &totp_code(&new, 1)).await;
+    assert_eq!(response.status(), 204);
 }

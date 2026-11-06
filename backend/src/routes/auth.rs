@@ -1,9 +1,10 @@
 use crate::auth::{
-    COOKIE, DATE_FORMATS, User, create_session, current_user, destroy_session, hash_password,
-    verify_password,
+    COOKIE, DATE_FORMATS, KeyUse, Scope, User, create_session, current_user, destroy_session,
+    hash_password, iso, key_user, verify_password,
 };
 use crate::error::{ErrorBody, HttpError};
 use crate::extract::ApiJson;
+use crate::routes::totp::{Step, challenge_cookie, next_step};
 use crate::state::AppState;
 use crate::visitor::client_ip;
 use axum::Json;
@@ -16,6 +17,7 @@ use serde_json::json;
 use sqlx::SqliteExecutor;
 use std::net::SocketAddr;
 use std::sync::OnceLock;
+use std::time::{Duration, SystemTime};
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -34,9 +36,21 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(reset_password))
 }
 
-/// The signed-in user, as a request extractor: a valid session cookie or
-/// a 401.
-pub struct AuthUser(pub User);
+/// How a request is signed in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Access {
+    /// The session cookie: everything the user may do.
+    Session,
+    /// An API key (`Authorization: Bearer`), capped by its scope.
+    Key(Scope),
+}
+
+/// The signed-in user, as a request extractor: a valid session cookie, or
+/// an API key, or a 401. A read key is refused anything but GET and HEAD
+/// here (403); admin endpoints check the rest in `require_admin`. The
+/// account's own settings (email, password, two-factor authentication, API
+/// keys) take a `SessionUser` instead: no key reaches them.
+pub struct AuthUser(pub User, pub Access);
 
 impl FromRequestParts<AppState> for AuthUser {
     type Rejection = HttpError;
@@ -45,6 +59,19 @@ impl FromRequestParts<AppState> for AuthUser {
         parts: &mut axum::http::request::Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
+        if let Some(token) = bearer(&parts.headers) {
+            let (user, key) = key_user(state.db.reader(), token)
+                .await
+                .ok_or_else(HttpError::unauthorized)?;
+            if key.scope == Scope::Read && !parts.method.is_safe() {
+                return Err(HttpError {
+                    status: StatusCode::FORBIDDEN,
+                    message: "This API key can only read".into(),
+                });
+            }
+            note_key_use(state, &key).await;
+            return Ok(AuthUser(user, Access::Key(key.scope)));
+        }
         let jar = CookieJar::from_request_parts(parts, state)
             .await
             .map_err(|_| HttpError::unauthorized())?;
@@ -52,15 +79,66 @@ impl FromRequestParts<AppState> for AuthUser {
         let user = current_user(state.db.reader(), token)
             .await
             .ok_or_else(HttpError::unauthorized)?;
-        Ok(AuthUser(user))
+        Ok(AuthUser(user, Access::Session))
     }
 }
 
+/// The signed-in user of a session cookie only: an API key is refused
+/// (403), so a leaked key cannot change the account or make more keys.
+pub struct SessionUser(pub User);
+
+impl FromRequestParts<AppState> for SessionUser {
+    type Rejection = HttpError;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        match AuthUser::from_request_parts(parts, state).await? {
+            AuthUser(user, Access::Session) => Ok(SessionUser(user)),
+            AuthUser(_, Access::Key(_)) => Err(HttpError {
+                status: StatusCode::FORBIDDEN,
+                message: "Not with an API key: sign in".into(),
+            }),
+        }
+    }
+}
+
+/// The token of an `Authorization: Bearer` header.
+fn bearer(headers: &HeaderMap) -> Option<&str> {
+    let value = headers.get("authorization")?.to_str().ok()?;
+    let (scheme, token) = value.split_once(' ')?;
+    scheme.eq_ignore_ascii_case("bearer").then(|| token.trim())
+}
+
+/// Records when a key was used, at most once a minute, so that a busy
+/// script does not take the one writer for every request. A failure is
+/// only logged: the request goes on.
+async fn note_key_use(state: &AppState, key: &KeyUse) {
+    let now = SystemTime::now();
+    let stale = iso(now - Duration::from_secs(60));
+    if key
+        .last_used_at
+        .as_deref()
+        .is_some_and(|last| last > stale.as_str())
+    {
+        return;
+    }
+    if let Err(e) = sqlx::query("UPDATE api_keys SET last_used_at = ?1 WHERE id = ?2")
+        .bind(iso(now))
+        .bind(key.id)
+        .execute(state.db.writer())
+        .await
+    {
+        tracing::warn!("cannot record the use of API key {}: {e}", key.id);
+    }
+}
+
+/// Admin only: an admin's session, or an admin's admin-scoped key.
 pub(crate) fn require_admin(user: &AuthUser) -> Result<(), HttpError> {
-    if user.0.is_admin {
-        Ok(())
-    } else {
-        Err(HttpError::forbidden())
+    match user {
+        AuthUser(u, Access::Session | Access::Key(Scope::Admin)) if u.is_admin => Ok(()),
+        _ => Err(HttpError::forbidden()),
     }
 }
 
@@ -148,6 +226,12 @@ pub struct Session {
     /// Single sign-on, when it is on: null when it is off. Always present.
     #[schema(required = true)]
     pub oidc: Option<OidcLogin>,
+    /// False when single sign-on is the only way in (`OIDC_ONLY`): the
+    /// login page offers no password, and passwords cannot be set.
+    pub password_login: bool,
+    /// Whether every user must have two-factor authentication on
+    /// (`TOTP_REQUIRED`): it cannot be turned off.
+    pub totp_required: bool,
 }
 
 /// How the login page offers single sign-on.
@@ -215,6 +299,8 @@ pub struct UserRow {
     pub has_password: bool,
     /// Whether the user is linked to a single sign-on account.
     pub single_sign_on: bool,
+    /// Whether the user has two-factor authentication on.
+    pub totp_enabled: bool,
 }
 
 async fn has_users(state: &AppState) -> Result<bool, HttpError> {
@@ -261,6 +347,8 @@ async fn session(
         needs_setup,
         user,
         oidc,
+        password_login: state.oidc.passwords_allowed(),
+        totp_required: state.totp_required,
     }))
 }
 
@@ -326,11 +414,13 @@ async fn setup(
     tag = "Auth",
     operation_id = "login",
     summary = "Sign in",
-    description = "Sets the session cookie. After five failed attempts for one IP and email within 15 minutes the pair is locked out (429, with a Retry-After header).",
+    description = "Sets the session cookie. For a user with two-factor authentication on it answers `totp_required` instead, with a cookie good for five minutes: `/login/totp` with a code finishes the sign-in. With `TOTP_REQUIRED`, a user without it gets `totp_setup_required`: `/login/totp/setup` and `/login/totp/enable` set the app up and finish the sign-in. After five failed attempts for one IP and email within 15 minutes the pair is locked out (429, with a Retry-After header).",
     request_body(content = Credentials, content_type = "application/json"),
     responses(
+        (status = 200, description = "The password is right; two-factor authentication is next", body = LoginStep),
         (status = 204, description = "Signed in"),
         (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 403, description = "Password sign-in is turned off (`OIDC_ONLY`)", body = ErrorBody),
         (status = 429, description = "Too many attempts, try again later", body = ErrorBody),
     ),
 )]
@@ -341,6 +431,9 @@ async fn login(
     headers: HeaderMap,
     body: Result<ApiJson<Credentials>, HttpError>,
 ) -> Result<Response, HttpError> {
+    if !state.oidc.passwords_allowed() {
+        return Err(HttpError::passwords_off());
+    }
     // A malformed body fails the same way as a wrong password.
     let Ok(ApiJson(creds)) = body else {
         return Err(HttpError {
@@ -385,8 +478,29 @@ async fn login(
         });
     }
     state.throttle.clear(&key);
+    if let Some(step) = next_step(state.db.reader(), &state, id).await? {
+        return Ok((
+            challenge_cookie(&state, id, step, secure(&headers)),
+            Json(LoginStep {
+                totp_required: step == Step::Code,
+                totp_setup_required: step == Step::Enroll,
+            }),
+        )
+            .into_response());
+    }
     let jar = create_session(state.db.writer(), jar, id, secure(&headers)).await?;
     Ok((StatusCode::NO_CONTENT, jar).into_response())
+}
+
+/// The password was right, and two-factor authentication is the next step.
+/// Exactly one of the two is true.
+#[derive(Serialize, ToSchema)]
+pub struct LoginStep {
+    /// A code from the authenticator app is next (`/login/totp`).
+    pub totp_required: bool,
+    /// Setting the app up is next (`TOTP_REQUIRED`): `/login/totp/setup`,
+    /// then `/login/totp/enable`.
+    pub totp_setup_required: bool,
 }
 
 #[utoipa::path(
@@ -423,7 +537,7 @@ async fn logout(State(state): State<AppState>, jar: CookieJar) -> Result<Respons
 )]
 async fn change_email(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: SessionUser,
     ApiJson(body): ApiJson<ChangeEmail>,
 ) -> Result<Response, HttpError> {
     let email = validate_email(&body.email)?;
@@ -468,7 +582,7 @@ async fn change_email(
 )]
 async fn change_settings(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: SessionUser,
     ApiJson(body): ApiJson<ChangeSettings>,
 ) -> Result<Response, HttpError> {
     if body.date_format.is_none() && body.use_24.is_none() && body.theme.is_none() {
@@ -514,21 +628,25 @@ async fn change_settings(
     tag = "Account",
     operation_id = "changePassword",
     summary = "Change your own password",
-    description = "The current password is required, except for a user who has none (single sign-on): they set a first one.",
+    description = "The current password is required, except for a user who has none (single sign-on): they set a first one. Refused while password sign-in is turned off (`OIDC_ONLY`).",
     request_body(content = ChangePassword, content_type = "application/json"),
     responses(
         (status = 204, description = "Changed"),
         (status = 400, description = "The request is invalid", body = ErrorBody),
         (status = 401, description = "Not signed in", body = ErrorBody),
+        (status = 403, description = "Password sign-in is turned off (`OIDC_ONLY`)", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
     security(("session" = [])),
 )]
 async fn change_password(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: SessionUser,
     ApiJson(body): ApiJson<ChangePassword>,
 ) -> Result<Response, HttpError> {
+    if !state.oidc.passwords_allowed() {
+        return Err(HttpError::passwords_off());
+    }
     let invalid = || HttpError {
         status: StatusCode::UNAUTHORIZED,
         message: "Invalid password".into(),
@@ -580,7 +698,7 @@ async fn change_password(
         (status = 401, description = "Not signed in", body = ErrorBody),
         (status = 403, description = "Admin only", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn list_users(
     State(state): State<AppState>,
@@ -590,7 +708,8 @@ async fn list_users(
     let rows: Vec<UserRow> = sqlx::query_as(
         "SELECT id, email, is_admin, created_at, password_hash IS NOT NULL AS has_password,
                     EXISTS (SELECT 1 FROM user_identities i WHERE i.user_id = users.id)
-                      AS single_sign_on
+                      AS single_sign_on,
+                    totp_secret IS NOT NULL AS totp_enabled
              FROM users ORDER BY id",
     )
     .fetch_all(state.db.reader())
@@ -604,7 +723,7 @@ async fn list_users(
     tag = "Users",
     operation_id = "createUser",
     summary = "Create a user",
-    description = "The password may be left out while single sign-on is on.",
+    description = "The password may be left out while single sign-on is on. With `OIDC_ONLY` no password is taken: the user signs in through the provider.",
     request_body(content = CreateUser, content_type = "application/json"),
     responses(
         (status = 201, description = "Created"),
@@ -614,7 +733,7 @@ async fn list_users(
         (status = 409, description = "Conflict", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn create_user(
     State(state): State<AppState>,
@@ -624,8 +743,13 @@ async fn create_user(
     require_admin(&user)?;
     let email = validate_email(&body.email)?;
     // Without a password the user can only sign in through the provider.
-    let password_hash = match body.password.as_deref().filter(|p| !p.is_empty()) {
+    let password = body.password.as_deref().filter(|p| !p.is_empty());
+    if password.is_some() && !state.oidc.passwords_allowed() {
+        return Err(HttpError::passwords_off());
+    }
+    let password_hash = match password {
         Some(password) => Some(hash_password(&validate_password(password)?)),
+        None if !state.oidc.passwords_allowed() => None,
         None if state.oidc.settings().enabled() => None,
         None => {
             return Err(HttpError::bad_request(
@@ -674,7 +798,7 @@ async fn create_user(
         (status = 409, description = "Conflict", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn change_role(
     State(state): State<AppState>,
@@ -723,7 +847,7 @@ async fn change_role(
         (status = 403, description = "Admin only", body = ErrorBody),
         (status = 409, description = "Conflict", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn delete_user(
     State(state): State<AppState>,
@@ -761,17 +885,18 @@ async fn delete_user(
     tag = "Users",
     operation_id = "resetUserPassword",
     summary = "Set a new password for a user",
+    description = "Refused while password sign-in is turned off (`OIDC_ONLY`).",
     params(("id" = i64, Path, description = "The user id")),
     request_body(content = ResetPassword, content_type = "application/json"),
     responses(
         (status = 204, description = "Changed"),
         (status = 400, description = "The request is invalid", body = ErrorBody),
         (status = 401, description = "Not signed in", body = ErrorBody),
-        (status = 403, description = "Admin only", body = ErrorBody),
+        (status = 403, description = "Admin only, or password sign-in is turned off (`OIDC_ONLY`)", body = ErrorBody),
         (status = 404, description = "Not found", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
-    security(("session" = [])),
+    security(("session" = []), ("api_key" = [])),
 )]
 async fn reset_password(
     State(state): State<AppState>,
@@ -780,6 +905,9 @@ async fn reset_password(
     ApiJson(body): ApiJson<ResetPassword>,
 ) -> Result<Response, HttpError> {
     require_admin(&user)?;
+    if !state.oidc.passwords_allowed() {
+        return Err(HttpError::passwords_off());
+    }
     let password = validate_password(&body.new_password)?;
     let updated = sqlx::query("UPDATE users SET password_hash = ?1 WHERE id = ?2")
         .bind(hash_password(&password))

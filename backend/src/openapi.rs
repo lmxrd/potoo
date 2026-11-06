@@ -7,7 +7,7 @@
 //! the dashboard endpoints are secured with.
 
 use crate::auth::COOKIE;
-use utoipa::openapi::security::{ApiKey, ApiKeyValue, SecurityScheme};
+use utoipa::openapi::security::{ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
 #[derive(OpenApi)]
@@ -15,8 +15,8 @@ use utoipa::{Modify, OpenApi};
     info(
         title = "Potoo API",
         description = "The API of Potoo, a small, privacy-friendly, self-hosted web analytics tool. \
-            The dashboard endpoints need the session cookie from /api/login (or /api/setup); the \
-            tracking endpoints are public.",
+            The dashboard endpoints need the session cookie from /api/login (or /api/setup), or \
+            an API key as `Authorization: Bearer`; the tracking endpoints are public.",
     ),
     tags(
         (name = "Auth", description = "Signing in and out, and the first-run setup"),
@@ -43,6 +43,22 @@ impl Modify for SessionCookie {
             .add_security_scheme(
                 "session",
                 SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::new(COOKIE))),
+            );
+        // API keys (`potoo_...`), made in the settings: on the endpoints that
+        // list it, capped by the key's scope.
+        openapi
+            .components
+            .get_or_insert_with(Default::default)
+            .add_security_scheme(
+                "api_key",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .description(Some(
+                            "An API key: `read` keys may only GET, `write` keys reach no admin endpoint.",
+                        ))
+                        .build(),
+                ),
             );
     }
 }
