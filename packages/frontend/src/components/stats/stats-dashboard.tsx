@@ -1,7 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { BarList } from "./bar-list";
 import { PageViewsChart } from "./page-views-chart";
-import { bucketLabel, chartLabel, formatDate, formatTime } from "../../lib/dates";
+import { useFormatters } from "../../lib/use-formatters";
 import type { SiteStats } from "potoo-sdk";
 import type { FacetFilters } from "../../lib/filter";
 import { facetLabel } from "../../lib/labels";
@@ -9,19 +9,16 @@ import { facetLabel } from "../../lib/labels";
 /** The dashboard content: totals, the chart and the breakdowns. */
 export function StatsDashboard({
   stats,
-  dateFormat = "YYYY-MM-DD",
-  use24 = true,
   filters,
   onToggleFilter,
 }: {
   stats: SiteStats;
-  dateFormat?: string;
-  use24?: boolean;
   filters: FacetFilters;
   onToggleFilter: (facet: string, value: string) => void;
 }) {
+  const format = useFormatters();
   const label = (day: string) =>
-    stats.bucket ? bucketLabel(day, stats.bucket, use24) : chartLabel(day, stats.days, use24);
+    stats.bucket ? format.bucketLabel(day, stats.bucket) : format.chartLabel(day, stats.days);
   return (
     <>
       <div className="grid grid-cols-2 gap-4">
@@ -48,15 +45,7 @@ export function StatsDashboard({
           <CardTitle>Page views</CardTitle>
         </CardHeader>
         <CardContent>
-          <PageViewsChart
-            rows={stats.byDay}
-            axisLabel={label}
-            describe={(day) =>
-              day.length > 10
-                ? `${formatDate(day.slice(0, 10), dateFormat)} ${formatTime(day.slice(11, 16), use24)}`
-                : formatDate(day, dateFormat)
-            }
-          />
+          <PageViewsChart rows={stats.byDay} axisLabel={label} describe={format.bucket} />
         </CardContent>
       </Card>
 

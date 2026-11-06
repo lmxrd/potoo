@@ -63,8 +63,6 @@ function SitePage() {
         range={range}
         onRange={setRange}
         stats={stats}
-        dateFormat={session.user?.date_format}
-        use24={session.user?.use_24}
         filters={filters}
         onFilters={setFilters}
         exportUrl={params ? exportHref(params) : undefined}
@@ -72,13 +70,7 @@ function SitePage() {
 
       <ErrorText>{statsError && errorMessage(statsError)}</ErrorText>
       {stats ? (
-        <StatsDashboard
-          stats={stats}
-          dateFormat={session.user?.date_format}
-          use24={session.user?.use_24}
-          filters={filters}
-          onToggleFilter={toggle}
-        />
+        <StatsDashboard stats={stats} filters={filters} onToggleFilter={toggle} />
       ) : (
         !statsError && <p className="text-muted-foreground">Loading…</p>
       )}

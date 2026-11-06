@@ -84,6 +84,10 @@ folder:
   `dark:`) and an accent (`--accent-color` and `--on-accent-color`, set by
   `applyTheme` in `src/lib/themes.ts`); `--primary` is the accent and
   `--accent` (shadcn's) a wash of it for hovers.
+- **Dates and times:** show them with `useFormatters()`
+  (`src/lib/use-formatters.ts`), bound to the signed-in user's date format
+  and clock; the pure functions under it are in `src/lib/dates.ts`. Do not
+  pass the user's `date_format` or `use_24` down as props to format with.
 - **Duplicated lists:** the date formats (`src/lib/dates.ts`) and the single
   sign-on error codes (`src/routes/login.tsx`) are listed in the backend
   too: change both.

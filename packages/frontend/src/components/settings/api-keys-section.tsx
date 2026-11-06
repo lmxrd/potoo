@@ -11,7 +11,7 @@ import {
 } from "potoo-sdk/react-query";
 import type { Scope } from "potoo-sdk/types";
 import { errorMessage } from "../../lib/api";
-import { formatDate } from "../../lib/dates";
+import { useFormatters } from "../../lib/use-formatters";
 import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { useConfirm } from "../common/confirm-dialog";
@@ -34,7 +34,7 @@ const EXPIRIES = [
  * its token once, and revoke them. Keys are sent as
  * `Authorization: Bearer <token>`.
  */
-export function ApiKeysSection({ isAdmin, dateFormat }: { isAdmin: boolean; dateFormat: string }) {
+export function ApiKeysSection({ isAdmin }: { isAdmin: boolean }) {
   const confirm = useConfirm();
   const queryClient = useQueryClient();
   const { data: keys, error: listError } = useQuery(listApiKeysOptions());
@@ -50,7 +50,7 @@ export function ApiKeysSection({ isAdmin, dateFormat }: { isAdmin: boolean; date
   // When the list is checked for expired keys, taken once (a render must not read the clock).
   const [now] = useState(() => Date.now());
   const scopes = SCOPES.filter((s) => s.value !== "admin" || isAdmin);
-  const date = (value: string) => formatDate(value, dateFormat);
+  const { date } = useFormatters();
 
   return (
     <div className="space-y-4">

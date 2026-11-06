@@ -16,7 +16,6 @@ export const Route = createFileRoute("/")({
 });
 
 function Overview() {
-  const { session } = Route.useRouteContext();
   const search = Route.useSearch();
   const navigate = useNavigate();
   const { data: sites, error: sitesError } = useQuery(listSitesOptions());
@@ -62,21 +61,13 @@ function Overview() {
         range={range}
         onRange={setRange}
         stats={stats}
-        dateFormat={session.user?.date_format}
-        use24={session.user?.use_24}
         filters={filters}
         onFilters={setFilters}
         exportUrl={params ? exportHref(params) : undefined}
       />
       <ErrorText>{statsError && errorMessage(statsError)}</ErrorText>
       {stats ? (
-        <StatsDashboard
-          stats={stats}
-          dateFormat={session.user?.date_format}
-          use24={session.user?.use_24}
-          filters={filters}
-          onToggleFilter={toggle}
-        />
+        <StatsDashboard stats={stats} filters={filters} onToggleFilter={toggle} />
       ) : (
         !statsError && <p className="text-muted-foreground">Loading…</p>
       )}

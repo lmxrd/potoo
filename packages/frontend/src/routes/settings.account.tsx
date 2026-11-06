@@ -18,7 +18,7 @@ function Account() {
           <CardTitle>API keys</CardTitle>
         </CardHeader>
         <CardContent>
-          <ApiKeysSection isAdmin={session.user!.is_admin} dateFormat={session.user!.date_format} />
+          <ApiKeysSection isAdmin={session.user!.is_admin} />
         </CardContent>
       </Card>
     </div>

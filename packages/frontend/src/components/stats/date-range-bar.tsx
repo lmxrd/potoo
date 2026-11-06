@@ -6,6 +6,7 @@ import { Input } from "../ui/input";
 import type { SiteStats } from "potoo-sdk";
 import { FACETS, type FacetFilters } from "../../lib/filter";
 import { facetLabel } from "../../lib/labels";
+import { useFormatters } from "../../lib/use-formatters";
 import {
   RANGE_PRESETS,
   localInput,
@@ -30,8 +31,6 @@ export function DateRangeBar({
   range,
   onRange,
   stats = null,
-  dateFormat,
-  use24,
   filters,
   onFilters,
   exportUrl,
@@ -39,13 +38,12 @@ export function DateRangeBar({
   range: DateRange;
   onRange: (range: DateRange) => void;
   stats?: SiteStats | null;
-  dateFormat?: string;
-  use24?: boolean;
   filters: FacetFilters;
   onFilters: (filters: FacetFilters) => void;
   /** Where the view downloads as CSV; none while the range is invalid. */
   exportUrl?: string;
 }) {
+  const format = useFormatters();
   const window = rangeWindow(range);
   const applied = {
     from: range.preset === "custom" ? range.from : (window && localInput(window.from)) || "",
@@ -187,7 +185,7 @@ export function DateRangeBar({
       </div>
 
       <p className="mt-2 text-xs text-muted-foreground">
-        {rangeSummary(range, dateFormat, use24)}
+        {rangeSummary(range, format.dateFormat, format.use24)}
         {stats &&
           ` \u00b7 ${stats.pageviews.toLocaleString()} page views \u00b7 ${stats.visitors.toLocaleString()} visitors`}
       </p>
