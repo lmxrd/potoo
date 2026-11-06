@@ -116,9 +116,11 @@ function Settings() {
 
 function DateFormat({ current }: { current: string }) {
   const [value, setValue] = useState(current);
+  // The example date, taken once (a render must not read the clock).
+  const [today] = useState(() => new Date().toISOString());
   const [error, setError] = useState<string>();
   const router = useRouter();
-  const change = useMutation(changeSettingsMutation());
+  const change = useMutation({ ...changeSettingsMutation(), meta: { inline: true } });
   return (
     <div className="space-y-2">
       <Select
@@ -150,7 +152,7 @@ function DateFormat({ current }: { current: string }) {
         </SelectContent>
       </Select>
       <p className="text-xs text-muted-foreground">
-        Dates across the app, for example {formatDate(new Date().toISOString(), value)}.
+        Dates across the app, for example {formatDate(today, value)}.
       </p>
       <ErrorText>{error}</ErrorText>
     </div>
@@ -161,7 +163,7 @@ function TimeFormat({ current }: { current: boolean }) {
   const [value, setValue] = useState(current);
   const [error, setError] = useState<string>();
   const router = useRouter();
-  const change = useMutation(changeSettingsMutation());
+  const change = useMutation({ ...changeSettingsMutation(), meta: { inline: true } });
   return (
     <div className="space-y-2">
       <label className="flex items-center gap-2 text-sm">
@@ -202,7 +204,7 @@ const BASES: { value: Theme["base"]; label: string }[] = [
 function ThemePicker({ current }: { current: Theme }) {
   const [error, setError] = useState<string>();
   const router = useRouter();
-  const change = useMutation(changeSettingsMutation());
+  const change = useMutation({ ...changeSettingsMutation(), meta: { inline: true } });
   const active = THEMES.find((preset) => sameTheme(preset.theme, current));
 
   const save = async (next: Theme) => {
@@ -289,7 +291,7 @@ function ChangeEmail({ current }: { current: string }) {
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const router = useRouter();
-  const changeEmail = useMutation(changeEmailMutation());
+  const changeEmail = useMutation({ ...changeEmailMutation(), meta: { inline: true } });
   return (
     <form
       className="flex flex-col gap-3"
@@ -331,7 +333,7 @@ function ChangePassword({ hasPassword }: { hasPassword: boolean }) {
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const router = useRouter();
-  const changePassword = useMutation(changePasswordMutation());
+  const changePassword = useMutation({ ...changePasswordMutation(), meta: { inline: true } });
   return (
     <form
       className="flex flex-col gap-3"

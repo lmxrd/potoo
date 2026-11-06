@@ -47,8 +47,8 @@ function SitePage() {
     enabled: params !== null,
     placeholderData: keepPreviousData,
   });
-  const updateSite = useMutation(updateSiteMutation());
-  const deleteSite = useMutation(deleteSiteMutation());
+  const updateSite = useMutation({ ...updateSiteMutation(), meta: { inline: true } });
+  const deleteSite = useMutation({ ...deleteSiteMutation(), meta: { inline: true } });
   const reloadSite = () =>
     queryClient.invalidateQueries({ queryKey: getSiteQueryKey({ path: { id: siteId } }) });
 

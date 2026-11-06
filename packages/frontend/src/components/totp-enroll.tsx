@@ -17,8 +17,8 @@ export function TotpEnroll({ onDone, onRestart }: { onDone: () => void; onRestar
   const [codes, setCodes] = useState<string[]>();
   const [code, setCode] = useState("");
   const [error, setError] = useState<string>();
-  const start = useMutation(loginTotpSetupMutation());
-  const enable = useMutation(loginTotpEnableMutation());
+  const start = useMutation({ ...loginTotpSetupMutation(), meta: { inline: true } });
+  const enable = useMutation({ ...loginTotpEnableMutation(), meta: { inline: true } });
 
   if (codes) {
     return (

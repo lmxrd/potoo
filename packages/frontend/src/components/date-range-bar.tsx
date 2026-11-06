@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { DownloadIcon } from "lucide-react";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
@@ -55,10 +55,14 @@ export function DateRangeBar({
   // edited. Its inputs hold their own text until Apply puts it in the URL.
   const [open, setOpen] = useState(range.preset === "custom");
   const [draft, setDraft] = useState<{ from: string; to: string } | null>(null);
-  useEffect(() => {
+  // When the URL's preset changes, the row follows it (adjusted while
+  // rendering rather than in an effect, so there is no extra render).
+  const [shownPreset, setShownPreset] = useState(range.preset);
+  if (shownPreset !== range.preset) {
+    setShownPreset(range.preset);
     setOpen(range.preset === "custom");
     setDraft(null);
-  }, [range.preset]);
+  }
 
   const shown = draft ?? applied;
   const canApply = rangeQuery({ preset: "custom", from: shown.from, to: shown.to }) !== null;
@@ -66,7 +70,7 @@ export function DateRangeBar({
   const apply = () => {
     if (!canApply) return;
     // The draft stays: clearing it here would show the old range for the
-    // moment before the navigation lands. The sync effect below clears it
+    // moment before the navigation lands. The preset check above clears it
     // once the URL holds the new range.
     onRange({ preset: "custom", from: shown.from, to: shown.to });
   };
@@ -92,7 +96,7 @@ export function DateRangeBar({
               size="sm"
               variant={!open && range.preset === preset.value ? "default" : "outline"}
               onClick={() => {
-                // Explicit: the URL effect alone would miss the case where
+                // Explicit: the preset check alone would miss the case where
                 // this preset is already the one in the URL.
                 setOpen(false);
                 setDraft(null);

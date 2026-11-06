@@ -20,7 +20,7 @@ export const Route = createFileRoute("/import")({
 
 function Import() {
   const queryClient = useQueryClient();
-  const importHits = useMutation(importHitsMutation());
+  const importHits = useMutation({ ...importHitsMutation(), meta: { inline: true } });
   const [file, setFile] = useState<File | null>(null);
   const [text, setText] = useState("");
   const [createSites, setCreateSites] = useState(false);

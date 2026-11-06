@@ -97,6 +97,7 @@ describe("statsQuery", () => {
 
 describe("cn", () => {
   it("joins class names and lets the last Tailwind utility win", () => {
-    expect(cn("px-2 text-sm", false && "hidden", "px-4")).toBe("text-sm px-4");
+    const hidden = false as boolean;
+    expect(cn("px-2 text-sm", hidden && "hidden", "px-4")).toBe("text-sm px-4");
   });
 });

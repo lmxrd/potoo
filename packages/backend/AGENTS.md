@@ -216,7 +216,8 @@ it** (nothing is committed or served):
   regenerate it: use the mise tasks (`mise run gen:sdk`).
 - Frontend code calls the API through the generated query options and
   mutations (`potoo-sdk/react-query`) with TanStack Query,
-  and shows errors with `errorMessage` from `lib/api.ts`. The one
+  and shows errors inline with `errorMessage` from `lib/api.ts`, or as a
+  toast (see `packages/frontend/AGENTS.md`). The one
   exception is the single sign-on button on the login page: a plain link to
   `/api/auth/oidc/login`, because the browser must go to the provider.
 - `.pnpmfile.cjs` (at the root) gives hey-api its own TypeScript 6: the project

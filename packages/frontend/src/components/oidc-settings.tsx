@@ -42,7 +42,7 @@ function Form({
 }) {
   const queryClient = useQueryClient();
   const router = useRouter();
-  const update = useMutation(updateOidcSettingsMutation());
+  const update = useMutation({ ...updateOidcSettingsMutation(), meta: { inline: true } });
   const [values, setValues] = useState<Record<TextField, string>>({
     issuer: settings.issuer,
     client_id: settings.client_id,

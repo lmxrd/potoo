@@ -36,11 +36,11 @@ function Users() {
   const { data: users, error } = useQuery(listUsersOptions());
   const queryClient = useQueryClient();
   const reload = () => queryClient.invalidateQueries({ queryKey: listUsersQueryKey() });
-  const createUser = useMutation(createUserMutation());
-  const changeRole = useMutation(changeUserRoleMutation());
-  const deleteUser = useMutation(deleteUserMutation());
-  const resetPassword = useMutation(resetUserPasswordMutation());
-  const resetTotp = useMutation(resetUserTotpMutation());
+  const createUser = useMutation({ ...createUserMutation(), meta: { inline: true } });
+  const changeRole = useMutation({ ...changeUserRoleMutation(), meta: { inline: true } });
+  const deleteUser = useMutation({ ...deleteUserMutation(), meta: { inline: true } });
+  const resetPassword = useMutation({ ...resetUserPasswordMutation(), meta: { inline: true } });
+  const resetTotp = useMutation({ ...resetUserTotpMutation(), meta: { inline: true } });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [admin, setAdmin] = useState(false);

@@ -28,12 +28,12 @@ export function TotpSettings({ enabled, required }: { enabled: boolean; required
   const [codes, setCodes] = useState<string[]>();
   const [code, setCode] = useState("");
   const [error, setError] = useState<string>();
-  const start = useMutation(setupTotpMutation());
-  const enable = useMutation(enableTotpMutation());
-  const disable = useMutation(disableTotpMutation());
-  const regenerate = useMutation(regenerateRecoveryCodesMutation());
-  const replace = useMutation(replaceTotpMutation());
-  const confirmReplace = useMutation(confirmReplaceTotpMutation());
+  const start = useMutation({ ...setupTotpMutation(), meta: { inline: true } });
+  const enable = useMutation({ ...enableTotpMutation(), meta: { inline: true } });
+  const disable = useMutation({ ...disableTotpMutation(), meta: { inline: true } });
+  const regenerate = useMutation({ ...regenerateRecoveryCodesMutation(), meta: { inline: true } });
+  const replace = useMutation({ ...replaceTotpMutation(), meta: { inline: true } });
+  const confirmReplace = useMutation({ ...confirmReplaceTotpMutation(), meta: { inline: true } });
   const [replacement, setReplacement] = useState<TotpSetup>();
   const [replaced, setReplaced] = useState(false);
 

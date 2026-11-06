@@ -1,4 +1,4 @@
-import { useMutation, type QueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import {
   createRootRouteWithContext,
   Link,
@@ -18,8 +18,9 @@ import {
   DropdownMenuTrigger,
 } from "../components/ui/dropdown-menu";
 import { applyTheme, parseTheme } from "../lib/theme";
+import type { RouterContext } from "../router";
 
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+export const Route = createRootRouteWithContext<RouterContext>()({
   // Every page goes through here: first-run → /setup, signed-out → /login.
   beforeLoad: async ({ location, context }) => {
     // Always fresh: the session changes with settings and sign-ins.

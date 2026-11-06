@@ -38,8 +38,8 @@ export function ApiKeys({ isAdmin, dateFormat }: { isAdmin: boolean; dateFormat:
   const confirm = useConfirm();
   const queryClient = useQueryClient();
   const { data: keys, error: listError } = useQuery(listApiKeysOptions());
-  const create = useMutation(createApiKeyMutation());
-  const revoke = useMutation(revokeApiKeyMutation());
+  const create = useMutation({ ...createApiKeyMutation(), meta: { inline: true } });
+  const revoke = useMutation({ ...revokeApiKeyMutation(), meta: { inline: true } });
   const [name, setName] = useState("");
   const [scope, setScope] = useState<Scope>("read");
   const [expiry, setExpiry] = useState(0);
@@ -47,6 +47,8 @@ export function ApiKeys({ isAdmin, dateFormat }: { isAdmin: boolean; dateFormat:
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string>();
   const reload = () => queryClient.invalidateQueries({ queryKey: listApiKeysQueryKey() });
+  // When the list is checked for expired keys, taken once (a render must not read the clock).
+  const [now] = useState(() => Date.now());
   const scopes = SCOPES.filter((s) => s.value !== "admin" || isAdmin);
   const date = (value: string) => formatDate(value, dateFormat);
 
@@ -146,7 +148,7 @@ export function ApiKeys({ isAdmin, dateFormat }: { isAdmin: boolean; dateFormat:
       {keys && keys.length > 0 && (
         <ul className="divide-y divide-border border-t border-border text-sm">
           {keys.map((k) => {
-            const expired = k.expires_at !== null && new Date(k.expires_at) < new Date();
+            const expired = k.expires_at !== null && Date.parse(k.expires_at) < now;
             return (
               <li key={k.id} className="flex items-center justify-between gap-2 py-2">
                 <div className="min-w-0">

@@ -23,8 +23,8 @@ export function CredentialsForm({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string>();
-  const login = useMutation(loginMutation());
-  const setup = useMutation(setupMutation());
+  const login = useMutation({ ...loginMutation(), meta: { inline: true } });
+  const setup = useMutation({ ...setupMutation(), meta: { inline: true } });
   return (
     <form
       className="flex max-w-sm flex-col gap-3"

@@ -24,7 +24,7 @@ function SitesPage() {
   const isAdmin = session.user?.is_admin;
   const { data: sites, error } = useQuery(listSitesOptions());
   const queryClient = useQueryClient();
-  const createSite = useMutation(createSiteMutation());
+  const createSite = useMutation({ ...createSiteMutation(), meta: { inline: true } });
   const navigate = useNavigate();
   const [hostname, setHostname] = useState("");
   const [formError, setFormError] = useState<string>();

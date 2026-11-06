@@ -14,7 +14,7 @@ export function TotpForm({ onDone, onRestart }: { onDone: () => void; onRestart:
   const [code, setCode] = useState("");
   const [recovery, setRecovery] = useState(false);
   const [error, setError] = useState<string>();
-  const login = useMutation(loginTotpMutation());
+  const login = useMutation({ ...loginTotpMutation(), meta: { inline: true } });
   return (
     <form
       className="flex max-w-sm flex-col gap-3"
