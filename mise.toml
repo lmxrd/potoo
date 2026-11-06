@@ -23,16 +23,19 @@ watchexec = "2.8.0"
 # The Rust backend on :8000 (with the Vite proxy in front of the frontend
 # for /api), and the frontend dev server.
 [tasks.dev]
+description = "Run dev mode"
 depends = ["dev:backend", "dev:frontend"]
 
 # Restarted when its code changes. It needs packages/frontend/dist to exist
 # to compile, even in debug.
 [tasks."dev:backend"]
+description = "Run and watch for changes for the backend"
 depends = ["build:frontend"]
 run = "watchexec --restart --stop-signal SIGINT --watch src --watch migrations --watch Cargo.toml --watch Cargo.lock --exts rs,toml,sql --ignore '**/target/**' -- cargo run"
 dir = "{{ config_root }}/packages/backend"
 
 [tasks."dev:frontend"]
+description = "Run the frontend dev server"
 depends = ["install:frontend", "gen:sdk"]
 run = "pnpm run dev"
 dir = "{{ config_root }}/packages/frontend"
@@ -40,6 +43,7 @@ dir = "{{ config_root }}/packages/frontend"
 # Run the server against a built frontend. Depends on the build so a stale
 # binary can never serve yesterday's code.
 [tasks.start]
+description = "Build the release binary and run it"
 depends = ["build"]
 run = "../../dist/potoo"
 dir = "{{ config_root }}/packages/backend"
@@ -51,6 +55,7 @@ dir = "{{ config_root }}/packages/backend"
 # task depends on this, so a fresh checkout (CI included) works; pnpm
 # installs frozen when CI is set.
 [tasks."install:frontend"]
+description = "Install the JavaScript workspace (frontend, SDK and e2e) from the root lockfile"
 run = "pnpm install"
 sources = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "packages/*/package.json"]
 outputs = ["node_modules/.pnpm/lock.yaml"]
@@ -63,6 +68,7 @@ dir = "{{ config_root }}"
 # The OpenAPI spec, written by the backend without the frontend embedded
 # (--features spec): the SDK is generated from it, so the spec comes first.
 [tasks."gen:spec"]
+description = "Generate the OpenAPI spec from the backend"
 run = "cargo run --features spec --bin specs"
 sources = ["src/**/*", "migrations/**/*", "Cargo.toml", "Cargo.lock", "build.rs"]
 outputs = ["target/specs/openapi.json", "target/specs/openapi.yaml"]
@@ -72,6 +78,7 @@ dir = "{{ config_root }}/packages/backend"
 # the spec, never committed. One task, so that tasks running side by side
 # never generate it twice at once.
 [tasks."gen:sdk"]
+description = "Regenerate the SDK (packages/sdk) from the OpenAPI spec"
 depends = ["install:frontend", "gen:spec"]
 run = "pnpm run openapi-ts"
 sources = ["../backend/target/specs/openapi.json", "openapi-ts.config.ts"]
@@ -86,6 +93,7 @@ dir = "{{ config_root }}/packages/sdk"
 # directory, wherever cargo is configured to put it (cargo has no stable
 # flag to put one artifact elsewhere).
 [tasks.build]
+description = "Build the release binary for this machine, with the frontend embedded, into dist/potoo"
 depends = ["build:frontend"]
 run = """
 cargo build --release
@@ -104,6 +112,7 @@ outputs = ["../../dist/potoo"]
 dir = "{{ config_root }}/packages/backend"
 
 [tasks."build:frontend"]
+description = "Build the frontend bundle into frontend/dist"
 depends = ["install:frontend", "gen:sdk"]
 run = "pnpm run build"
 sources = [
@@ -122,23 +131,26 @@ dir = "{{ config_root }}/packages/frontend"
 # built outside the image, with this machine's cargo cache. ARCH=amd64 or
 # arm64 picks the architecture (default: this machine's).
 [tasks."build:linux"]
+description = "Build the static (musl) Linux binary for this machine's CPU architecture into dist/, with the frontend embedded"
 depends = ["build:frontend"]
 run = "scripts/build-linux.sh"
 
 # The image: Alpine and the binary above, for the architecture of this
 # machine (ARCH=amd64 with --platform linux/amd64 builds the other one).
 [tasks."build:docker"]
+description = "Build the container image from the Linux binary in dist/ (for this machine's architecture)"
 depends = ["build:linux"]
-run = "podman build -t potoo ."
+run = "podman build --format docker -t potoo ."
 
 # The image with a CPU profiler: stop the container (SIGTERM) and the
 # flamegraph is written to /data/flamegraph.svg. Never push this one.
 [tasks."build:profiling"]
+description = "Build a CPU-profiling image (never push it)"
 depends = ["build:frontend"]
 run = """
 PROFILE=profiling FEATURES=profiling scripts/build-linux.sh
 arch=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
-podman build --build-arg BINARY=dist/potoo-linux-$arch-profiling -t potoo:profiling .
+podman build --format docker --build-arg BINARY=dist/potoo-linux-$arch-profiling -t potoo:profiling .
 """
 
 # ---------------------------------------------------------------------------
@@ -146,10 +158,12 @@ podman build --build-arg BINARY=dist/potoo-linux-$arch-profiling -t potoo:profil
 # ---------------------------------------------------------------------------
 
 [tasks.check]
+description = "Run each stack's checks"
 depends = ["check:frontend", "check:backend"]
 
 # rust-embed needs packages/frontend/dist to exist to compile, hence the build.
 [tasks."check:backend"]
+description = "Run backend checks (rustfmt, clippy)"
 depends = ["build:frontend"]
 run = """
 cargo fmt --check \
@@ -159,18 +173,22 @@ cargo fmt --check \
 dir = "{{ config_root }}/packages/backend"
 
 [tasks."check:frontend"]
+description = "Run frontend checks (typecheck, lint, format)"
 depends = ["install:frontend", "gen:sdk"]
 run = "pnpm run check"
 dir = "{{ config_root }}/packages/frontend"
 
 [tasks.fix]
+description = "Auto-fix in each stack"
 depends = ["fix:backend", "fix:frontend"]
 
 [tasks."fix:backend"]
+description = "Auto-fix backend formatting"
 run = "cargo fmt"
 dir = "{{ config_root }}/packages/backend"
 
 [tasks."fix:frontend"]
+description = "Auto-fix frontend lint and formatting"
 depends = ["install:frontend"]
 run = "pnpm run fix"
 dir = "{{ config_root }}/packages/frontend"
@@ -178,15 +196,18 @@ dir = "{{ config_root }}/packages/frontend"
 # Unit and integration tests: the backend's (cargo) and the frontend's
 # (Vitest). The end-to-end smoke tests are `test:e2e`.
 [tasks.test]
+description = "Run each stack's tests"
 depends = ["test:backend", "test:frontend"]
 
 [tasks."test:backend"]
+description = "Run the backend tests"
 depends = ["build:frontend"]
 run = "cargo test"
 sources = ["src/**/*", "tests/**/*", "migrations/**/*", "Cargo.toml", "Cargo.lock"]
 dir = "{{ config_root }}/packages/backend"
 
 [tasks."test:frontend"]
+description = "Run the frontend tests"
 depends = ["install:frontend", "gen:sdk"]
 run = "pnpm run test"
 dir = "{{ config_root }}/packages/frontend"
@@ -194,6 +215,7 @@ dir = "{{ config_root }}/packages/frontend"
 # The end-to-end smoke tests (packages/e2e, Playwright): a real browser
 # against the image just built, on a fresh database (scripts/e2e.sh).
 [tasks."test:e2e"]
+description = "Build the image, start it with a fresh database in a volume, and run the Playwright smoke tests"
 depends = ["build:docker", "install:frontend"]
 run = [
   "pnpm --filter potoo-e2e exec playwright install chromium",
@@ -209,6 +231,7 @@ run = [
 # new advisories come out for dependencies that did not change. A finding
 # to accept goes in osv-scanner.toml, with the reason.
 [tasks.audit]
+description = "Known vulnerabilities in the locked crates and npm packages (osv-scanner: OSV, RustSec and GitHub advisories)"
 run = "osv-scanner scan source --config osv-scanner.toml --lockfile packages/backend/Cargo.lock --lockfile pnpm-lock.yaml"
 dir = "{{ config_root }}"
 
@@ -216,6 +239,7 @@ dir = "{{ config_root }}"
 # and CRITICAL ones fail. IMAGE picks it, by default the published one; CI
 # scans the one it builds. The binary is static, so this is about the base.
 [tasks."audit:image"]
+description = "Known vulnerabilities in an image's Alpine packages (Trivy): fixable HIGH and CRITICAL ones fail; IMAGE picks it, by default the published one"
 run = 'trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "${IMAGE:-ghcr.io/lmxrd/potoo:latest}"'
 
 # ---------------------------------------------------------------------------
@@ -225,12 +249,14 @@ run = 'trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL -
 # Write load against the production image in a 2 CPU, 2 GB container; see
 # scripts/loadtest.sh for the settings (CPUS, MEMORY, RATES, DURATION).
 [tasks.loadtest]
+description = "Write load against the production image in a 2 CPU, 2 GB container"
 run = "scripts/loadtest.sh"
 
 # A year of demo data for development. Wipes every hit — not the sites
 # or users — and creates the demo site blog.example.com when there is
 # none. Deterministic: seeding twice gives the same data.
 [tasks.seed]
+description = "Fill the dev database with a year of demo data (wipes every hit)"
 depends = ["build:frontend"]
 run = "cargo run --bin seed"
 dir = "{{ config_root }}/packages/backend"
@@ -240,6 +266,7 @@ dir = "{{ config_root }}/packages/backend"
 # and the local data (the SQLite database and the GeoIP database).
 # `mise run install:frontend` and a build bring it all back.
 [tasks.clean]
+description = "Remove everything generated or local (builds, node_modules, the SDK, the local data)"
 dir = "{{ config_root }}"
 run = """
 rm -rf packages/backend/target packages/backend/data data dist

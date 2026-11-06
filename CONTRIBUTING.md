@@ -160,9 +160,14 @@ footer) the major; `ci:`, `chore:`, `docs:` and the like release nothing.
    `packages/backend/Cargo.toml`, `packages/backend/Cargo.lock` and `packages/frontend/package.json`,
    and the changelog.
 2. Merge that PR when you want to ship. The release (tag `v1.2.3`) is
-   created, and the release workflow builds the Linux binaries (static
-   musl, and glibc suffixed `-gnu`, for amd64 and arm64) and attaches them,
-   and pushes the multi-arch image as `1.2.3`, `1.2` and `latest`.
+   created, and the release workflow:
+   - builds the static Linux binaries for `amd64` and `arm64` natively, on a
+     runner of each architecture, and attaches them to the release with the
+     OpenAPI spec (JSON and YAML);
+   - writes one `SHA256SUMS` for everything attached (both binaries and the spec);
+   - packages those same binaries into the Docker image and pushes it to
+     `ghcr.io/lmxrd/potoo` as one multi-arch image, tagged `1.2.3`, `1.2` and
+     `latest`.
 
 The commit that lands on `main` is what counts, and pull requests are
 squash merged with the pull request's title as the message. So **the title of

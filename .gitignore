@@ -1,7 +1,27 @@
-node_modules
-dist
-data
-potoo
+# mise
+.mise.local.toml
+mise.local.toml
+
+# dependencies / build output
+node_modules/
+dist/
+target/
+
+# local data (the development database and its files)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# environment
+.env
+.env.*
+!.env.example
+
+# misc
 .DS_Store
-packages/sdk/src
-packages/sdk/openapi-ts-error-*.log
+*.log
+.local
+
+.idea
+.junie

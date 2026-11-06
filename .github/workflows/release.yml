@@ -3,10 +3,11 @@ name: Release
 # Every push to main updates the release PR (version bump and changelog,
 # from the conventional commits). Merging it creates the tag and the
 # GitHub release, and only then do the jobs below run: natively on an
-# amd64 and an arm64 runner (no cross compiling, no emulation) they build
-# the Linux binaries, attached to the release, and the image, pushed to
-# the GitHub Container Registry as one multi-arch manifest. CI never
-# pushes, except the lockfile fix below on the release PR's branch.
+# amd64 and an arm64 runner (no cross compiling, no emulation) one job
+# builds the Linux binary, attaches it to the release and packages that
+# very binary into the image (nothing compiles in it), pushed to the GitHub
+# Container Registry; `manifest` makes them one multi-arch image. CI never pushes,
+# except the lockfile fix below on the release PR's branch.
 #
 # Needs "Allow GitHub Actions to create and approve pull requests" in the
 # repository's Actions settings.
@@ -37,8 +38,8 @@ jobs:
       - uses: googleapis/release-please-action@v5
         id: release
 
-      # release-please bumps the version in packages/backend/Cargo.toml but
-      # cannot bump the potoo entry of packages/backend/Cargo.lock (its toml updater does
+      # release-please bumps the version in packages/backend/Cargo.toml but cannot
+      # bump the potoo entry of packages/backend/Cargo.lock (its toml updater does
       # not match it), so cargo does it on the release PR's branch. `-w`
       # touches only the workspace's own packages, never a dependency.
       # A push with the default token starts no workflow; the next push to
@@ -62,11 +63,10 @@ jobs:
             git push
           fi
 
-  # On each architecture's runner: the static (musl) binary, which runs on
-  # any Linux, attached to the release with its checksum (and the OpenAPI
-  # spec, once), and the image, which copies that very binary (the
-  # Dockerfile builds nothing), pushed by digest only; `manifest` tags them.
-  binaries:
+  # musl binaries are static and run on any Linux (Ubuntu, Debian, ...).
+  # Each runner builds its binary once, attaches it to the release and
+  # pushes the image made from it by digest only; `manifest` tags them.
+  binaries-and-image:
     needs: release-please
     if: needs.release-please.outputs.created == 'true'
     strategy:
@@ -82,10 +82,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-please.outputs.tag }}
-      - uses: jdx/mise-action@v4
-      # dist/potoo-linux-<arch>, with the frontend (built from the OpenAPI
-      # spec the backend writes first) embedded.
-      - run: mise run build:linux
+      - uses: ./.github/actions/build-binary
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -98,7 +95,6 @@ jobs:
           if [ "${{ matrix.arch }}" = amd64 ]; then
             cp packages/backend/target/specs/openapi.json packages/backend/target/specs/openapi.yaml release/
           fi
-          (cd release && sha256sum -- * > "SHA256SUMS-${{ matrix.arch }}")
           gh release upload "$TAG" release/* --clobber
       - run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@v4
@@ -107,6 +103,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # buildx sets TARGETARCH, which picks dist/potoo-linux-<arch>.
       - uses: docker/build-push-action@v7
         id: build
         with:
@@ -124,10 +121,29 @@ jobs:
           path: digests/*
           if-no-files-found: error
 
+  # One SHA256SUMS for everything attached (both binaries and the spec),
+  # once both runners have uploaded: `sha256sum -c SHA256SUMS
+  # --ignore-missing` checks a download.
+  checksums:
+    needs: [release-please, binaries-and-image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Write and attach SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release-please.outputs.tag }}
+        run: |
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir release \
+            --pattern 'potoo-linux-*' --pattern 'openapi.*'
+          (cd release && sha256sum -- * > SHA256SUMS && cat SHA256SUMS)
+          gh release upload "$TAG" release/SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+
   # The tags 1.2.3, 1.2 and latest (prereleases get only the exact
   # version), pointing at both images.
   manifest:
-    needs: [release-please, binaries]
+    needs: [release-please, binaries-and-image]
     runs-on: ubuntu-latest
     permissions:
       packages: write

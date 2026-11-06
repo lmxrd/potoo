@@ -1,39 +1,49 @@
 #!/bin/sh
-# The static Linux binary (musl) that the image copies:
-# dist/potoo-linux-<arch>. It is built here rather than inside the image,
-# so it uses this machine's cargo cache and target directory (wherever
-# that is configured), not a cold one in a container. cargo-zigbuild uses
-# zig as the C compiler and linker for the musl target (sqlite, ring), so
-# the same command builds on a Mac and on Linux, for either architecture.
+# The static (musl) Linux binary of potoo, written to dist/ at the
+# repository root, for the image's Dockerfile and the release workflow.
+# cargo zigbuild makes zig the C compiler and linker (the bundled SQLite and
+# ring included), so the same command works on a Mac and on Linux, for
+# either architecture.
 #
-#   ARCH      amd64 or arm64 (default: this machine's)
-#   PROFILE   the cargo profile (default: release)
+#   ARCH      amd64 | arm64 (default: this machine's; x86_64/aarch64 work too)
+#   PROFILE   cargo profile (default: release)
 #   FEATURES  cargo features (default: none)
 #
-# The frontend must be built first (rust-embed embeds packages/frontend/dist):
-# `mise run build:linux` does both.
+# The result is dist/potoo-linux-<arch>, with a -<profile> suffix for any
+# profile other than release.
 set -eu
 
-arch=${ARCH:-$(uname -m)}
-case "$arch" in
-  x86_64 | amd64) arch=amd64 triple=x86_64-unknown-linux-musl ;;
-  aarch64 | arm64) arch=arm64 triple=aarch64-unknown-linux-musl ;;
+BIN=potoo
+root="$(cd "$(dirname "$0")/.." && pwd)"
+
+ARCH="${ARCH:-$(uname -m)}"
+PROFILE="${PROFILE:-release}"
+FEATURES="${FEATURES:-}"
+
+case "$ARCH" in
+  amd64 | x86_64) arch=amd64 triple=x86_64-unknown-linux-musl ;;
+  arm64 | aarch64) arch=arm64 triple=aarch64-unknown-linux-musl ;;
   *)
-    echo "unknown architecture: $arch (amd64 or arm64)" >&2
+    echo "unsupported ARCH: $ARCH (amd64 or arm64)" >&2
     exit 1
     ;;
 esac
-profile=${PROFILE:-release}
 
-cd "$(dirname "$0")/../packages/backend"
-cargo zigbuild --profile "$profile" --features "${FEATURES:-}" --target "$triple"
+cd "$root/packages/backend"
+cargo zigbuild --profile "$PROFILE" --features "$FEATURES" --target "$triple" --bin "$BIN"
 
-# Cargo has no stable flag to put one artifact elsewhere (--artifact-dir
-# is nightly only, and --target-dir would leave the shared cache behind),
-# so the binary is copied out of the target directory, wherever it is.
-target_dir=$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)
-name=potoo-linux-$arch
-[ "$profile" = release ] || name=$name-$profile
-mkdir -p ../../dist
-cp "$target_dir/$triple/$profile/potoo" "../../dist/$name"
-echo "dist/$name"
+# The machine's own target directory, which may be a central one
+# (`[build] target-dir` in ~/.cargo/config.toml). Cargo has no stable flag
+# that writes one artifact elsewhere (`--artifact-dir` is nightly-only, and
+# `--target-dir` would leave the shared cache behind), so this copy is the
+# override.
+target_dir="$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)"
+# Cargo's output directory for the built-in `dev` profile is `debug`.
+profile_dir="$PROFILE"
+[ "$PROFILE" = dev ] && profile_dir=debug
+
+out="$root/dist/$BIN-linux-$arch"
+[ "$PROFILE" = release ] || out="$out-$PROFILE"
+mkdir -p "$root/dist"
+cp "$target_dir/$triple/$profile_dir/$BIN" "$out"
+echo "$out"

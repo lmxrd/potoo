@@ -8,69 +8,51 @@ on:
 permissions:
   contents: read
 
+# The two jobs are independent, so they run side by side: the checks and
+# tests, and the release build with its image. Nothing is pushed: releases
+# publish, CI only verifies.
 jobs:
-  # The quality gates, exactly as locally: the tools come from mise.toml
-  # and the checks and tests are the same tasks. The default target on
-  # the bare runner — no matrix, no cross compiling — and nothing is
-  # pushed: releases publish, CI only verifies.
+  # The quality gates, exactly as locally: the tools come from mise (mise.toml,
+  # package.json, rust-toolchain.toml) and
+  # the checks and tests are the same tasks. The default target on the bare
+  # runner — no matrix, no cross compiling. One job, so the dev build of the
+  # backend (and of the OpenAPI spec) is done once and shared.
   checks:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v4
-      - uses: actions/cache@v6
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            packages/backend/target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-check-${{ hashFiles('packages/backend/Cargo.lock') }}
+          workspaces: packages/backend
+          key: checks
       - run: mise run check
       - run: mise run test
 
-  # The builds run in parallel once the checks pass: the release build,
-  # and the image. Separate cache keys, since the checks cache a debug
-  # target directory and this one a release one.
+  # The release binary for each architecture, natively on its own runner
+  # (static musl, so it runs in the Alpine image and on any Ubuntu or
+  # Debian), with the frontend embedded — the same task as locally. The image
+  # is that binary copied in by the Dockerfile (nothing compiles in it),
+  # started once to check its health check, so a packaging bug fails the PR,
+  # not the release.
   build:
-    needs: checks
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { runner: ubuntu-latest, arch: amd64 }
+          - { runner: ubuntu-24.04-arm, arch: arm64 }
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v4
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            packages/backend/target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-build-${{ hashFiles('packages/backend/Cargo.lock') }}
-      - run: mise run build
-
-  # The image copies the static binary built just before it, with the
-  # same task and cargo cache as locally (the Dockerfile builds nothing).
-  # Built, never pushed.
-  docker:
-    needs: checks
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: jdx/mise-action@v4
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            packages/backend/target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-linux-${{ hashFiles('packages/backend/Cargo.lock') }}
-      - run: mise run build:linux
+      - uses: ./.github/actions/build-binary
+      # BuildKit (the default) sets TARGETARCH, which picks the binary.
       - run: docker build -t potoo:ci .
-      # Started once, until its own HEALTHCHECK (`potoo healthcheck`) says
-      # healthy, so a packaging bug fails the PR, not the release. No GeoIP
-      # download.
       - name: Run the image and check its health check
         run: |
+          # No GeoIP download (GEOIP_URL empty).
           docker run --rm -d --name potoo-ci -e GEOIP_URL= potoo:ci
-          for _ in $(seq 1 30); do
+          # The image's own HEALTHCHECK (potoo healthcheck).
+          for _ in $(seq 1 15); do
             status="$(docker inspect -f '{{.State.Health.Status}}' potoo-ci)"
             [ "$status" = healthy ] && exit 0
             sleep 2
@@ -90,23 +72,55 @@ jobs:
       - run: mise run audit:image
         env:
           IMAGE: potoo:ci
-      # The end-to-end smoke tests (packages/e2e): a real browser against this
-      # image, on a fresh database. Only Chromium, cached by Playwright's
-      # version (its system libraries are installed every time).
-      - run: mise run install:frontend
+      # The amd64 image, for the end-to-end tests below.
+      - name: Keep the image
+        if: matrix.arch == 'amd64'
+        run: docker save potoo:ci | gzip > potoo-image.tar.gz
+      - uses: actions/upload-artifact@v7
+        if: matrix.arch == 'amd64'
+        with:
+          name: image-amd64
+          path: potoo-image.tar.gz
+          retention-days: 1
+
+  # The Playwright smoke tests (packages/e2e) against that image, started
+  # with a fresh database file in a volume: first setup, signing out and in,
+  # two-factor sign-in, a site and its dashboard. Only Node and pnpm are
+  # installed, and only Chromium, cached by Playwright's version.
+  e2e:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      MISE_AUTO_INSTALL: "false"
+      MISE_TASK_RUN_AUTO_INSTALL: "false"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: jdx/mise-action@v4
+        with:
+          install_args: node pnpm
+      - uses: actions/download-artifact@v8
+        with:
+          name: image-amd64
+      - run: gunzip -c potoo-image.tar.gz | docker load
+      - run: pnpm install --frozen-lockfile
       - id: playwright
-        run: echo "version=$(jq -r '.devDependencies["@playwright/test"]' packages/e2e/package.json)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(pnpm --filter potoo-e2e exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
       - uses: actions/cache@v6
+        id: browsers
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-      - run: pnpm --filter potoo-e2e exec playwright install --with-deps chromium
+          key: playwright-${{ steps.playwright.outputs.version }}-chromium
+      - if: steps.browsers.outputs.cache-hit != 'true'
+        run: pnpm --filter potoo-e2e exec playwright install --with-deps chromium
+      - if: steps.browsers.outputs.cache-hit == 'true'
+        run: pnpm --filter potoo-e2e exec playwright install-deps chromium
       - run: scripts/e2e.sh
         env:
-          CONTAINER: docker
           IMAGE: potoo:ci
+          ENGINE: docker
       - uses: actions/upload-artifact@v7
         if: failure()
         with:
-          name: e2e-results
-          path: packages/e2e/test-results
+          name: playwright-report
+          path: packages/e2e/playwright-report
+          retention-days: 7

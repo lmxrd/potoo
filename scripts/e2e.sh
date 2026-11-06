@@ -1,32 +1,52 @@
 #!/bin/sh
-# The end-to-end smoke tests (packages/e2e) against the built image: a fresh
-# container with an empty data volume, on 127.0.0.1:$E2E_PORT (default
-# 8090), removed afterwards. `mise run test:e2e` builds the image first.
-# CONTAINER picks the engine (podman locally, docker in CI); IMAGE the image.
+# The end-to-end smoke tests (packages/e2e, Playwright) against the container
+# image, as it ships: started with a fresh database file in a volume, then
+# stopped and removed whatever the result.
+#
+#   IMAGE      the image to test (default: potoo, what `mise run build:docker` makes)
+#   ENGINE     podman or docker (default: podman if installed, else docker)
+#   E2E_PORT   the port on this machine (default: 8180)
+#
+# Chromium must be installed for Playwright (`pnpm --filter potoo-e2e exec
+# playwright install chromium`; the test:e2e task does it). Extra arguments go
+# to `playwright test`.
 set -eu
-cd "$(dirname "$0")/.."
-engine=${CONTAINER:-podman}
-image=${IMAGE:-potoo}
-port=${E2E_PORT:-8090}
-name=potoo-e2e-$$
+
+root="$(cd "$(dirname "$0")/.." && pwd)"
+IMAGE="${IMAGE:-potoo}"
+ENGINE="${ENGINE:-$(command -v podman >/dev/null 2>&1 && echo podman || echo docker)}"
+E2E_PORT="${E2E_PORT:-8180}"
+name="potoo-e2e-$$"
+volume="potoo-e2e-data-$$"
 
 cleanup() {
-  $engine rm -f "$name" >/dev/null 2>&1 || true
-  $engine volume rm -f "$name" >/dev/null 2>&1 || true
+  status=$?
+  if [ "$status" -ne 0 ]; then
+    echo "--- server log ---" >&2
+    "$ENGINE" logs "$name" >&2 || true
+  fi
+  "$ENGINE" rm -f "$name" >/dev/null 2>&1 || true
+  "$ENGINE" volume rm -f "$volume" >/dev/null 2>&1 || true
+  exit "$status"
 }
-trap cleanup EXIT
+trap cleanup EXIT INT TERM
 
-$engine run -d --name "$name" -p "127.0.0.1:$port:8000" -e GEOIP_URL= \
-  -v "$name:/data" "$image" >/dev/null
+"$ENGINE" volume create "$volume" >/dev/null
+# The image's database is /data/potoo.db: a real file in the volume. No
+# GeoIP download (GEOIP_URL empty): the tests need no countries.
+"$ENGINE" run -d --name "$name" -p "127.0.0.1:$E2E_PORT:8000" -v "$volume:/data" \
+  -e GEOIP_URL= "$IMAGE" >/dev/null
+
+base="http://localhost:$E2E_PORT"
 i=0
-until curl -fs "http://127.0.0.1:$port/api/health" >/dev/null; do
+until curl -sf "$base/api/health" >/dev/null; do
   i=$((i + 1))
-  if [ "$i" -ge 60 ]; then
-    $engine logs "$name"
-    echo "the image did not answer its health check" >&2
+  if [ "$i" -gt 60 ]; then
+    echo "the server did not become healthy" >&2
     exit 1
   fi
   sleep 1
 done
 
-E2E_BASE_URL="http://127.0.0.1:$port" pnpm --filter potoo-e2e exec playwright test "$@"
+cd "$root/packages/e2e"
+E2E_BASE_URL="$base" pnpm exec playwright test "$@"

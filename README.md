@@ -392,7 +392,8 @@ does:
   after 5 failures in 15 minutes, every attempt counts and the limit is a
   pace (see [Two-factor authentication](#two-factor-authentication)).
 - **No glibc builds.** Releases attach only the static (musl) binaries, which
-  run on any Linux, with their SHA-256 checksums.
+  run on any Linux, with one `SHA256SUMS` for everything attached
+  (`sha256sum -c SHA256SUMS --ignore-missing` checks a download).
 - **Ids are UUIDs.** Users, sites and API keys have UUIDv7 ids (strings in
   the API, such as `0190f5b2-7c00-7c1a-9d3e-5b7a1c2d3e4f`) instead of
   numbers. The upgrade converts them, keeping every relation; it rewrites
