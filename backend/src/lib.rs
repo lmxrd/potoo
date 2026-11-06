@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod csrf;
 pub mod csv;
 pub mod db;
 pub mod error;
@@ -47,6 +48,12 @@ pub fn app(state: AppState) -> Router {
             .build();
     frontend::mount(router)
         .layer(auth)
+        // Outside the sessions: a forged request is refused before any
+        // session is loaded or saved.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            csrf::check,
+        ))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state)
 }

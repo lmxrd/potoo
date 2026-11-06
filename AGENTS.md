@@ -137,6 +137,14 @@ cookie is `potoo_session`, `SameSite=Strict`, `Secure` with
 `SECURE_COOKIES`. The 2FA challenge and the single sign-on login cookies
 are separate signed cookies, not sessions.
 
+**Cross-site requests** (`csrf.rs`, a layer outside the sessions): a
+POST, PUT, PATCH or DELETE passes with `Sec-Fetch-Site: same-origin` (or
+`none`), or, without that header, an `Origin` matching the host (the
+forwarded one with `TRUST_PROXY`), or neither header (not a browser).
+`same-site` is refused on purpose: a sibling subdomain is the same site.
+`/api/collect` and Bearer requests skip it. A new endpoint that must take
+cross-origin writes (none should) goes in `allowed`, with the reason.
+
 **API keys** (`routes/api_keys.rs`, `key_user` in `auth.rs`): `api_keys`
 holds the SHA-256 of `potoo_<64 hex>` and its scope (`read`/`write`/
 `admin`). `AuthUser(user, Access)` takes the session cookie or

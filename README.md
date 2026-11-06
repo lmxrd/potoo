@@ -104,7 +104,10 @@ Mac builds it too; `ARCH=amd64` or `arm64` builds the other architecture.
 Behind a reverse proxy, set `TRUST_PROXY=1` so the client IP is read from
 `X-Forwarded-For`, and terminate TLS there. Served over https, set
 `SECURE_COOKIES=true` too, so the session cookie is only ever sent over
-https.
+https. Requests that change something must come from Potoo's own pages
+(browsers say so in `Sec-Fetch-Site`, older ones in `Origin`): a proxy that
+rewrites the `Host` header needs `TRUST_PROXY=1` and `X-Forwarded-Host`,
+or an older browser's changes are refused.
 
 ### Staying up to date
 
