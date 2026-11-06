@@ -1718,15 +1718,15 @@ packages:
     engines: {node: '>=10'}
     hasBin: true
 
-  seroval-plugins@1.6.8:
-    resolution: {integrity: sha512-N7mWAMydj89EnYTHtRpS3LBrAz3J9O6oVrqpuXuvlAHfAUG8WEKqtbAd7SBiJNY5NfCAFhSdyAh7wI4Shjqy4g==}
-    engines: {node: '>=10'}
+  seroval-plugins@1.7.7:
+    resolution: {integrity: sha512-5PAKQPAfj2MD332QeCdzXKm334ftIb0B1Ek3I9IQa73rPOlBSHko9mODFo8XNjzs6KJQG3nE6dn9dw7hJjrZAQ==}
+    engines: {node: '>=20'}
     peerDependencies:
       seroval: ^1.0
 
-  seroval@1.6.8:
-    resolution: {integrity: sha512-HlSgSAkTk4EqHcje1ptJjfZi1YDv5KbhVJ/d3P7T/nAXua2VmDu+AKDX5VTdFfZf48nDkWB2TKYt0DrCSa+3wg==}
-    engines: {node: '>=10'}
+  seroval@1.7.7:
+    resolution: {integrity: sha512-9OdYsqMLV5RSUNNtkgr6DT2bS/ncba6AqUJx8H7epNJNa0cKNWhQtF5GLRjkF/KuAdvAuRRitWrq86K/v1S/kg==}
+    engines: {node: '>=20'}
 
   shebang-command@2.0.0:
     resolution: {integrity: sha512-kHxr2zZpYtdmrN1qDjrrX/Z1rR1kG8Dx+gkpK1G4eXmvXswmcE1hTWBWYUzlraYw1/yZp6YuDY77YtvbN0dmDA==}
@@ -2331,8 +2331,8 @@ snapshots:
     dependencies:
       '@tanstack/history': 1.162.5
       cookie-es: 3.1.1
-      seroval: 1.6.8
-      seroval-plugins: 1.6.8(seroval@1.6.8)
+      seroval: 1.7.7
+      seroval-plugins: 1.7.7(seroval@1.7.7)
 
   '@tanstack/router-generator@1.167.46':
     dependencies:
@@ -3057,11 +3057,11 @@ snapshots:
 
   semver@7.8.4: {}
 
-  seroval-plugins@1.6.8(seroval@1.6.8):
+  seroval-plugins@1.7.7(seroval@1.7.7):
     dependencies:
-      seroval: 1.6.8
+      seroval: 1.7.7
 
-  seroval@1.6.8: {}
+  seroval@1.7.7: {}
 
   shebang-command@2.0.0:
     dependencies:
