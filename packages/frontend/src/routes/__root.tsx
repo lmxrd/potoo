@@ -7,7 +7,7 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import type { User } from "potoo-sdk";
-import { getSessionOptions, logoutMutation } from "potoo-sdk/react-query";
+import { getAuthStatusOptions, getMeOptions, logoutMutation } from "potoo-sdk/react-query";
 import { ChevronDownIcon } from "lucide-react";
 import { Button } from "../components/ui/button";
 import {
@@ -23,14 +23,20 @@ import type { RouterContext } from "../router";
 export const Route = createRootRouteWithContext<RouterContext>()({
   // Every page goes through here: first-run → /setup, signed-out → /login.
   beforeLoad: async ({ location, context }) => {
-    // Always fresh: the session changes with settings and sign-ins.
-    const session = await context.queryClient.fetchQuery(getSessionOptions());
+    // Always fresh: both change with settings and sign-ins. The signed-in
+    // user is null while nobody is (`/api/auth/me` answers 401).
+    const status = await context.queryClient.fetchQuery(getAuthStatusOptions());
+    const user = status.bootstrap_required
+      ? null
+      : await context.queryClient.fetchQuery(getMeOptions()).catch(() => null);
+    const session = { ...status, user };
     // The theme applies before anything renders, so there is no flash of
     // the default palette.
     applyTheme(parseTheme(session.user?.theme));
     const path = location.pathname;
-    if (session.needsSetup && path !== "/setup") throw redirect({ to: "/setup" });
-    if (!session.needsSetup && !session.user && path !== "/login") throw redirect({ to: "/login" });
+    if (session.bootstrap_required && path !== "/setup") throw redirect({ to: "/setup" });
+    if (!session.bootstrap_required && !session.user && path !== "/login")
+      throw redirect({ to: "/login" });
     if (session.user && (path === "/login" || path === "/setup")) throw redirect({ to: "/" });
     return { session };
   },

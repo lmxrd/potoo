@@ -23,13 +23,17 @@ use uuid::Uuid;
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(session))
-        .routes(routes!(setup))
+        .routes(routes!(auth_status))
+        .routes(routes!(bootstrap))
         .routes(routes!(login))
         .routes(routes!(logout))
-        .routes(routes!(change_email))
-        .routes(routes!(change_settings))
+        .routes(routes!(me, update_me))
         .routes(routes!(change_password))
+}
+
+/// Managing users, nested under /admin.
+pub fn admin_router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new()
         .routes(routes!(list_users, create_user))
         .routes(routes!(change_role, delete_user))
         .routes(routes!(reset_password))
@@ -91,18 +95,17 @@ fn validate_password(raw: &str) -> Result<String, ApiError> {
     }
 }
 
-/// The session and first-run state; the frontend routes every page by it.
+/// How signing in works here, before anyone is signed in; the frontend routes
+/// every page by it.
 #[derive(Serialize, ToSchema)]
-pub struct Session {
-    /// True while there are no users at all: the next step is `/setup`.
-    #[serde(rename = "needsSetup")]
-    pub needs_setup: bool,
-    /// The signed-in user: null when nobody is signed in. Always present.
+pub struct AuthStatus {
+    /// True while there are no users at all: the first admin must be created
+    /// (`/bootstrap`).
+    pub bootstrap_required: bool,
+    /// What the single sign-on button says, e.g. "Single sign-on"; null while
+    /// single sign-on is off. Always present.
     #[schema(required = true)]
-    pub user: Option<User>,
-    /// Single sign-on, when it is on: null when it is off. Always present.
-    #[schema(required = true)]
-    pub oidc: Option<OidcLogin>,
+    pub sso: Option<String>,
     /// False when single sign-on is the only way in (`OIDC_ONLY`): the
     /// login page offers no password, and passwords cannot be set.
     pub password_login: bool,
@@ -111,22 +114,12 @@ pub struct Session {
     pub totp_required: bool,
 }
 
-/// How the login page offers single sign-on.
-#[derive(Serialize, ToSchema)]
-pub struct OidcLogin {
-    /// What the button says, e.g. "Single sign-on".
-    pub label: String,
-}
-
 /// A new email address for the signed-in user.
+/// What to change of your own account: each field that is sent changes, or
+/// none does; at least one is required.
 #[derive(Deserialize, ToSchema)]
-pub struct ChangeEmail {
-    pub email: String,
-}
-
-/// The preferences to change; at least one is required.
-#[derive(Deserialize, ToSchema)]
-pub struct ChangeSettings {
+pub struct UpdateMe {
+    pub email: Option<String>,
     /// One of `YYYY-MM-DD`, `DD/MM/YYYY`, `MM/DD/YYYY`, `DD.MM.YYYY`.
     pub date_format: Option<String>,
     /// Whether times are shown in 24-hour format.
@@ -194,35 +187,41 @@ async fn admin_count<'e>(db: impl SqliteExecutor<'e>) -> Result<i64, ApiError> {
     Ok(count)
 }
 
-// Session + first-run state. The frontend uses this to route every page.
 #[utoipa::path(
     get,
-    path = "/session",
+    path = "/status",
     tag = "Auth",
-    operation_id = "getSession",
-    summary = "The session and the first-run state",
-    description = "Whether the first admin still has to be created, and who is signed in (null when nobody is).",
+    operation_id = "getAuthStatus",
+    summary = "How signing in works",
+    description = "Whether the first admin still has to be created, and which ways in there are. Needs no session.",
     responses(
-        (status = 200, description = "The session", body = Session),
+        (status = 200, description = "The sign-in status", body = AuthStatus),
     ),
 )]
-async fn session(
-    State(state): State<AppState>,
-    auth: AuthSession,
-) -> Result<Json<Session>, ApiError> {
-    let needs_setup = !has_users(&state).await?;
-    let user = if needs_setup { None } else { auth.user };
+async fn auth_status(State(state): State<AppState>) -> Result<Json<AuthStatus>, ApiError> {
     let settings = state.oidc.settings();
-    let oidc = settings.enabled().then(|| OidcLogin {
-        label: settings.label().to_string(),
-    });
-    Ok(Json(Session {
-        needs_setup,
-        user,
-        oidc,
+    Ok(Json(AuthStatus {
+        bootstrap_required: !has_users(&state).await?,
+        sso: settings.enabled().then(|| settings.label().to_string()),
         password_login: state.oidc.passwords_allowed(),
         totp_required: state.totp_required,
     }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/me",
+    tag = "Account",
+    operation_id = "getMe",
+    summary = "The signed-in user",
+    responses(
+        (status = 200, description = "The signed-in user", body = User),
+        (status = 401, description = "Not signed in", body = ErrorBody),
+    ),
+    security(("session" = []), ("api_key" = [])),
+)]
+async fn me(user: CurrentUser) -> Json<User> {
+    Json(user.user)
 }
 
 /// An email and a password, to sign in or to create the first admin.
@@ -236,20 +235,20 @@ pub struct Credentials {
 // Creates the admin. Only possible while there are no users at all.
 #[utoipa::path(
     post,
-    path = "/setup",
+    path = "/bootstrap",
     tag = "Auth",
-    operation_id = "setup",
+    operation_id = "bootstrap",
     summary = "Create the first admin",
     description = "Only possible while there are no users. Signs the new admin in: the session cookie is set.",
     request_body(content = Credentials, content_type = "application/json"),
     responses(
-        (status = 201, description = "The admin was created and signed in"),
+        (status = 201, description = "The admin was created and signed in", body = User),
         (status = 400, description = "The request is invalid", body = ErrorBody),
         (status = 409, description = "Conflict", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
 )]
-async fn setup(
+async fn bootstrap(
     State(state): State<AppState>,
     mut auth: AuthSession,
     ApiJson(creds): ApiJson<Credentials>,
@@ -275,7 +274,7 @@ async fn setup(
         .await?
         .ok_or_else(|| ApiError::internal("the new admin is gone"))?;
     sessions::sign_in(&mut auth, &user).await?;
-    Ok(StatusCode::CREATED.into_response())
+    Ok((StatusCode::CREATED, Json(user)).into_response())
 }
 
 #[utoipa::path(
@@ -374,73 +373,38 @@ async fn logout(mut auth: AuthSession) -> Result<Response, ApiError> {
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-// Change the signed-in user's own email.
+// Change the signed-in user's own email and preferences.
 #[utoipa::path(
-    post,
-    path = "/email",
+    patch,
+    path = "/me",
     tag = "Account",
-    operation_id = "changeEmail",
-    summary = "Change your own email",
-    request_body(content = ChangeEmail, content_type = "application/json"),
+    operation_id = "updateMe",
+    summary = "Change your own account",
+    description = "The email, the date format, the time format and the theme. Each one that is sent changes, or none does.",
+    request_body(content = UpdateMe, content_type = "application/json"),
     responses(
-        (status = 204, description = "Changed"),
+        (status = 200, description = "The updated user", body = User),
         (status = 400, description = "The request is invalid", body = ErrorBody),
         (status = 401, description = "Not signed in", body = ErrorBody),
-        (status = 409, description = "Conflict", body = ErrorBody),
+        (status = 409, description = "That email is already taken", body = ErrorBody),
         (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
     ),
     security(("session" = [])),
 )]
-async fn change_email(
+async fn update_me(
     State(state): State<AppState>,
+    auth: AuthSession,
     user: SessionUser,
-    ApiJson(body): ApiJson<ChangeEmail>,
-) -> Result<Response, ApiError> {
-    let email = validate_email(&body.email)?;
-    let mut tx = state.db.writer().begin().await?;
-    let taken: Option<i64> =
-        sqlx::query_scalar("SELECT 1 FROM users WHERE email = ?1 AND id != ?2")
-            .bind(&email)
-            .bind(user.0.id)
-            .fetch_optional(&mut *tx)
-            .await?;
-    if taken.is_some() {
-        return Err(ApiError::new(StatusCode::CONFLICT, "Email already in use"));
-    }
-    sqlx::query("UPDATE users SET email = ?1 WHERE id = ?2")
-        .bind(&email)
-        .bind(user.0.id)
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
-    Ok(StatusCode::NO_CONTENT.into_response())
-}
-
-// Change the signed-in user's own preferences.
-#[utoipa::path(
-    post,
-    path = "/settings",
-    tag = "Account",
-    operation_id = "changeSettings",
-    summary = "Change your own preferences",
-    description = "The date format, the time format and the theme. Each one that is sent changes, or none does.",
-    request_body(content = ChangeSettings, content_type = "application/json"),
-    responses(
-        (status = 204, description = "Changed"),
-        (status = 400, description = "The request is invalid", body = ErrorBody),
-        (status = 401, description = "Not signed in", body = ErrorBody),
-        (status = 415, description = "The body must be JSON (Content-Type: application/json)", body = ErrorBody),
-    ),
-    security(("session" = [])),
-)]
-async fn change_settings(
-    State(state): State<AppState>,
-    user: SessionUser,
-    ApiJson(body): ApiJson<ChangeSettings>,
-) -> Result<Response, ApiError> {
-    if body.date_format.is_none() && body.use_24.is_none() && body.theme.is_none() {
+    ApiJson(body): ApiJson<UpdateMe>,
+) -> Result<Json<User>, ApiError> {
+    if body.email.is_none()
+        && body.date_format.is_none()
+        && body.use_24.is_none()
+        && body.theme.is_none()
+    {
         return Err(ApiError::bad_request("A setting to change is required"));
     }
+    let email = body.email.as_deref().map(validate_email).transpose()?;
     if let Some(format) = &body.date_format
         && !DATE_FORMATS.contains(&format.as_str())
     {
@@ -449,6 +413,22 @@ async fn change_settings(
     let theme = body.theme.as_deref().map(validate_theme).transpose()?;
     // Each setting that was sent changes, or none does.
     let mut tx = state.db.writer().begin().await?;
+    if let Some(email) = &email {
+        let taken: Option<i64> =
+            sqlx::query_scalar("SELECT 1 FROM users WHERE email = ?1 AND id != ?2")
+                .bind(email)
+                .bind(user.0.id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        if taken.is_some() {
+            return Err(ApiError::conflict("Email already in use"));
+        }
+        sqlx::query("UPDATE users SET email = ?1 WHERE id = ?2")
+            .bind(email)
+            .bind(user.0.id)
+            .execute(&mut *tx)
+            .await?;
+    }
     if let Some(format) = &body.date_format {
         sqlx::query("UPDATE users SET date_format = ?1 WHERE id = ?2")
             .bind(format)
@@ -471,7 +451,12 @@ async fn change_settings(
             .await?;
     }
     tx.commit().await?;
-    Ok(StatusCode::NO_CONTENT.into_response())
+    let updated = auth
+        .backend
+        .get_user(&user.0.id)
+        .await?
+        .ok_or_else(ApiError::unauthorized)?;
+    Ok(Json(updated))
 }
 
 // Change the signed-in user's own password, or set a first one.

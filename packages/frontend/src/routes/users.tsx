@@ -30,7 +30,7 @@ function Users() {
   const confirm = useConfirm();
   const { session } = Route.useRouteContext();
   // With single sign-on on, a user may have no password.
-  const passwordOptional = session.oidc !== null;
+  const passwordOptional = session.sso !== null;
   // With single sign-on only (OIDC_ONLY) there are no passwords at all.
   const passwords = session.password_login;
   const { data: users, error } = useQuery(listUsersOptions());

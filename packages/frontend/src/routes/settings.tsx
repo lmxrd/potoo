@@ -7,11 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { ErrorText } from "../components/error-text";
 import { Input } from "../components/ui/input";
 import { TotpSettings } from "../components/totp-settings";
-import {
-  changeEmailMutation,
-  changePasswordMutation,
-  changeSettingsMutation,
-} from "potoo-sdk/react-query";
+import { changePasswordMutation, updateMeMutation } from "potoo-sdk/react-query";
 import { errorMessage } from "../lib/api";
 import { DATE_FORMATS, formatDate, formatTime } from "../lib/dates";
 import { THEMES, applyTheme, parseTheme, sameTheme, themeJson, type Theme } from "../lib/theme";
@@ -120,7 +116,7 @@ function DateFormat({ current }: { current: string }) {
   const [today] = useState(() => new Date().toISOString());
   const [error, setError] = useState<string>();
   const router = useRouter();
-  const change = useMutation({ ...changeSettingsMutation(), meta: { inline: true } });
+  const change = useMutation({ ...updateMeMutation(), meta: { inline: true } });
   return (
     <div className="space-y-2">
       <Select
@@ -163,7 +159,7 @@ function TimeFormat({ current }: { current: boolean }) {
   const [value, setValue] = useState(current);
   const [error, setError] = useState<string>();
   const router = useRouter();
-  const change = useMutation({ ...changeSettingsMutation(), meta: { inline: true } });
+  const change = useMutation({ ...updateMeMutation(), meta: { inline: true } });
   return (
     <div className="space-y-2">
       <label className="flex items-center gap-2 text-sm">
@@ -204,7 +200,7 @@ const BASES: { value: Theme["base"]; label: string }[] = [
 function ThemePicker({ current }: { current: Theme }) {
   const [error, setError] = useState<string>();
   const router = useRouter();
-  const change = useMutation({ ...changeSettingsMutation(), meta: { inline: true } });
+  const change = useMutation({ ...updateMeMutation(), meta: { inline: true } });
   const active = THEMES.find((preset) => sameTheme(preset.theme, current));
 
   const save = async (next: Theme) => {
@@ -291,7 +287,7 @@ function ChangeEmail({ current }: { current: string }) {
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const router = useRouter();
-  const changeEmail = useMutation({ ...changeEmailMutation(), meta: { inline: true } });
+  const changeEmail = useMutation({ ...updateMeMutation(), meta: { inline: true } });
   return (
     <form
       className="flex flex-col gap-3"

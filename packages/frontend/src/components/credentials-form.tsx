@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Button } from "./ui/button";
 import { ErrorText } from "./error-text";
 import { Input } from "./ui/input";
-import { loginMutation, setupMutation } from "potoo-sdk/react-query";
+import { bootstrapMutation, loginMutation } from "potoo-sdk/react-query";
 import { errorMessage } from "../lib/api";
 
 export function CredentialsForm({
@@ -24,7 +24,7 @@ export function CredentialsForm({
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string>();
   const login = useMutation({ ...loginMutation(), meta: { inline: true } });
-  const setup = useMutation({ ...setupMutation(), meta: { inline: true } });
+  const setup = useMutation({ ...bootstrapMutation(), meta: { inline: true } });
   return (
     <form
       className="flex max-w-sm flex-col gap-3"

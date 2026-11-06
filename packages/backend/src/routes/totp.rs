@@ -46,7 +46,11 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(regenerate_recovery_codes))
         .routes(routes!(replace))
         .routes(routes!(confirm_replace))
-        .routes(routes!(reset))
+}
+
+/// Turning off a user's two-factor authentication, nested under /admin.
+pub fn admin_router() -> OpenApiRouter<AppState> {
+    OpenApiRouter::new().routes(routes!(reset))
 }
 
 /// How long the second step may wait after the password.

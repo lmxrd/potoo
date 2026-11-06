@@ -63,14 +63,14 @@ function Login() {
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">Sign in</h1>
       {error && <ErrorText>{SSO_ERRORS[error] ?? "Single sign-on failed."}</ErrorText>}
-      {session.oidc && (
+      {session.sso && (
         <div className="flex max-w-sm flex-col gap-3">
           {/* A navigation, not a request: the browser goes to the provider. */}
           <a
             href="/api/auth/oidc/login"
             className="rounded bg-primary px-3 py-2 text-center text-sm font-medium text-primary-foreground hover:bg-primary/90"
           >
-            Sign in with {session.oidc.label}
+            Sign in with {session.sso}
           </a>
           {session.password_login && (
             <p className="text-center text-xs text-muted-foreground">or with your password</p>
@@ -87,7 +87,7 @@ function Login() {
           onTotp={setStep}
         />
       )}
-      {!session.password_login && !session.oidc && (
+      {!session.password_login && !session.sso && (
         <ErrorText>Single sign-on is not set up yet. Ask an admin.</ErrorText>
       )}
     </div>

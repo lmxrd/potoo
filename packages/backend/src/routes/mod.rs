@@ -3,12 +3,12 @@ use crate::state::AppState;
 use axum::Json;
 use axum::http::StatusCode;
 use utoipa_axum::router::OpenApiRouter;
-use utoipa_axum::routes;
 
 pub mod api_keys;
 pub mod auth;
 pub mod collect;
 pub mod export;
+pub mod health;
 pub mod import;
 pub mod oidc;
 pub mod sites;
@@ -22,9 +22,14 @@ pub mod totp;
 /// are the namespaces under /api.
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(health))
+        .merge(health::router())
         .merge(collect::router())
-        .nest("/admin", oidc::admin_router())
+        .nest(
+            "/admin",
+            oidc::admin_router()
+                .merge(auth::admin_router())
+                .merge(totp::admin_router()),
+        )
         .nest(
             "/auth",
             auth::router()
@@ -46,20 +51,4 @@ async fn not_found() -> (StatusCode, Json<ErrorBody>) {
             error: "Not found".into(),
         }),
     )
-}
-
-/// Liveness: 200 OK, for the Docker healthcheck and load balancers.
-#[utoipa::path(
-    get,
-    path = "/health",
-    tag = "System",
-    operation_id = "getHealth",
-    summary = "Liveness",
-    description = "200 OK, for the Docker healthcheck and load balancers.",
-    responses(
-        (status = 200, description = "The server is up", body = String, content_type = "text/plain"),
-    ),
-)]
-async fn health() -> &'static str {
-    "OK"
 }

@@ -140,14 +140,14 @@ async fn setup_users_sites_collection_stats_and_exports() {
     let admin = json!({ "email": "a@example.com", "password": "correct horse battery" });
 
     // First run: no users yet, every page redirects to setup.
-    let session = json(request(&app, Method::GET, "/api/auth/session", None, None).await).await;
+    let session = session_of(&app, None).await;
     assert_eq!(session["needsSetup"], json!(true));
     assert_eq!(session["user"], json!(null));
 
     let response = request(
         &app,
         Method::POST,
-        "/api/auth/setup",
+        "/api/auth/bootstrap",
         None,
         Some(admin.clone()),
     )
@@ -158,7 +158,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::POST,
-            "/api/auth/setup",
+            "/api/auth/bootstrap",
             None,
             Some(admin.clone())
         )
@@ -198,7 +198,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::POST,
-            "/api/auth/users",
+            "/api/admin/users",
             Some(&session),
             Some(json!({ "email": "u@example.com", "password": "another long pass" })),
         )
@@ -424,17 +424,16 @@ async fn setup_users_sites_collection_stats_and_exports() {
     assert_eq!(
         request(
             &app,
-            Method::POST,
-            "/api/auth/settings",
+            Method::PATCH,
+            "/api/auth/me",
             Some(&session),
             Some(json!({ "theme": "{\"base\":\"dark\",\"accent\":\"#38BDF8\"}" })),
         )
         .await
         .status_code(),
-        204
+        200
     );
-    let with_theme =
-        json(request(&app, Method::GET, "/api/auth/session", Some(&session), None).await).await;
+    let with_theme = session_of(&app, Some(&session)).await;
     assert_eq!(
         with_theme["user"]["theme"],
         json!("{\"base\":\"dark\",\"accent\":\"#38bdf8\"}")
@@ -442,8 +441,8 @@ async fn setup_users_sites_collection_stats_and_exports() {
     assert_eq!(
         request(
             &app,
-            Method::POST,
-            "/api/auth/settings",
+            Method::PATCH,
+            "/api/auth/me",
             Some(&session),
             Some(json!({ "theme": "{\"base\":\"blue\"}" })),
         )
@@ -454,14 +453,14 @@ async fn setup_users_sites_collection_stats_and_exports() {
 
     // Users: the last admin cannot be demoted or deleted.
     let users =
-        json(request(&app, Method::GET, "/api/auth/users", Some(&session), None).await).await;
+        json(request(&app, Method::GET, "/api/admin/users", Some(&session), None).await).await;
     let admin_id = users[0]["id"].as_str().unwrap().to_string();
     assert_eq!(users[0]["is_admin"], json!(true));
     assert_eq!(users[1]["is_admin"], json!(false));
     let user_id = users[1]["id"].as_str().unwrap().to_string();
     let response = app
         .server
-        .method(Method::PATCH, &format!("/api/auth/users/{admin_id}"))
+        .method(Method::PATCH, &format!("/api/admin/users/{admin_id}"))
         .add_header("cookie", &session)
         .json(&json!({ "is_admin": false }))
         .await;
@@ -470,7 +469,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::DELETE,
-            &format!("/api/auth/users/{admin_id}"),
+            &format!("/api/admin/users/{admin_id}"),
             Some(&session),
             None
         )
@@ -482,7 +481,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         request(
             &app,
             Method::DELETE,
-            &format!("/api/auth/users/{user_id}"),
+            &format!("/api/admin/users/{user_id}"),
             Some(&session),
             None
         )
@@ -542,10 +541,10 @@ async fn pixel_tracker_and_api_404() {
     let js = response.text();
     assert!(js.contains("new URL(\"api/collect\", s.src)"));
 
-    // Liveness, for healthchecks: 200 with an OK body.
+    // Liveness, for healthchecks: 200 when the service and its database are up.
     let response = request(&app, Method::GET, "/api/health", None, None).await;
     assert_eq!(response.status_code(), 200);
-    assert_eq!(response.text(), "OK");
+    assert_eq!(json(response).await, json!({ "status": "ok", "db": "ok" }));
 
     // Unknown API paths answer with JSON, not the frontend.
     let response = request(&app, Method::GET, "/api/nope", None, None).await;
@@ -557,7 +556,7 @@ async fn pixel_tracker_and_api_404() {
 async fn bots_and_dnt_are_not_recorded() {
     let app = spawn_app().await;
     let admin = json!({ "email": "a@example.com", "password": "correct horse battery" });
-    let response = request(&app, Method::POST, "/api/auth/setup", None, Some(admin)).await;
+    let response = request(&app, Method::POST, "/api/auth/bootstrap", None, Some(admin)).await;
     let session = cookie(&response);
     json(
         request(
@@ -661,7 +660,7 @@ async fn bodies_are_json_only_except_at_collect() {
     let credentials = r#"{"email":"a@example.com","password":"correct horse battery"}"#;
 
     // Valid JSON in another content type is a 415, in the API's error shape.
-    let response = post_raw(&app, "/api/auth/setup", "text/plain", credentials).await;
+    let response = post_raw(&app, "/api/auth/bootstrap", "text/plain", credentials).await;
     assert_eq!(response.status_code(), 415);
     assert_eq!(
         json(response).await["error"],
@@ -669,12 +668,12 @@ async fn bodies_are_json_only_except_at_collect() {
     );
     // Invalid JSON, or JSON of the wrong shape, is a 400.
     for body in ["{nope", r#"{"email": 1}"#, ""] {
-        let response = post_raw(&app, "/api/auth/setup", "application/json", body).await;
+        let response = post_raw(&app, "/api/auth/bootstrap", "application/json", body).await;
         assert_eq!(response.status_code(), 400, "{body:?}");
         assert_eq!(json(response).await["error"], json!("Invalid request body"));
     }
     // Nothing was created by any of those; the real thing works.
-    let response = post_raw(&app, "/api/auth/setup", "application/json", credentials).await;
+    let response = post_raw(&app, "/api/auth/bootstrap", "application/json", credentials).await;
     assert_eq!(response.status_code(), 201);
 
     // A login with a body the API cannot read fails like a wrong password.
@@ -715,7 +714,7 @@ async fn import_adds_every_row_or_none() {
         &request(
             &app,
             Method::POST,
-            "/api/auth/setup",
+            "/api/auth/bootstrap",
             None,
             Some(credentials),
         )
@@ -753,7 +752,7 @@ async fn import_adds_every_row_or_none() {
     request(
         &app,
         Method::POST,
-        "/api/auth/users",
+        "/api/admin/users",
         Some(&session),
         Some(json!({ "email": "u@example.com", "password": "another long pass" })),
     )
@@ -1276,7 +1275,7 @@ async fn admin_session(app: &TestApp) -> String {
     let response = request(
         app,
         Method::POST,
-        "/api/auth/setup",
+        "/api/auth/bootstrap",
         None,
         Some(json!({ "email": "admin@example.com", "password": "correct horse battery" })),
     )
@@ -1308,8 +1307,26 @@ async fn configure(app: &TestApp, session: &str, provider: &provider::Provider, 
     assert_eq!(response.status_code(), 200);
 }
 
+/// What the frontend knows before routing a page: `/api/auth/status` and,
+/// when signed in, `/api/auth/me`, put together as the old session endpoint
+/// answered (`needsSetup`, `user`, `oidc.label`, `password_login`,
+/// `totp_required`), which is what these tests check.
 async fn session_of(app: &TestApp, session: Option<&str>) -> Value {
-    json(request(app, Method::GET, "/api/auth/session", session, None).await).await
+    let status = json(request(app, Method::GET, "/api/auth/status", None, None).await).await;
+    let me = request(app, Method::GET, "/api/auth/me", session, None).await;
+    let user = if me.status_code() == 200 {
+        json(me).await
+    } else {
+        assert_eq!(me.status_code(), 401);
+        Value::Null
+    };
+    json!({
+        "needsSetup": status["bootstrap_required"],
+        "user": user,
+        "oidc": if status["sso"].is_null() { Value::Null } else { json!({ "label": status["sso"] }) },
+        "password_login": status["password_login"],
+        "totp_required": status["totp_required"],
+    })
 }
 
 /// Single sign-on is off until an admin sets a provider that
@@ -1329,7 +1346,7 @@ async fn single_sign_on_is_off_until_a_working_provider_is_set() {
     let response = request(
         &app,
         Method::POST,
-        "/api/auth/users",
+        "/api/admin/users",
         Some(&admin),
         Some(passwordless.clone()),
     )
@@ -1360,7 +1377,7 @@ async fn single_sign_on_is_off_until_a_working_provider_is_set() {
     request(
         &app,
         Method::POST,
-        "/api/auth/users",
+        "/api/admin/users",
         Some(&admin),
         Some(json!({ "email": "user@example.com", "password": "correct horse battery" })),
     )
@@ -1411,7 +1428,7 @@ async fn single_sign_on_is_off_until_a_working_provider_is_set() {
     let response = request(
         &app,
         Method::POST,
-        "/api/auth/users",
+        "/api/admin/users",
         Some(&admin),
         Some(passwordless),
     )
@@ -1437,7 +1454,7 @@ async fn single_sign_on_signs_existing_users_in() {
     request(
         &app,
         Method::POST,
-        "/api/auth/users",
+        "/api/admin/users",
         Some(&admin),
         Some(json!({ "email": "b@example.com", "password": "correct horse battery" })),
     )
@@ -1479,7 +1496,8 @@ async fn single_sign_on_signs_existing_users_in() {
         session_of(&app, Some(&session)).await["user"]["email"],
         json!("b@example.com")
     );
-    let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
+    let users =
+        json(request(&app, Method::GET, "/api/admin/users", Some(&admin), None).await).await;
     let linked: Vec<_> = users
         .as_array()
         .unwrap()
@@ -1508,7 +1526,7 @@ async fn single_sign_on_refuses_bad_callbacks() {
     request(
         &app,
         Method::POST,
-        "/api/auth/users",
+        "/api/admin/users",
         Some(&admin),
         Some(json!({ "email": "b@example.com", "password": "correct horse battery" })),
     )
@@ -1611,7 +1629,8 @@ async fn single_sign_on_refuses_bad_callbacks() {
     assert_eq!(result, Err("/login?error=unknown_user".into()));
 
     // None of that linked or created anything.
-    let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
+    let users =
+        json(request(&app, Method::GET, "/api/admin/users", Some(&admin), None).await).await;
     assert_eq!(users.as_array().unwrap().len(), 2);
     assert!(
         users
@@ -1763,7 +1782,7 @@ async fn single_sign_on_signs_nobody_in_before_setup() {
     let response = request(
         &app,
         Method::POST,
-        "/api/auth/setup",
+        "/api/auth/bootstrap",
         None,
         Some(json!({ "email": "admin@example.com", "password": "correct horse battery" })),
     )
@@ -1922,7 +1941,7 @@ async fn secure_admin_session(app: &TestApp) -> String {
     let response = request(
         app,
         Method::POST,
-        "/api/auth/setup",
+        "/api/auth/bootstrap",
         None,
         Some(json!({ "email": "admin@example.com", "password": "correct horse battery" })),
     )
@@ -2179,7 +2198,7 @@ async fn enable(app: &TestApp, session: &str) -> String {
 }
 
 async fn reset_totp(app: &TestApp, session: &str, id: &str) -> Response {
-    let path = format!("/api/auth/users/{id}/totp");
+    let path = format!("/api/admin/users/{id}/totp");
     request(app, Method::DELETE, &path, Some(session), None).await
 }
 
@@ -2419,7 +2438,7 @@ async fn two_factor_authentication_is_turned_off_by_the_user_or_an_admin() {
     let response = request(
         &app,
         Method::POST,
-        "/api/auth/users",
+        "/api/admin/users",
         Some(&admin),
         Some(json!({ "email": "b@example.com", "password": "correct horse battery" })),
     )
@@ -2457,7 +2476,8 @@ async fn two_factor_authentication_is_turned_off_by_the_user_or_an_admin() {
         password_login(&app, "b@example.com").await.status_code(),
         200
     );
-    let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
+    let users =
+        json(request(&app, Method::GET, "/api/admin/users", Some(&admin), None).await).await;
     let id = users[1]["id"].as_str().unwrap().to_string();
     assert_eq!(users[1]["totp_enabled"], json!(true));
     let own = users[0]["id"].as_str().unwrap().to_string();
@@ -2474,7 +2494,8 @@ async fn two_factor_authentication_is_turned_off_by_the_user_or_an_admin() {
         password_login(&app, "b@example.com").await.status_code(),
         204
     );
-    let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
+    let users =
+        json(request(&app, Method::GET, "/api/admin/users", Some(&admin), None).await).await;
     assert_eq!(users[1]["totp_enabled"], json!(false));
 }
 
@@ -2512,22 +2533,23 @@ async fn single_sign_on_only_refuses_passwords() {
     );
     let body = json!({ "email": "b@example.com", "password": "correct horse battery" });
     assert_eq!(
-        post(&app, "/api/auth/users", &admin, Some(body))
+        post(&app, "/api/admin/users", &admin, Some(body))
             .await
             .status_code(),
         403
     );
     let body = json!({ "email": "b@example.com" });
     assert_eq!(
-        post(&app, "/api/auth/users", &admin, Some(body))
+        post(&app, "/api/admin/users", &admin, Some(body))
             .await
             .status_code(),
         201
     );
-    let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
+    let users =
+        json(request(&app, Method::GET, "/api/admin/users", Some(&admin), None).await).await;
     let id = users[1]["id"].as_str().unwrap().to_string();
     let body = json!({ "new_password": "correct horse battery" });
-    let path = format!("/api/auth/users/{id}/password");
+    let path = format!("/api/admin/users/{id}/password");
     assert_eq!(
         post(&app, &path, &admin, Some(body)).await.status_code(),
         403
@@ -2613,14 +2635,14 @@ async fn api_keys_are_capped_by_their_scope() {
         201
     );
     assert_eq!(
-        with_key(&app, Method::GET, "/api/auth/users", &write, None)
+        with_key(&app, Method::GET, "/api/admin/users", &write, None)
             .await
             .status_code(),
         403
     );
     // Admin: what the admin may.
     assert_eq!(
-        with_key(&app, Method::GET, "/api/auth/users", &admin_key, None)
+        with_key(&app, Method::GET, "/api/admin/users", &admin_key, None)
             .await
             .status_code(),
         200
@@ -2709,7 +2731,7 @@ async fn api_keys_are_capped_by_their_scope() {
 
     // A regular user: no admin keys, and an admin key would not help.
     let body = json!({ "email": "b@example.com", "password": "correct horse battery" });
-    post(&app, "/api/auth/users", &admin, Some(body)).await;
+    post(&app, "/api/admin/users", &admin, Some(body)).await;
     let user = cookie(&password_login(&app, "b@example.com").await);
     let body = json!({ "name": "x", "scope": "admin" });
     assert_eq!(
@@ -2729,9 +2751,10 @@ async fn api_keys_are_capped_by_their_scope() {
         200
     );
     // A user's keys go with them.
-    let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
+    let users =
+        json(request(&app, Method::GET, "/api/admin/users", Some(&admin), None).await).await;
     let id = users[1]["id"].as_str().unwrap().to_string();
-    let path = format!("/api/auth/users/{id}");
+    let path = format!("/api/admin/users/{id}");
     assert_eq!(
         request(&app, Method::DELETE, &path, Some(&admin), None)
             .await
@@ -2861,7 +2884,7 @@ async fn totp_required_makes_everyone_set_it_up() {
     // they set it up again.
     let body = json!({ "email": "b@example.com" });
     assert_eq!(
-        post(&app, "/api/auth/users", &admin, Some(body))
+        post(&app, "/api/admin/users", &admin, Some(body))
             .await
             .status_code(),
         201
@@ -2888,7 +2911,8 @@ async fn totp_required_makes_everyone_set_it_up() {
     assert_eq!(response.status_code(), 200);
     let (page, _) = sso_step(&app, &provider, "b@example.com").await;
     assert_eq!(page, "/login?step=totp");
-    let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
+    let users =
+        json(request(&app, Method::GET, "/api/admin/users", Some(&admin), None).await).await;
     let id = users[1]["id"].as_str().unwrap().to_string();
     assert_eq!(reset_totp(&app, &admin, &id).await.status_code(), 204);
     let (page, _) = sso_step(&app, &provider, "b@example.com").await;
@@ -2979,7 +3003,7 @@ async fn sessions_end_with_a_password_change_a_deletion_or_a_logout() {
     let admin = admin_session(&app).await;
     let body = json!({ "email": "b@example.com", "password": "correct horse battery" });
     assert_eq!(
-        post(&app, "/api/auth/users", &admin, Some(body))
+        post(&app, "/api/admin/users", &admin, Some(body))
             .await
             .status_code(),
         201
@@ -3017,8 +3041,9 @@ async fn sessions_end_with_a_password_change_a_deletion_or_a_logout() {
     let body = json!({ "email": "b@example.com", "password": "another horse battery" });
     let session = cookie(&request(&app, Method::POST, "/api/auth/login", None, Some(body)).await);
     assert!(signed_in(session.clone()).await);
-    let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
-    let path = format!("/api/auth/users/{}", users[1]["id"].as_str().unwrap());
+    let users =
+        json(request(&app, Method::GET, "/api/admin/users", Some(&admin), None).await).await;
+    let path = format!("/api/admin/users/{}", users[1]["id"].as_str().unwrap());
     assert_eq!(
         request(&app, Method::DELETE, &path, Some(&admin), None)
             .await
