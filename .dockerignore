@@ -5,9 +5,8 @@
 data
 dist/*
 !dist/potoo-linux-*
-frontend/dist
-frontend/node_modules
 node_modules
-potoo
-backend/target
-frontend/src/client
+packages/*/node_modules
+packages/frontend/dist
+packages/backend/target
+packages/sdk/src

@@ -24,7 +24,7 @@ RUN apk upgrade --no-cache \
   && mkdir /data && chown potoo /data
 COPY ${BINARY} /usr/local/bin/potoo
 ENV PORT=8000 \
-    DATABASE_PATH=/data/potoo.db \
+    DATABASE_URL=sqlite:/data/potoo.db \
     GEOIP_DB_PATH=/data/country.mmdb
 VOLUME /data
 EXPOSE 8000

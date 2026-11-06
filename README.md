@@ -75,10 +75,11 @@ services:
     volumes:
       - ./data:/data
     environment:
-      # To register the IP of the app sits behind a reverse proxy that sets 
-      # X-Forwarded-For and terminates TLS; see the configuration table below 
-      # for everything else.
-      TRUST_PROXY: "1"
+      # Where Potoo is reached: an https address makes its cookies Secure.
+      PUBLIC_URL: "https://stats.example.com"
+      # Behind a reverse proxy that sets X-Forwarded-For and terminates TLS;
+      # see the configuration table below for everything else.
+      TRUST_PROXY: "true"
       # RETENTION_DAYS: "365"   # delete hits older than a year
 ```
 
@@ -101,8 +102,14 @@ into `dist/potoo-linux-<arch>`), then the image (podman) for the
 architecture of your machine. The binary is cross-compiled with zig, so a
 Mac builds it too; `ARCH=amd64` or `arm64` builds the other architecture.
 
-Behind a reverse proxy, set `TRUST_PROXY=1` so the client IP is read from
-`X-Forwarded-For`, and terminate TLS there.
+Set `PUBLIC_URL` to the address Potoo is reached at. When it is https,
+every cookie is `Secure` with the `__Host-` prefix, so it is only ever sent
+over https and no other subdomain can set or read it; requests that change
+something must come from that address (browsers say where a request comes
+from in `Sec-Fetch-Site`, older ones in `Origin`); and single sign-on's
+callback is under it. Behind a reverse proxy, also set `TRUST_PROXY=true`,
+so the client's address (for the visitor counts and the sign-in limits) is
+read from `X-Forwarded-For`, and terminate TLS there.
 
 ### Staying up to date
 
@@ -238,11 +245,13 @@ are not checked for duplicates.
 | Variable             | Default             | Purpose                                                                                                                                     |
 | -------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PORT`               | `8000`              | HTTP port                                                                                                                                   |
-| `DATABASE_PATH`      | `data/potoo.db`     | SQLite file                                                                                                                                 |
+| `DATABASE_URL`       | `sqlite:data/potoo.db` | The database, as a URL. SQLite only for now: `sqlite:` and the file's path, e.g. `sqlite:/data/potoo.db`                               |
 | `SQLITE_SYNCHRONOUS` | `NORMAL`            | How hard SQLite syncs to disk: `NORMAL` is fast and safe (a power cut can lose the last few hits, never corrupt); `FULL` syncs every commit |
 | `GEOIP_DB_PATH`      | `data/country.mmdb` | MaxMind-format country DB. Downloaded from DB-IP on boot when missing or older than a week, and refreshed weekly (the current month's file, or last month's until the new one is published)                            |
 | `GEOIP_URL`          | unset               | Override the download URL, e.g. your own mirror. Empty string disables downloading; a missing file then leaves country empty                |
-| `TRUST_PROXY`        | unset               | Set to `1` to read the client IP from `X-Forwarded-For` (behind a reverse proxy)                                                            |
+| `PUBLIC_URL`         | unset               | The address Potoo is reached at, e.g. `https://stats.example.com`. https makes every cookie `Secure` and `__Host-`; it is also the only origin changes are taken from, and single sign-on's callback is under it. Unset (local use): plain cookies, the request's own host |
+| `TRUST_PROXY`        | `false`             | `true` to read the client IP from `X-Forwarded-For` (behind a reverse proxy)                                                               |
+| `RUST_LOG`           | `info`              | What is logged, e.g. `debug` or `potoo=debug,tower_http=info`                                                                              |
 | `RETENTION_DAYS`     | unset               | Delete hits older than this                                                                                                                 |
 | `OIDC_ISSUER`        | unset               | Single sign-on: the provider's issuer URL (`https://`). With `OIDC_CLIENT_ID`, turns single sign-on on; see [Single sign-on](#single-sign-on) |
 | `OIDC_CLIENT_ID`     | unset               | Single sign-on: the client id registered with the provider                                                                                  |
@@ -254,9 +263,13 @@ are not checked for duplicates.
 | `OIDC_ONLY`          | `false`             | Single sign-on: `true` makes single sign-on the only way in: no password signs in and none can be set. The first admin is still created with a password on `/setup`, then signs in through the provider (matched by their verified email) |
 | `TOTP_REQUIRED`      | `false`             | `true` makes two-factor authentication required: a user without it sets up an authenticator app at their next sign-in (password or single sign-on), and nobody can turn it off. Sessions made before are kept |
 
-`OIDC_AUTO_CREATE`, `OIDC_ONLY` and `TOTP_REQUIRED` take `true` or `false`
+`TRUST_PROXY`, `OIDC_AUTO_CREATE`, `OIDC_ONLY` and `TOTP_REQUIRED` take `true` or `false`
 (`1`/`0`, `yes`/`no` and `on`/`off` work too); any other value stops Potoo at
 start.
+
+A session lasts 30 days from the sign-in. Changing the password or the
+two-factor setup signs the user's other sessions out, and deleting a user
+signs them out everywhere at once.
 
 This site or product includes IP data from db-ip.com, licensed under CC BY 4.0.
 
@@ -297,11 +310,9 @@ sign-on is set up (with the variables, or in the admin settings by the first
 admin, signed in after `/setup`), nobody else can sign in; Potoo logs a
 warning at start.
 
-Behind a reverse proxy that terminates TLS, the callback URL Potoo works out
-needs `TRUST_PROXY=1` and the proxy's `X-Forwarded-Proto` (and
-`X-Forwarded-Host`, or the original `Host` header); without them, set
-`OIDC_REDIRECT_URL`. The callback must be on the scheme (http or https) Potoo
-is reached over: a login where it is not is refused at once (the log says
+The callback URL is `PUBLIC_URL` followed by `/api/auth/oidc/callback`, or
+`OIDC_REDIRECT_URL` when set. It must be on the scheme (http or https) of
+`PUBLIC_URL`: a login where it is not is refused at once (the log says
 why). A sign-in in progress lives in a cookie for ten minutes,
 signed with a key made when Potoo starts: a restart, or a second sign-in
 started in another tab, makes it fail, and trying again works.
@@ -317,8 +328,13 @@ authenticator app (or type the key), confirm with a code, and keep the ten
 recovery codes it shows once. From then on, signing in (with a password or
 with single sign-on) also asks for a code from the app, or a recovery code
 (each works once). A code is
-accepted for 30 seconds either side of its own, and only once. After five
-wrong codes within 15 minutes, the user's codes are refused for a while.
+accepted for 30 seconds either side of its own, and only once.
+
+Every attempt to sign in or enter a code counts, right or wrong: 5 per
+email address, then 1 a minute; 30 per client address, then 1 every 6
+seconds; and 5 codes (or current passwords) per user, then 1 a minute.
+Over that, Potoo answers 429 with `Retry-After`. Nobody is ever locked out,
+so nobody can lock someone else out, only slow down guessing.
 
 Turning it off, making new recovery codes, or moving to a new phone or app
 (**Replace app**) needs a code. A replacement shows a new QR code, and the old
@@ -359,11 +375,38 @@ hits still queued — the last few milliseconds — and, with the default
 `SQLITE_SYNCHRONOUS=NORMAL`, the last few commits. Past a queue of 20,000
 waiting hits the tracker answers `503` instead of buffering more.
 
+## Upgrading from 0.6
+
+Potoo is before 1.0, so a release can change how it is set up. The next one
+does:
+
+- **Everyone signs in again once.** Sessions moved to a new store; the old
+  ones are dropped.
+- **Behind an https proxy, set `PUBLIC_URL`** (e.g. `https://stats.example.com`).
+  It replaces what Potoo worked out from `X-Forwarded-Proto` and
+  `X-Forwarded-Host`, which it no longer reads: without it, cookies are not
+  `Secure`, single sign-on's callback is plain http, and older browsers'
+  changes are refused.
+- **Sign-in limits changed.** Instead of locking an address and email out
+  after 5 failures in 15 minutes, every attempt counts and the limit is a
+  pace (see [Two-factor authentication](#two-factor-authentication)).
+- **No glibc builds.** Releases attach only the static (musl) binaries, which
+  run on any Linux, with their SHA-256 checksums.
+- **Ids are UUIDs.** Users, sites and API keys have UUIDv7 ids (strings in
+  the API, such as `0190f5b2-7c00-7c1a-9d3e-5b7a1c2d3e4f`) instead of
+  numbers. The upgrade converts them, keeping every relation; it rewrites
+  the hits table, so on a large database it takes a while. Today's unique
+  visitors may be counted twice across the upgrade.
+- **`DATABASE_PATH` is now `DATABASE_URL`**, a database URL:
+  `DATABASE_PATH=/data/potoo.db` becomes `DATABASE_URL=sqlite:/data/potoo.db`
+  (the image sets it already).
+- **`RUST_LOG`** now picks what is logged (default `info`).
+
 ## The API
 
 Every endpoint is described in an OpenAPI 3.1 document, generated from the code
 rather than hosted: `mise run gen:spec` writes it to
-`backend/target/specs/openapi.json`. The dashboard's API client is generated from
+`packages/backend/target/specs/openapi.json`. The dashboard's API client is generated from
 it, and you can load it into any OpenAPI viewer or client generator.
 
 ## Notes

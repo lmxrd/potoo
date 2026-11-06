@@ -1,108 +1,96 @@
-# pnpm matches the pnpm of frontend/package.json's packageManager: change
-# them together. The Docker image builds nothing (see the Dockerfile).
+# Tool versions. Node and pnpm are read from the root package.json
+# (`devEngines.runtime` and `packageManager`), Rust from rust-toolchain.toml
+# (which rustup reads too): each version lives in one place. The Docker
+# image builds nothing (see the Dockerfile).
+[settings]
+idiomatic_version_file_enable_tools = ["node", "pnpm", "rust"]
+
 [tools]
-node = "24"
-pnpm = "12.11.2"
-# The host target comes with the toolchain; the release also builds the
-# static musl binary, so its std is installed for either architecture.
-rust = {
-  version = "1.99.0",
-  components = ["clippy", "llvm-tools", "rustfmt"],
-  targets = ["x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"],
-}
 # The C compiler and linker of the static Linux binary (scripts/build-linux.sh),
 # so that it builds on a Mac too.
 zig = "0.15.2"
 "github:rust-cross/cargo-zigbuild" = "0.24.0"
+# Restarts the backend when its code changes (dev:backend).
+watchexec = "2.8.0"
 # The vulnerability scanners of `mise run audit` and `audit:image`.
 "aqua:google/osv-scanner" = "2.7.0"
 "aqua:aquasecurity/trivy" = "0.76.1"
 
-# Development: the Rust backend on :8000 (with the Vite proxy in front of
-# the frontend for /api), or the frontend dev server alone.
+# ---------------------------------------------------------------------------
+# Development
+# ---------------------------------------------------------------------------
+
+# The Rust backend on :8000 (with the Vite proxy in front of the frontend
+# for /api), and the frontend dev server.
 [tasks.dev]
 depends = ["dev:backend", "dev:frontend"]
 
-# The backend needs frontend/dist to exist to compile, even in debug.
+# Restarted when its code changes. It needs packages/frontend/dist to exist
+# to compile, even in debug.
 [tasks."dev:backend"]
 depends = ["build:frontend"]
-run = "cargo run"
-dir = "{{ config_root }}/backend"
+run = "watchexec --restart --stop-signal SIGINT --watch src --watch migrations --watch Cargo.toml --watch Cargo.lock --exts rs,toml,sql --ignore '**/target/**' -- cargo run"
+dir = "{{ config_root }}/packages/backend"
+
+[tasks."dev:frontend"]
+depends = ["install:frontend", "gen:sdk"]
+run = "pnpm run dev"
+dir = "{{ config_root }}/packages/frontend"
+
+# Run the server against a built frontend. Depends on the build so a stale
+# binary can never serve yesterday's code.
+[tasks.start]
+depends = ["build"]
+run = "../../dist/potoo"
+dir = "{{ config_root }}/packages/backend"
 
 # Tasks with sources and outputs are skipped when the outputs are newer
 # than the sources.
 #
-# The frontend's dependencies. Every frontend task depends on this, so a
-# fresh checkout (CI included) works; pnpm installs frozen when CI is set.
+# The JavaScript workspace (frontend, SDK, end-to-end tests). Every frontend
+# task depends on this, so a fresh checkout (CI included) works; pnpm
+# installs frozen when CI is set.
 [tasks."install:frontend"]
 run = "pnpm install"
-sources = ["package.json", "pnpm-lock.yaml"]
+sources = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "packages/*/package.json"]
 outputs = ["node_modules/.pnpm/lock.yaml"]
-dir = "{{ config_root }}/frontend"
+dir = "{{ config_root }}"
+
+# ---------------------------------------------------------------------------
+# Generated code
+# ---------------------------------------------------------------------------
 
 # The OpenAPI spec, written by the backend without the frontend embedded
-# (--features spec): the frontend's API client is generated from it, so the
-# spec comes first. The frontend tasks below depend on it.
+# (--features spec): the SDK is generated from it, so the spec comes first.
 [tasks."gen:spec"]
 run = "cargo run --features spec --bin openapi"
-sources = [
-  "src/**/*",
-  "migrations/**/*",
-  "Cargo.toml",
-  "Cargo.lock",
-  "build.rs",
-]
+sources = ["src/**/*", "migrations/**/*", "Cargo.toml", "Cargo.lock", "build.rs"]
 outputs = ["target/specs/openapi.json"]
-dir = "{{ config_root }}/backend"
+dir = "{{ config_root }}/packages/backend"
 
-# The frontend's API client, generated from the spec (not committed). One
-# task, so that tasks running side by side never generate it twice at once.
-[tasks."gen:client"]
+# The SDK the frontend calls the API with (packages/sdk/src), generated from
+# the spec, never committed. One task, so that tasks running side by side
+# never generate it twice at once.
+[tasks."gen:sdk"]
 depends = ["install:frontend", "gen:spec"]
-run = "pnpm run gen:api"
-sources = [
-  "../backend/target/specs/openapi.json",
-  "openapi-ts.config.ts",
-]
-dir = "{{ config_root }}/frontend"
+run = "pnpm run openapi-ts"
+sources = ["../backend/target/specs/openapi.json", "openapi-ts.config.ts"]
+outputs = ["src/index.ts"]
+dir = "{{ config_root }}/packages/sdk"
 
-[tasks."dev:frontend"]
-depends = ["install:frontend", "gen:client"]
-run = "pnpm run dev"
-dir = "{{ config_root }}/frontend"
+# ---------------------------------------------------------------------------
+# Build
+# ---------------------------------------------------------------------------
 
-# Run the server against a built frontend. Depends on the build so a
-# stale binary can never serve yesterday's code.
-[tasks.start]
-depends = ["build:backend"]
-run = "cargo run --release"
-dir = "{{ config_root }}/backend"
-
+# The release binary for this machine, copied to dist/potoo out of the target
+# directory, wherever cargo is configured to put it (cargo has no stable
+# flag to put one artifact elsewhere).
 [tasks.build]
-depends = ["build:backend"]
-
-[tasks."build:frontend"]
-depends = ["install:frontend", "gen:client"]
-run = "pnpm run build"
-sources = [
-  "src/**/*",
-  "index.html",
-  "vite.config.ts",
-  "tsconfig.json",
-  "package.json",
-  "pnpm-lock.yaml",
-]
-dir = "{{ config_root }}/frontend"
-
-# The release binary for this machine, copied to dist/potoo out of the
-# target directory, wherever cargo is configured to put it (cargo has no
-# stable flag to put one artifact elsewhere).
-[tasks."build:backend"]
 depends = ["build:frontend"]
 run = """
 cargo build --release
-mkdir -p ../dist
-cp "$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)/release/potoo" ../dist/potoo
+mkdir -p ../../dist
+cp "$(cargo metadata --format-version 1 --no-deps | jq -r .target_directory)/release/potoo" ../../dist/potoo
 """
 sources = [
   "src/**/*",
@@ -112,8 +100,23 @@ sources = [
   "build.rs",
   "../frontend/dist/**/*",
 ]
-outputs = ["../dist/potoo"]
-dir = "{{ config_root }}/backend"
+outputs = ["../../dist/potoo"]
+dir = "{{ config_root }}/packages/backend"
+
+[tasks."build:frontend"]
+depends = ["install:frontend", "gen:sdk"]
+run = "pnpm run build"
+sources = [
+  "src/**/*",
+  "index.html",
+  "vite.config.ts",
+  "tsconfig.json",
+  "components.json",
+  "package.json",
+  "../sdk/src/**/*",
+  "../../pnpm-lock.yaml",
+]
+dir = "{{ config_root }}/packages/frontend"
 
 # The static Linux binary (musl) the image copies, dist/potoo-linux-<arch>:
 # built outside the image, with this machine's cargo cache. ARCH=amd64 or
@@ -138,10 +141,14 @@ arch=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
 podman build --build-arg BINARY=dist/potoo-linux-$arch-profiling -t potoo:profiling .
 """
 
+# ---------------------------------------------------------------------------
+# Checks and tests
+# ---------------------------------------------------------------------------
+
 [tasks.check]
 depends = ["check:frontend", "check:backend"]
 
-# rust-embed needs frontend/dist to exist to compile, hence the build.
+# rust-embed needs packages/frontend/dist to exist to compile, hence the build.
 [tasks."check:backend"]
 depends = ["build:frontend"]
 run = """
@@ -149,37 +156,60 @@ cargo fmt --check \
   && cargo clippy -- -D warnings \
   && cargo clippy --features spec --all-targets -- -D warnings
 """
-dir = "{{ config_root }}/backend"
+dir = "{{ config_root }}/packages/backend"
 
 [tasks."check:frontend"]
-depends = ["install:frontend", "gen:client"]
+depends = ["install:frontend", "gen:sdk"]
 run = "pnpm run check"
-dir = "{{ config_root }}/frontend"
+dir = "{{ config_root }}/packages/frontend"
 
 [tasks.fix]
 depends = ["fix:backend", "fix:frontend"]
 
 [tasks."fix:backend"]
 run = "cargo fmt"
-dir = "{{ config_root }}/backend"
+dir = "{{ config_root }}/packages/backend"
 
 [tasks."fix:frontend"]
 depends = ["install:frontend"]
 run = "pnpm run fix"
-dir = "{{ config_root }}/frontend"
+dir = "{{ config_root }}/packages/frontend"
 
+# Unit and integration tests: the backend's (cargo) and the frontend's
+# (Vitest). The end-to-end smoke tests are `test:e2e`.
 [tasks.test]
+depends = ["test:backend", "test:frontend"]
+
+[tasks."test:backend"]
 depends = ["build:frontend"]
 run = "cargo test"
 sources = ["src/**/*", "tests/**/*", "migrations/**/*", "Cargo.toml", "Cargo.lock"]
-dir = "{{ config_root }}/backend"
+dir = "{{ config_root }}/packages/backend"
+
+[tasks."test:frontend"]
+depends = ["install:frontend", "gen:sdk"]
+run = "pnpm run test"
+dir = "{{ config_root }}/packages/frontend"
+
+# The end-to-end smoke tests (packages/e2e, Playwright): a real browser
+# against the image just built, on a fresh database (scripts/e2e.sh).
+[tasks."test:e2e"]
+depends = ["build:docker", "install:frontend"]
+run = [
+  "pnpm --filter potoo-e2e exec playwright install chromium",
+  "scripts/e2e.sh",
+]
+
+# ---------------------------------------------------------------------------
+# Security
+# ---------------------------------------------------------------------------
 
 # Known vulnerabilities in the locked dependencies (the OSV database, which
 # has the RustSec and GitHub advisories). Every day in CI (security.yml), as
 # new advisories come out for dependencies that did not change. A finding
 # to accept goes in osv-scanner.toml, with the reason.
 [tasks.audit]
-run = "osv-scanner scan source --config osv-scanner.toml --lockfile backend/Cargo.lock --lockfile frontend/pnpm-lock.yaml"
+run = "osv-scanner scan source --config osv-scanner.toml --lockfile packages/backend/Cargo.lock --lockfile pnpm-lock.yaml"
 dir = "{{ config_root }}"
 
 # Known vulnerabilities in an image (its Alpine packages): the fixable HIGH
@@ -187,6 +217,10 @@ dir = "{{ config_root }}"
 # scans the one it builds. The binary is static, so this is about the base.
 [tasks."audit:image"]
 run = 'trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "${IMAGE:-ghcr.io/lmxrd/potoo:latest}"'
+
+# ---------------------------------------------------------------------------
+# Data and manual tooling
+# ---------------------------------------------------------------------------
 
 # Write load against the production image in a 2 CPU, 2 GB container; see
 # scripts/loadtest.sh for the settings (CPUS, MEMORY, RATES, DURATION).
@@ -199,16 +233,16 @@ run = "scripts/loadtest.sh"
 [tasks.seed]
 depends = ["build:frontend"]
 run = "cargo run --bin seed"
-dir = "{{ config_root }}/backend"
+dir = "{{ config_root }}/packages/backend"
 
 # Remove everything that is generated or local: the Rust build (and the
-# OpenAPI spec in it), node_modules, the frontend build and the generated API
-# client, and the local data (the SQLite database and the GeoIP database).
+# OpenAPI spec in it), node_modules, the frontend build and the generated SDK,
+# and the local data (the SQLite database and the GeoIP database).
 # `mise run install:frontend` and a build bring it all back.
 [tasks.clean]
 dir = "{{ config_root }}"
 run = """
-rm -rf backend/target backend/data data dist
-rm -rf frontend/node_modules frontend/dist frontend/src/client
-rm -f frontend/openapi-ts-error-*.log
+rm -rf packages/backend/target packages/backend/data data dist
+rm -rf node_modules packages/*/node_modules packages/frontend/dist packages/sdk/src
+rm -f packages/sdk/openapi-ts-error-*.log
 """

@@ -23,8 +23,8 @@ backend).
 | -------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `mise run dev`             | Runs the backend and the frontend (Vite) together                                                              |
 | `mise run start`           | Builds, then runs the server (never a stale binary)                                                            |
-| `mise run gen:spec`        | Writes the OpenAPI spec to `backend/target/specs/openapi.json`                                                 |
-| `mise run gen:client`      | Generates the frontend API client from the spec (`frontend/src/client`, not committed)                         |
+| `mise run gen:spec`        | Writes the OpenAPI spec to `packages/backend/target/specs/openapi.json`                                                 |
+| `mise run gen:sdk`      | Generates the frontend API client from the spec (`packages/sdk/src`, not committed)                         |
 | `mise run build`           | Builds the frontend and the release binary for this machine, copied to `dist/potoo`                            |
 | `mise run build:linux`     | The static Linux binary the image copies, `dist/potoo-linux-<arch>` (zig cross-compiles; `ARCH=amd64`/`arm64`) |
 | `mise run build:docker`    | `build:linux`, then the Docker image (podman), which only copies that binary                                   |
@@ -34,7 +34,8 @@ backend).
 | `mise run audit`           | Known vulnerabilities in `Cargo.lock` and `pnpm-lock.yaml` (osv-scanner; also daily in CI)                     |
 | `mise run audit:image`     | Known vulnerabilities in the image's Alpine packages (Trivy); `IMAGE=` picks one, by default the published one |
 | `mise run fix`             | Applies the format and lint fixes                                                                              |
-| `mise run test`            | The backend tests: end-to-end over HTTP, and unit tests                                                        |
+| `mise run test`            | Unit and integration tests: the backend's (cargo, axum-test) and the frontend's (Vitest)                       |
+| `mise run test:e2e`        | The end-to-end smoke tests: builds the image, then a real browser goes through it (Playwright)                 |
 | `mise run seed`            | A year of demo data (wipes every hit; deterministic)                                                           |
 | `mise run clean`           | Removes the local data: the database and the GeoIP database                                                    |
 
@@ -43,23 +44,30 @@ Tasks that build something are cached by their `sources` and `outputs` in
 
 `mise run check` and `mise run test` must pass before a change can land.
 The checks cover formatting (rustfmt, oxfmt), linting (clippy, oxlint) and
-types (tsc) for both projects; the tests are end-to-end over real HTTP,
-against an in-memory database: setup, login and its throttle, users and
-the last-admin rules, sites, collection (bots and Do-Not-Track
-included), the stats with a filter, and the export.
+types (tsc) for both projects. The tests come in three layers:
+
+- **Unit tests** next to the code (Rust `#[cfg(test)]`, and Vitest for the
+  frontend's `src/lib`).
+- **Integration tests** of the API (`packages/backend/tests/api.rs`, on
+  axum-test, against an in-memory database): setup, login and its limits,
+  two-factor, sessions, single sign-on with a stand-in provider, API keys,
+  CSRF, users and the last-admin rules, sites, collection (bots and
+  Do-Not-Track included), the stats with a filter, the export and import.
+- **End-to-end smoke tests** (`packages/e2e`, Playwright): a few flows a
+  real browser runs against the built image. CI runs all three.
 
 ## The API and its spec
 
 Every endpoint is documented in code: a `#[utoipa::path]` on the handler, named
 request and response structs with `ToSchema`, and the handler registered with
 `routes!` on its module's `OpenApiRouter` (utoipa-axum), which is both the route
-and the spec entry, so the two cannot drift. The spec is written to `backend/target/specs/openapi.json` by `mise run gen:spec` and is
-not served. The frontend's client is generated from it (`mise run gen:client`)
+and the spec entry, so the two cannot drift. The spec is written to `packages/backend/target/specs/openapi.json` by `mise run gen:spec` and is
+not served. The frontend's client is generated from it (`mise run gen:sdk`)
 with hey-api, and uses TanStack Query and zod; it is not committed.
 
 ## Changing the schema
 
-Add a new numbered file to `backend/migrations/` (`0003_what_it_does.sql`).
+Add a new numbered file to `packages/backend/migrations/` (`0003_what_it_does.sql`).
 It is applied, in order, when the server or the seed starts, and recorded in
 the `_sqlx_migrations` table. Never edit a migration that has shipped: its
 checksum is recorded, and a changed file stops the server from starting.
@@ -72,36 +80,37 @@ foreign keys off, or `ON DELETE CASCADE` empties the tables that point at it.
 ## The code
 
 ```
-backend/src/main.rs        entrypoint: env config, geo refresh, retention, graceful stop
-backend/src/lib.rs         the app: the API routes plus the frontend, and the TLS provider
-backend/src/frontend.rs    the embedded frontend: static files, cache headers, the SPA fallback
-backend/src/state.rs       the shared AppState
-backend/src/error.rs       HttpError, answered as {"error": "..."}
-backend/src/extract.rs     ApiJson: the JSON request body extractor
-backend/src/db.rs          the SQLite pools (one writer, read-only readers), caches, migrations on startup
-backend/src/ingest.rs      the hit queue and the batched writer
-backend/src/profile.rs     per-phase timers, compiled in only with the profiling feature
-backend/src/openapi.rs     the OpenAPI document: title, tags, the cookie scheme (paths come from the routers)
-backend/src/bin/openapi.rs writes the spec to a file (`mise run gen:spec`)
-backend/migrations/        the schema, one numbered SQL file per change (sqlx migrations)
-backend/src/auth.rs        password hashing, sessions, the login throttle
-backend/src/oidc.rs        single sign-on: the settings (env over stored), the OIDC flow, the signed login cookie
-backend/src/visitor.rs     user agent parsing, client IP, visitor hashes
-backend/src/geo.rs         country lookup + the weekly DB-IP download
-backend/src/stats.rs       ranges, chart buckets, the aggregations
-backend/src/filter.rs      the RSQL filter subset the dashboard uses
-backend/src/csv.rs         the CSV writer + the export download (the import reads CSV in routes/import.rs)
-backend/src/tracker.rs     the tracker script and the pixel GIF
-backend/src/util.rs        sha256 and random hex helpers
-backend/src/routes/        auth, users, oidc (login, callback, admin settings), sites, stats, export, import, collect
-backend/src/bin/seed.rs    a year of demo data, for development
-backend/examples/          the load generator behind `mise run loadtest`
-backend/tests/api.rs       the end-to-end tests (with a stand-in OpenID provider; its test keys in tests/fixtures/)
-scripts/                   the load test script and its generator image
-frontend/src/routes/       dashboard, sites table, site page, admin settings (users.tsx), settings
-frontend/src/components/   the shared UI pieces
-frontend/src/client/       the generated API client (hey-api; gitignored, never edited)
-frontend/src/lib/          error messages, ranges, filters, date formatting
+packages/backend/src/main.rs        entrypoint: env config, geo refresh, retention, graceful stop
+packages/backend/src/lib.rs         the app: the API routes plus the frontend, and the TLS provider
+packages/backend/src/frontend.rs    the embedded frontend: static files, cache headers, the SPA fallback
+packages/backend/src/state.rs       the shared AppState
+packages/backend/src/error.rs       HttpError, answered as {"error": "..."}
+packages/backend/src/extract.rs     ApiJson: the JSON request body extractor
+packages/backend/src/db.rs          the SQLite pools (one writer, read-only readers), caches, migrations on startup
+packages/backend/src/ingest.rs      the hit queue and the batched writer
+packages/backend/src/profile.rs     per-phase timers, compiled in only with the profiling feature
+packages/backend/src/openapi.rs     the OpenAPI document: title, tags, the cookie scheme (paths come from the routers)
+packages/backend/src/bin/openapi.rs writes the spec to a file (`mise run gen:spec`)
+packages/backend/migrations/        the schema, one numbered SQL file per change (sqlx migrations)
+packages/backend/src/auth.rs        password hashing, API keys
+packages/backend/src/oidc.rs        single sign-on: the settings (env over stored), the OIDC flow, the signed login cookie
+packages/backend/src/visitor.rs     user agent parsing, client IP, visitor hashes
+packages/backend/src/geo.rs         country lookup + the weekly DB-IP download
+packages/backend/src/stats.rs       ranges, chart buckets, the aggregations
+packages/backend/src/filter.rs      the RSQL filter subset the dashboard uses
+packages/backend/src/csv.rs         the CSV writer + the export download (the import reads CSV in routes/import.rs)
+packages/backend/src/tracker.rs     the tracker script and the pixel GIF
+packages/backend/src/util.rs        sha256 and random hex helpers
+packages/backend/src/routes/        auth, users, oidc (login, callback, admin settings), sites, stats, export, import, collect
+packages/backend/src/bin/seed.rs    a year of demo data, for development
+packages/backend/examples/          the load generator behind `mise run loadtest`
+packages/backend/tests/api.rs       the integration tests (axum-test; a stand-in OpenID provider, its test keys in tests/fixtures/)
+scripts/                            the Linux build, the end-to-end run (e2e.sh), the load test and its generator image
+packages/e2e/                       the end-to-end smoke tests (Playwright)
+packages/frontend/src/routes/       dashboard, sites table, site page, admin settings (users.tsx), settings
+packages/frontend/src/components/   the shared UI pieces
+packages/sdk/src/       the generated API client (hey-api; gitignored, never edited)
+packages/frontend/src/lib/          error messages, ranges, filters, date formatting
 ```
 
 ## The rules a change must keep
@@ -130,8 +139,12 @@ not a change we can take. Concretely:
   code in `stats.rs` and `routes/sites.rs`. Add a new time-filtered
   endpoint by reusing them, not by inventing a new syntax.
 - **Keep it simple.** SQLite through sqlx with run-time queries (one
-  writer connection, read-only readers), no ORM, no abstraction layers. If a change needs a new dependency or a
-  new concept, first check whether the naive version is enough.
+  writer connection, read-only readers), no ORM, no abstraction layers.
+- **Prefer a well-known crate to our own code.** When a maintained,
+  widely used crate or npm package solves the problem, use it instead of
+  writing the same thing; propose it in the pull request (or an issue
+  first) with its name, version and why. Write it yourself only when
+  nothing maintained fits, and say why in a comment.
 - **Comment the why, not the what** — the reasoning behind a decision
   is the part the code cannot show.
 
@@ -144,7 +157,7 @@ the minor version, `fix:` the patch, `feat!:` (or a `BREAKING CHANGE:`
 footer) the major; `ci:`, `chore:`, `docs:` and the like release nothing.
 
 1. Every push to `main` updates one open "release PR": the version in
-   `backend/Cargo.toml`, `backend/Cargo.lock` and `frontend/package.json`,
+   `packages/backend/Cargo.toml`, `packages/backend/Cargo.lock` and `packages/frontend/package.json`,
    and the changelog.
 2. Merge that PR when you want to ship. The release (tag `v1.2.3`) is
    created, and the release workflow builds the Linux binaries (static
