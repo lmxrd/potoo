@@ -4,8 +4,17 @@
 //! used twice; `verify` takes the last step used for that.
 
 use crate::auth::sha256_hex;
+use crate::error::ApiError;
+use crate::state::AppState;
+use crate::time::unix_now;
+use axum::http::{HeaderMap, StatusCode};
+use axum_extra::extract::SignedCookieJar;
+use axum_extra::extract::cookie::{Cookie, SameSite};
 use rand::{Rng, RngExt};
+use sqlx::SqliteExecutor;
+use std::time::Duration;
 use totp_rs::{Algorithm, Builder, Secret, Totp};
+use uuid::Uuid;
 
 const STEP_SECONDS: u64 = 30;
 /// A code from the step before or after the current one is accepted too, for
@@ -100,6 +109,212 @@ pub fn recovery_code_hash(code: &str) -> String {
         .map(|c| c.to_ascii_lowercase())
         .collect();
     sha256_hex(&normalized)
+}
+
+// ---------------------------------------------------------------------------
+// The stored state: the codes in use, recovery codes, and the sign-in's
+// second step (the challenge cookie).
+// ---------------------------------------------------------------------------
+
+pub const CHALLENGE_TTL: Duration = Duration::from_secs(5 * 60);
+const CHALLENGE_COOKIE: &str = "potoo_2fa";
+const CHALLENGE_PATH: &str = "/api/auth/login";
+
+/// The challenge cookie's name and path: like the single sign-on cookie, a
+/// `__Host-` cookie over https (which needs the path `/`), so a sibling
+/// subdomain cannot plant one; over plain http it goes to the login paths
+/// only.
+pub fn challenge_name(secure: bool) -> (&'static str, &'static str) {
+    if secure {
+        ("__Host-potoo_2fa", "/")
+    } else {
+        (CHALLENGE_COOKIE, CHALLENGE_PATH)
+    }
+}
+
+pub fn challenge(value: String, secure: bool) -> Cookie<'static> {
+    let (name, path) = challenge_name(secure);
+    Cookie::build((name, value))
+        .path(path)
+        .http_only(true)
+        .same_site(SameSite::Strict)
+        .secure(secure)
+        .max_age(time::Duration::seconds(CHALLENGE_TTL.as_secs() as i64))
+        .build()
+}
+
+/// What a sign-in still needs before its session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Step {
+    /// A code from the app (two-factor authentication is on).
+    Code,
+    /// Setting the app up (it is off, and `TOTP_REQUIRED` is set).
+    Enroll,
+}
+
+impl Step {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Step::Code => "code",
+            Step::Enroll => "enroll",
+        }
+    }
+
+    /// Where single sign-on sends the browser to take this step.
+    pub fn page(self) -> &'static str {
+        match self {
+            Step::Code => "/login?step=totp",
+            Step::Enroll => "/login?step=totp-setup",
+        }
+    }
+}
+
+/// The step a user who just proved who they are must take next, if any.
+pub async fn next_step<'e>(
+    db: impl SqliteExecutor<'e>,
+    state: &AppState,
+    user_id: Uuid,
+) -> sqlx::Result<Option<Step>> {
+    let on: bool = sqlx::query_scalar("SELECT totp_secret IS NOT NULL FROM users WHERE id = ?1")
+        .bind(user_id)
+        .fetch_one(db)
+        .await?;
+    Ok(if on {
+        Some(Step::Code)
+    } else if state.totp_required {
+        Some(Step::Enroll)
+    } else {
+        None
+    })
+}
+
+/// The signed cookie that lets this browser finish the sign-in of a user
+/// who proved who they are: `<user id>.<expiry, unix seconds>.<step>`. It is
+/// signed with its own key, made at start: a restart makes the user sign in
+/// again.
+pub fn challenge_cookie(state: &AppState, user_id: Uuid, step: Step) -> SignedCookieJar {
+    let expires = unix_now() + CHALLENGE_TTL.as_secs();
+    let value = format!("{user_id}.{expires}.{}", step.as_str());
+    SignedCookieJar::new(state.challenge_key.clone()).add(challenge(value, state.secure_cookies))
+}
+
+/// The user of a valid, unexpired challenge cookie for this step, or a 401.
+pub fn challenged_user(
+    state: &AppState,
+    headers: &HeaderMap,
+    step: Step,
+) -> Result<Uuid, ApiError> {
+    let expired = || {
+        ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "The sign-in expired, sign in again",
+        )
+    };
+    let (name, _) = challenge_name(state.secure_cookies);
+    let value = SignedCookieJar::from_headers(headers, state.challenge_key.clone())
+        .get(name)
+        .ok_or_else(expired)?
+        .value()
+        .to_string();
+    let mut parts = value.split('.');
+    let (Some(user), Some(expires), Some(kind), None) =
+        (parts.next(), parts.next(), parts.next(), parts.next())
+    else {
+        return Err(expired());
+    };
+    let expires: u64 = expires.parse().map_err(|_| expired())?;
+    if expires <= unix_now() || kind != step.as_str() {
+        return Err(expired());
+    }
+    user.parse().map_err(|_| expired())
+}
+
+/// Whether `code` is a valid code of the user's authenticator app or one of
+/// their recovery codes; either is used up. False when two-factor
+/// authentication is off. The caller counted the attempt (`state.limits`).
+pub async fn use_code(state: &AppState, user_id: Uuid, code: &str) -> Result<bool, ApiError> {
+    if code.len() > 64 {
+        return Ok(false);
+    }
+    let row: Option<(Option<String>, i64)> =
+        sqlx::query_as("SELECT totp_secret, totp_last_step FROM users WHERE id = ?1")
+            .bind(user_id)
+            .fetch_optional(state.db.reader())
+            .await?;
+    let Some((Some(secret), last_step)) = row else {
+        return Ok(false);
+    };
+    let used = if let Some(step) = verify(&secret, code, current_step(), last_step.max(0) as u64) {
+        // Only if no other request used this step (or a later one) since,
+        // and the secret is still the one checked.
+        sqlx::query(
+            "UPDATE users SET totp_last_step = ?1
+             WHERE id = ?2 AND totp_secret = ?3 AND totp_last_step < ?1",
+        )
+        .bind(step as i64)
+        .bind(user_id)
+        .bind(&secret)
+        .execute(state.db.writer())
+        .await?
+        .rows_affected()
+            == 1
+    } else {
+        let used = sqlx::query(
+            "DELETE FROM recovery_codes WHERE user_id = ?1 AND code_hash = ?2
+             AND EXISTS (SELECT 1 FROM users WHERE id = ?1 AND totp_secret IS NOT NULL)",
+        )
+        .bind(user_id)
+        .bind(recovery_code_hash(code))
+        .execute(state.db.writer())
+        .await?
+        .rows_affected()
+            == 1;
+        if used {
+            tracing::info!("user {user_id} used a recovery code");
+        }
+        used
+    };
+    Ok(used)
+}
+
+/// Replace a user's recovery codes with new ones, returning them.
+pub async fn replace_recovery_codes(
+    tx: &mut sqlx::SqliteConnection,
+    user_id: Uuid,
+) -> Result<Vec<String>, ApiError> {
+    sqlx::query("DELETE FROM recovery_codes WHERE user_id = ?1")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    let codes = new_recovery_codes();
+    for code in &codes {
+        sqlx::query("INSERT INTO recovery_codes (user_id, code_hash) VALUES (?1, ?2)")
+            .bind(user_id)
+            .bind(recovery_code_hash(code))
+            .execute(&mut *tx)
+            .await?;
+    }
+    Ok(codes)
+}
+
+/// Turn two-factor authentication off for a user: no secret, no recovery codes.
+/// False when there is no such user.
+pub async fn remove(state: &AppState, user_id: Uuid) -> Result<bool, ApiError> {
+    let mut tx = state.db.writer().begin().await?;
+    let updated = sqlx::query(
+        "UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_last_step = 0
+         WHERE id = ?1",
+    )
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    sqlx::query("DELETE FROM recovery_codes WHERE user_id = ?1")
+        .bind(user_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    Ok(updated == 1)
 }
 
 #[cfg(test)]

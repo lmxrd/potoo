@@ -4,9 +4,9 @@ use crate::auth::{
 use crate::error::{ApiError, ErrorBody};
 use crate::extract::ApiJson;
 use crate::limits::UserAction;
-use crate::routes::totp::{Step, challenge_cookie, next_step};
 use crate::sessions::{self, AuthSession};
 use crate::state::AppState;
+use crate::totp::{Step, challenge_cookie, next_step};
 use crate::visitor::client_ip;
 use axum::Json;
 use axum::extract::{ConnectInfo, State};
