@@ -123,7 +123,9 @@ function DateFormat({ current }: { current: string }) {
     <div className="space-y-2">
       <Select
         value={value}
+        items={DATE_FORMATS}
         onValueChange={async (next) => {
+          if (next === null) return;
           setValue(next);
           setError(undefined);
           try {
@@ -192,6 +194,11 @@ function TimeFormat({ current }: { current: boolean }) {
  * the accent) for a custom one. Every choice previews live, and reverts
  * when saving fails.
  */
+const BASES: { value: Theme["base"]; label: string }[] = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+];
+
 function ThemePicker({ current }: { current: Theme }) {
   const [error, setError] = useState<string>();
   const router = useRouter();
@@ -243,14 +250,18 @@ function ThemePicker({ current }: { current: Theme }) {
         </Label>
         <Select
           value={current.base}
-          onValueChange={(base) => save({ ...current, base: base as Theme["base"] })}
+          items={BASES}
+          onValueChange={(base) => base && save({ ...current, base })}
         >
           <SelectTrigger id="theme-base" size="sm">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="light">Light</SelectItem>
-            <SelectItem value="dark">Dark</SelectItem>
+            {BASES.map((b) => (
+              <SelectItem key={b.value} value={b.value}>
+                {b.label}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
         <label htmlFor="theme-accent" className="text-muted-foreground">

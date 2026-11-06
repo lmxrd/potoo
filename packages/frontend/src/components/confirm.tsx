@@ -9,7 +9,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "./ui/alert-dialog";
-import { buttonVariants } from "./ui/button";
 
 /** What a confirmation asks. `destructive` paints the action red. */
 export type ConfirmOptions = {
@@ -57,9 +56,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => answer(false)}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className={
-                options?.destructive ? buttonVariants({ variant: "destructive" }) : undefined
-              }
+              variant={options?.destructive ? "destructive" : "default"}
               onClick={() => answer(true)}
             >
               {options?.action}

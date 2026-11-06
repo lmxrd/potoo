@@ -99,7 +99,7 @@ export function ApiKeys({ isAdmin, dateFormat }: { isAdmin: boolean; dateFormat:
             <Label htmlFor="api-key-scope" className="font-normal text-muted-foreground">
               Permission
             </Label>
-            <Select value={scope} onValueChange={(next) => setScope(next as Scope)}>
+            <Select value={scope} items={scopes} onValueChange={(next) => next && setScope(next)}>
               <SelectTrigger id="api-key-scope" className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -116,13 +116,17 @@ export function ApiKeys({ isAdmin, dateFormat }: { isAdmin: boolean; dateFormat:
             <Label htmlFor="api-key-expiry" className="font-normal text-muted-foreground">
               Expires
             </Label>
-            <Select value={String(expiry)} onValueChange={(next) => setExpiry(Number(next))}>
+            <Select
+              value={expiry}
+              items={EXPIRIES.map((x, i) => ({ value: i, label: x.label }))}
+              onValueChange={(next) => next !== null && setExpiry(next)}
+            >
               <SelectTrigger id="api-key-expiry" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 {EXPIRIES.map((x, i) => (
-                  <SelectItem key={x.label} value={String(i)}>
+                  <SelectItem key={x.label} value={i}>
                     {x.label}
                   </SelectItem>
                 ))}

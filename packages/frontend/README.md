@@ -1,8 +1,8 @@
 # potoo frontend
 
 The dashboard: a client-rendered React SPA built with Vite, Tailwind CSS 4,
-shadcn/ui, TanStack Router (file-based) and TanStack Query, managed with pnpm.
-The backend embeds its build (`dist/`) in the binary.
+shadcn/ui (on Base UI), TanStack Router (file-based) and TanStack Query,
+managed with pnpm. The backend embeds its build (`dist/`) in the binary.
 
 ## Commands
 
