@@ -1,6 +1,8 @@
 use crate::db::Db;
 use crate::filter::{FacetFilters, filter_sql};
-use chrono::{DateTime, Datelike, TimeZone, Utc};
+use jiff::Timestamp;
+use jiff::civil::date as civil_date;
+use jiff::tz::TimeZone;
 use serde::Serialize;
 use utoipa::ToSchema;
 
@@ -23,8 +25,8 @@ pub enum Bucket {
 /// are the frontend's concern: it turns them into this before the
 /// request.
 pub struct StatsRange {
-    pub from: DateTime<Utc>,
-    pub to: DateTime<Utc>,
+    pub from: Timestamp,
+    pub to: Timestamp,
 }
 
 /// Parse the from/to of a stats or export request — the one shape every
@@ -35,20 +37,14 @@ pub fn parse_range(from: Option<&str>, to: Option<&str>) -> Result<StatsRange, S
     let (Some(from), Some(to)) = (from, to) else {
         return Err("from and to are both required, as ISO 8601 timestamps".into());
     };
-    let (Ok(from), Ok(to)) = (
-        DateTime::parse_from_rfc3339(from),
-        DateTime::parse_from_rfc3339(to),
-    ) else {
+    let (Ok(from), Ok(to)) = (from.parse::<Timestamp>(), to.parse::<Timestamp>()) else {
         return Err("from and to must be ISO 8601 timestamps".into());
     };
-    let range = StatsRange {
-        from: from.with_timezone(&Utc),
-        to: to.with_timezone(&Utc),
-    };
+    let range = StatsRange { from, to };
     if range.from >= range.to {
         return Err("from must be before to".into());
     }
-    if (range.to - range.from).num_milliseconds() > 730 * DAY_MS {
+    if span_ms(&range) > 730 * DAY_MS {
         return Err("the range can span at most 730 days (two years)".into());
     }
     Ok(range)
@@ -57,7 +53,12 @@ pub fn parse_range(from: Option<&str>, to: Option<&str>) -> Result<StatsRange, S
 /// The range as the `days` field of the stats response: the length of
 /// the window in days, rounded up.
 fn days_field(range: &StatsRange) -> i64 {
-    ((range.to - range.from).num_milliseconds() + DAY_MS - 1) / DAY_MS
+    (span_ms(range) + DAY_MS - 1) / DAY_MS
+}
+
+/// The length of the window, in milliseconds.
+fn span_ms(range: &StatsRange) -> i64 {
+    range.to.as_millisecond() - range.from.as_millisecond()
 }
 
 /// The buckets a range's chart is aggregated over.
@@ -71,8 +72,8 @@ struct Buckets {
 
 fn buckets(range: &StatsRange) -> Buckets {
     span_buckets(
-        range.from.timestamp_millis(),
-        range.to.timestamp_millis() + 1, // the `to` instant is included
+        range.from.as_millisecond(),
+        range.to.as_millisecond() + 1, // the `to` instant is included
     )
 }
 
@@ -85,10 +86,13 @@ pub fn range_bounds(range: &StatsRange) -> (String, String) {
     (buckets.since, buckets.until)
 }
 
+/// `YYYY-MM-DDTHH:MM:SS.mmmZ`, the form `created_at` is stored in.
 fn iso(millis: i64) -> String {
-    Utc.timestamp_millis_opt(millis)
-        .unwrap()
-        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+    format!("{:.3}", timestamp(millis))
+}
+
+fn timestamp(millis: i64) -> Timestamp {
+    Timestamp::from_millisecond(millis).expect("a time within jiff's range")
 }
 
 fn date(millis: i64) -> String {
@@ -112,14 +116,8 @@ const MONTH_SQL: &str = "substr(created_at, 1, 7) || '-01'";
 /// aligned, but the first and last are clipped to the window itself.
 fn span_buckets(start: i64, end: i64) -> Buckets {
     let span = end - start;
-    let midnight = |millis: i64| {
-        let dt = Utc.timestamp_millis_opt(millis).unwrap();
-        dt.date_naive()
-            .and_hms_opt(0, 0, 0)
-            .unwrap()
-            .and_utc()
-            .timestamp_millis()
-    };
+    // Unix time has no leap seconds: every UTC day is DAY_MS long.
+    let midnight = |millis: i64| millis - millis.rem_euclid(DAY_MS);
 
     if span <= 48 * HOUR_MS {
         let first = start - start % HOUR_MS;
@@ -149,8 +147,10 @@ fn span_buckets(start: i64, end: i64) -> Buckets {
     }
     if span <= 180 * DAY_MS {
         let monday = |millis: i64| {
-            let dt = Utc.timestamp_millis_opt(millis).unwrap();
-            let weekday = dt.weekday().num_days_from_sunday();
+            let weekday = timestamp(millis)
+                .to_zoned(TimeZone::UTC)
+                .weekday()
+                .to_sunday_zero_offset();
             millis - i64::from((weekday + 6) % 7) * DAY_MS
         };
         let first = monday(midnight(start));
@@ -165,36 +165,22 @@ fn span_buckets(start: i64, end: i64) -> Buckets {
             sql: WEEK_SQL,
         };
     }
-    let first_dt = Utc
-        .timestamp_millis_opt(start)
-        .unwrap()
-        .date_naive()
-        .with_day(1)
-        .unwrap()
-        .and_hms_opt(0, 0, 0)
-        .unwrap()
-        .and_utc();
-    let last = Utc.timestamp_millis_opt(end - 1).unwrap();
-    let months =
-        (last.year() - first_dt.year()) * 12 + last.month() as i32 - first_dt.month() as i32 + 1;
-    let first_month = first_dt.year() * 12 + first_dt.month() as i32 - 1;
+    let first_dt = timestamp(start).to_zoned(TimeZone::UTC);
+    let last = timestamp(end - 1).to_zoned(TimeZone::UTC);
+    let month_index = |year: i16, month: i8| i32::from(year) * 12 + i32::from(month) - 1;
+    let first_month = month_index(first_dt.year(), first_dt.month());
+    let months = month_index(last.year(), last.month()) - first_month + 1;
     Buckets {
         bucket: Some(Bucket::Month),
         keys: (0..months)
             .map(|i| {
                 let m = first_month + i;
-                date(
-                    Utc.with_ymd_and_hms(
-                        m.div_euclid(12),
-                        (m.rem_euclid(12) + 1) as u32,
-                        1,
-                        0,
-                        0,
-                        0,
-                    )
-                    .unwrap()
-                    .timestamp_millis(),
-                )
+                let first_day =
+                    civil_date(m.div_euclid(12) as i16, (m.rem_euclid(12) + 1) as i8, 1)
+                        .to_zoned(TimeZone::UTC)
+                        .expect("a UTC date")
+                        .timestamp();
+                date(first_day.as_millisecond())
             })
             .collect(),
         since: iso(start),
@@ -468,7 +454,10 @@ pub async fn stats_for(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
+
+    fn at(iso: &str) -> Timestamp {
+        iso.parse().unwrap()
+    }
 
     #[test]
     fn parses_iso_windows() {
@@ -484,24 +473,14 @@ mod tests {
             Some("2026-10-10T00:00:00Z"),
         )
         .unwrap();
-        assert_eq!(
-            range.from,
-            Utc.with_ymd_and_hms(2026, 10, 9, 0, 0, 0).unwrap()
-                + chrono::Duration::milliseconds(500)
-        );
-        assert_eq!(
-            range.to,
-            Utc.with_ymd_and_hms(2026, 10, 10, 0, 0, 0).unwrap()
-        );
+        assert_eq!(range.from, at("2026-10-09T00:00:00.500Z"));
+        assert_eq!(range.to, at("2026-10-10T00:00:00Z"));
         let range = parse_range(
             Some("2026-10-09T02:00:00+02:00"),
             Some("2026-10-10T00:00:00Z"),
         )
         .unwrap();
-        assert_eq!(
-            range.from,
-            Utc.with_ymd_and_hms(2026, 10, 9, 0, 0, 0).unwrap()
-        );
+        assert_eq!(range.from, at("2026-10-09T00:00:00Z"));
         // from must be before to, and the window spans at most 730 days
         // (two years) — exactly 730 is allowed.
         assert!(parse_range(Some("2026-10-10T00:00:00Z"), Some("2026-10-09T00:00:00Z")).is_err());
@@ -511,19 +490,19 @@ mod tests {
 
     #[test]
     fn days_field_rounds_up() {
-        let from = Utc.with_ymd_and_hms(2026, 1, 1, 10, 30, 0).unwrap();
-        let to = Utc.with_ymd_and_hms(2026, 1, 2, 12, 30, 0).unwrap();
+        let from = at("2026-01-01T10:30:00Z");
+        let to = at("2026-01-02T12:30:00Z");
         assert_eq!(days_field(&StatsRange { from, to }), 2); // 26 hours
-        let from = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
-        let to = Utc.with_ymd_and_hms(2026, 1, 1, 12, 0, 0).unwrap();
+        let from = at("2026-01-01T00:00:00Z");
+        let to = at("2026-01-01T12:00:00Z");
         assert_eq!(days_field(&StatsRange { from, to }), 1); // 12 hours
     }
 
     #[test]
     fn buckets_follow_the_span() {
         let range = StatsRange {
-            from: Utc.with_ymd_and_hms(2026, 1, 1, 10, 30, 0).unwrap(),
-            to: Utc.with_ymd_and_hms(2026, 1, 2, 12, 30, 0).unwrap(),
+            from: at("2026-01-01T10:30:00Z"),
+            to: at("2026-01-02T12:30:00Z"),
         };
         let chart = buckets(&range);
         assert_eq!(chart.bucket, Some(Bucket::Hour));
@@ -534,8 +513,8 @@ mod tests {
         assert_eq!(chart.until, "2026-01-02T12:30:00.001Z");
 
         let range = StatsRange {
-            from: Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap(),
-            to: Utc.with_ymd_and_hms(2026, 2, 1, 0, 0, 0).unwrap(),
+            from: at("2026-01-01T00:00:00Z"),
+            to: at("2026-02-01T00:00:00Z"),
         };
         let chart = buckets(&range);
         assert_eq!(chart.bucket, Some(Bucket::Day));

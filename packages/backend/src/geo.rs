@@ -1,5 +1,5 @@
-use chrono::{DateTime, Datelike, Utc};
 use flate2::read::GzDecoder;
+use jiff::{Timestamp, ToSpan, Zoned, tz::TimeZone};
 use maxminddb::Reader;
 use std::io::Read;
 use std::net::IpAddr;
@@ -35,25 +35,25 @@ pub enum Source {
 
 impl Source {
     /// The URLs to try, in order, at the given moment.
-    fn urls(&self, now: DateTime<Utc>) -> Vec<String> {
+    fn urls(&self, now: Zoned) -> Vec<String> {
         match self {
             Source::Disabled => Vec::new(),
             Source::Url(url) => vec![url.clone()],
             // This month's build, and last month's for the first days of a
             // month, before the new one is published.
             Source::DbIp => {
-                let last_month = now.with_day(1).unwrap_or(now) - chrono::Duration::days(1);
-                [now, last_month].map(dbip_url).to_vec()
+                let last_month = now.first_of_month().unwrap_or(now.clone()) - 1.day();
+                [&now, &last_month].map(dbip_url).to_vec()
             }
         }
     }
 }
 
 /// The DB-IP country lite database of the month of a date.
-fn dbip_url(date: DateTime<Utc>) -> String {
+fn dbip_url(date: &Zoned) -> String {
     format!(
         "https://download.db-ip.com/free/dbip-country-lite-{}.mmdb.gz",
-        date.format("%Y-%m")
+        date.strftime("%Y-%m")
     )
 }
 
@@ -114,7 +114,8 @@ impl Geo {
     /// of the source's URLs that works. Returns success; the old database
     /// is only replaced once the new one actually opens.
     pub async fn refresh(&self) -> bool {
-        self.refresh_from(self.source.urls(Utc::now())).await
+        self.refresh_from(self.source.urls(Timestamp::now().to_zoned(TimeZone::UTC)))
+            .await
     }
 
     async fn refresh_from(&self, urls: Vec<String>) -> bool {
@@ -164,10 +165,11 @@ async fn download(url: &str) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
-
-    fn at(year: i32, month: u32, day: u32) -> DateTime<Utc> {
-        Utc.with_ymd_and_hms(year, month, day, 12, 0, 0).unwrap()
+    fn at(year: i16, month: i8, day: i8) -> Zoned {
+        jiff::civil::date(year, month, day)
+            .at(12, 0, 0, 0)
+            .to_zoned(TimeZone::UTC)
+            .unwrap()
     }
 
     #[test]

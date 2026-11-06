@@ -1,6 +1,5 @@
 //! End-to-end tests over real HTTP, against an in-memory database.
 
-use chrono::{Duration, Utc};
 use potoo::{app, auth, db, geo, oidc, state::AppState};
 use reqwest::{Client, Method, Response};
 use serde_json::{Value, json};
@@ -85,6 +84,12 @@ async fn spawn(options: Options) -> TestApp {
         base: format!("http://{addr}"),
         client: Client::new(),
     }
+}
+
+/// Now, give or take some hours, as the API takes times.
+fn iso_from_now(hours: i64) -> String {
+    use jiff::ToSpan;
+    format!("{:.3}", jiff::Timestamp::now() + hours.hours())
 }
 
 /// The session cookie of a response.
@@ -221,10 +226,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
     let site_id = site["id"].as_i64().unwrap();
     // The window of the stats and the exports: twelve hours either side
     // of now, so it covers the hits this test collects.
-    let window = (
-        (Utc::now() - Duration::hours(12)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        (Utc::now() + Duration::hours(12)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-    );
+    let window = (iso_from_now(-12), iso_from_now(12));
 
     // Collection: a pageview and a click; unknown hosts are ignored, and
     // so are query strings on paths.
@@ -598,10 +600,7 @@ async fn bots_and_dnt_are_not_recorded() {
         .unwrap();
     assert_eq!(dnt.status(), 204);
 
-    let window = (
-        (Utc::now() - Duration::hours(12)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        (Utc::now() + Duration::hours(12)).to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-    );
+    let window = (iso_from_now(-12), iso_from_now(12));
     let stats = json(
         request(
             &app,
@@ -1580,7 +1579,7 @@ async fn single_sign_on_refuses_bad_callbacks() {
         "nonce": login.nonce,
         "verifier": "a guess",
         "redirect_url": format!("{}/api/auth/oidc/callback", app.base),
-        "started": Utc::now().timestamp(),
+        "started": jiff::Timestamp::now().as_second(),
     });
     let forged = format!("potoo_oidc={}", urlencoding(&forged.to_string()));
     refused(callback(&app, &query, Some(&forged)).await, "state");

@@ -7,7 +7,6 @@ use crate::state::AppState;
 use crate::stats::range_bounds;
 use axum::extract::{Query, State};
 use axum::response::Response;
-use chrono::Utc;
 use sqlx::Row;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -112,7 +111,7 @@ async fn export(
     // exports of the same view differ, and downloads never collide.
     let name = format!(
         "potoo-export-{}.csv",
-        Utc::now().format("%Y-%m-%dT%H:%M:%S")
+        jiff::Timestamp::now().strftime("%Y-%m-%dT%H:%M:%S")
     );
     Ok(csv::download(csv::write_csv(&rows), &name))
 }

@@ -6,7 +6,7 @@
 //!
 //!     mise run seed
 
-use chrono::{Datelike, TimeZone, Utc};
+use jiff::{Timestamp, tz::TimeZone};
 use potoo::db;
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
@@ -103,16 +103,15 @@ async fn main() -> anyhow::Result<()> {
     // The demo data replaces whatever hits are in the database.
     sqlx::query("DELETE FROM hits").execute(pool).await?;
 
-    let now = Utc::now();
-    let midnight = Utc
-        .with_ymd_and_hms(now.year(), now.month(), now.day(), 0, 0, 0)
-        .unwrap();
+    let now = Timestamp::now().as_millisecond();
+    // Unix time has no leap seconds: every UTC day is DAY_MS long.
+    let midnight = now - now.rem_euclid(DAY_MS);
     let mut inserted = 0usize;
     for (site_id, _) in &sites {
         let base = rng.random_range(40..120);
         for i in 0..YEAR {
-            let start = midnight.timestamp_millis() - (YEAR - 1 - i) * DAY_MS;
-            let end = (start + DAY_MS).min(now.timestamp_millis());
+            let start = midnight - (YEAR - 1 - i) * DAY_MS;
+            let end = (start + DAY_MS).min(now);
             // Traffic grows over the year; today ends now, not in the
             // future.
             let trend = 0.55 + 0.9 * (i as f64) / (YEAR - 1) as f64;
@@ -167,8 +166,11 @@ fn day_hits(
     base: i64,
     trend: f64,
 ) -> Vec<Hit> {
-    let weekday = Utc.timestamp_millis_opt(start).unwrap().weekday();
-    let weekend = if weekday.num_days_from_sunday().is_multiple_of(6) {
+    let weekday = Timestamp::from_millisecond(start)
+        .unwrap()
+        .to_zoned(TimeZone::UTC)
+        .weekday();
+    let weekend = if (weekday.to_sunday_zero_offset() as u8).is_multiple_of(6) {
         0.55
     } else {
         1.0
@@ -176,9 +178,7 @@ fn day_hits(
     let volume = (base as f64 * weekend * trend * rng.random_range(0.8..1.2)).round() as i64;
     let at = |rng: &mut StdRng| {
         let millis = rng.random_range(start..end);
-        Utc.timestamp_millis_opt(millis)
-            .unwrap()
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+        format!("{:.3}", Timestamp::from_millisecond(millis).unwrap())
     };
 
     let mut hits = Vec::new();

@@ -8,7 +8,6 @@ use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, FromRequest, Multipart, Query, Request, State};
 use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use utoipa::{IntoParams, ToSchema};
@@ -486,16 +485,13 @@ fn parse_row(
             });
         }
     };
-    let created_at = DateTime::parse_from_rfc3339(field(1))
-        .map_err(|_| {
-            bad(
-                "created_at",
-                format!("\"{}\" is not an ISO 8601 date and time", field(1)),
-            )
-        })?
-        .with_timezone(&Utc)
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string();
+    let created_at = field(1).parse::<jiff::Timestamp>().map_err(|_| {
+        bad(
+            "created_at",
+            format!("\"{}\" is not an ISO 8601 date and time", field(1)),
+        )
+    })?;
+    let created_at = format!("{created_at:.3}");
     let kind = match field(2) {
         "pageview" => "pageview",
         "click" => "click",

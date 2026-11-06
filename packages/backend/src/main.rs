@@ -197,8 +197,9 @@ fn write_profile(profiler: &pprof::ProfilerGuard<'_>, out: &str) {
 }
 
 async fn purge(db: &db::Db, retention_days: i64) {
-    let cutoff = (chrono::Utc::now() - chrono::Duration::days(retention_days))
-        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let cutoff = potoo::auth::iso(
+        std::time::SystemTime::now() - Duration::from_secs(retention_days as u64 * 86_400),
+    );
     if let Err(e) = sqlx::query("DELETE FROM hits WHERE created_at < ?1")
         .bind(cutoff)
         .execute(db.writer())

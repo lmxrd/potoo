@@ -153,7 +153,8 @@ pub fn now_iso() -> String {
     iso(SystemTime::now())
 }
 
+/// `YYYY-MM-DDTHH:MM:SS.mmmZ`, the form times are stored in.
 pub fn iso(t: SystemTime) -> String {
-    let dt: chrono::DateTime<chrono::Utc> = t.into();
-    dt.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+    let t = jiff::Timestamp::try_from(t).expect("a time within jiff's range");
+    format!("{t:.3}")
 }
