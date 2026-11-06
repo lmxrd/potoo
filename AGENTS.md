@@ -70,6 +70,14 @@ before the hit is on disk.
   its own `BEGIN`/`COMMIT`): with them on, dropping `users` would delete
   every session. Test it on a real file with data, like
   `the_single_sign_on_migration_keeps_users_and_sessions` in `db.rs`.
+- Users, sites and API keys have UUIDv7 ids (`uuid::Uuid::now_v7()`,
+  made by the caller: an insert names its `id`), stored as 16-byte BLOBs,
+  `NOT NULL`; the API sends them as strings. Hits keep integer ids (the big
+  table, never addressed by id). Where ids go into dynamic SQL as text
+  params (stats, export), they are bound as hex: `unhex(?)`.
+- Dates and times are jiff (`jiff::Timestamp`), stored as
+  `YYYY-MM-DDTHH:MM:SS.mmmZ` text (`format!("{t:.3}")`, `auth::iso`). chrono
+  is only in the tests, for openidconnect's ID token claims.
 - `users.password_hash` is NULL for a user who has no password (single
   sign-on only): anything that reads it must treat NULL as "no password",
   never as a hash.

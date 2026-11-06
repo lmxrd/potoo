@@ -392,6 +392,12 @@ does:
   pace (see [Two-factor authentication](#two-factor-authentication)).
 - **No glibc builds.** Releases attach only the static (musl) binaries, which
   run on any Linux, with their SHA-256 checksums.
+- **Ids are UUIDs.** Users, sites and API keys have UUIDv7 ids (strings in
+  the API, such as `0190f5b2-7c00-7c1a-9d3e-5b7a1c2d3e4f`) instead of
+  numbers. The upgrade converts them, keeping every relation; it rewrites
+  the hits table, so on a large database it takes a while. Today's unique
+  visitors may be counted twice across the upgrade.
+- **`RUST_LOG`** now picks what is logged (default `info`).
 
 ## The API
 
