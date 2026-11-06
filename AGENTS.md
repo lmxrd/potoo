@@ -99,7 +99,7 @@ verified, and not to a user linked to another account at that provider.
 `OIDC_ONLY` (`oidc.passwords_allowed()`) refuses every password path with
 403 (`HttpError::passwords_off`: login, its second step, setting or resetting
 a password, a user created with one) but `/setup`; the session's
-`password_login` tells the frontend. Forwarded headers count for the callback URL only with `TRUST_PROXY`. The
+`password_login` tells the frontend. The callback URL is `OIDC_REDIRECT_URL`, else under `PUBLIC_URL`, else plain http on the request's host; forwarded headers never count. The
 callback never redirects anywhere but `/`, `/login?step=<step>` and
 `/login?error=<code>`, and
 always clears the login cookie (even one it did not sign), with the
@@ -115,12 +115,20 @@ conditional UPDATE); recovery codes are SHA-256 hashes in `recovery_codes`,
 deleted when used. A sign-in (password, or the single sign-on callback)
 of a user with it on gets no session but the signed `potoo_2fa` cookie
 (`__Host-` over https, `<user id>.<expiry>.<step>`, five minutes, the
-`oidc.key()`): the password answers 200 `LoginStep`, the callback redirects
+`state.challenge_key`, its own): the password answers 200 `LoginStep`, the callback redirects
 to `/login?step=totp`; `/login/totp` finishes it. With `TOTP_REQUIRED`
 (`state.totp_required`) a user without it gets the `enroll` step instead
 (`/login?step=totp-setup`, `/login/totp/setup`, `/login/totp/enable`), and
-`/totp/disable` is refused. `next_step` decides, for both paths. Wrong codes count in `state.throttle` per user
-(`totp|<id>`), not per address.
+`/totp/disable` is refused. `next_step` decides, for both paths.
+
+**Limits** (`limits.rs`, governor): every attempt counts, right or wrong,
+and over the quota is a 429 with `Retry-After` (`HttpError::TooManyRequests`),
+never a lockout. `state.limits.sign_in(ip, email)` for a password sign-in
+(5 per email, 30 per address), `state.limits.user(id, ip)` for a code or a
+current password (5 per user). Any new endpoint that checks a secret goes
+through one of them. The tests get large quotas (`Options`), but for
+`attempts_are_limited_per_email_address_and_user`; the quotas are
+woodmouse's too: change both.
 
 **Sessions** (`session.rs`): tower-sessions keeps them and axum-login
 signs users in and out (`AuthSession`). The store is ours (the community's
@@ -133,14 +141,16 @@ create a session another way. axum-login loads the user on each request
 the session against the user's `auth_hash` (the password hash and the TOTP
 secret): changing either signs the other sessions out, so after the user
 changes their own, call `session::refresh` to keep the current one. The
-cookie is `potoo_session`, `SameSite=Strict`, `Secure` with
-`SECURE_COOKIES`. The 2FA challenge and the single sign-on login cookies
+cookie is `potoo_session`, `SameSite=Strict` (`__Host-potoo_session`,
+`Secure` when `PUBLIC_URL` is https: `state.secure_cookies`, which decides
+for every cookie). The 2FA challenge and the single sign-on login cookies
 are separate signed cookies, not sessions.
 
 **Cross-site requests** (`csrf.rs`, a layer outside the sessions): a
 POST, PUT, PATCH or DELETE passes with `Sec-Fetch-Site: same-origin` (or
-`none`), or, without that header, an `Origin` matching the host (the
-forwarded one with `TRUST_PROXY`), or neither header (not a browser).
+`none`), or, without that header, an `Origin` that is `PUBLIC_URL`'s (or,
+without it, matches `Host`; forwarded headers never count), or neither
+header (not a browser).
 `same-site` is refused on purpose: a sibling subdomain is the same site.
 `/api/collect` and Bearer requests skip it. A new endpoint that must take
 cross-origin writes (none should) goes in `allowed`, with the reason.

@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod config;
 pub mod csrf;
 pub mod csv;
 pub mod db;
@@ -8,6 +9,7 @@ pub mod filter;
 pub mod frontend;
 pub mod geo;
 pub mod ingest;
+pub mod limits;
 pub mod oidc;
 pub mod openapi;
 pub mod profile;
@@ -38,7 +40,7 @@ pub fn app(state: AppState) -> Router {
     // Sessions (tower-sessions, our store) and who is signed in on them
     // (axum-login). A session is only loaded when a handler asks for it.
     let sessions = tower_sessions::SessionManagerLayer::new(session::Store::new(state.db.clone()))
-        .with_name(session::COOKIE)
+        .with_name(session::cookie_name(state.secure_cookies))
         .with_path("/")
         .with_http_only(true)
         .with_same_site(tower_sessions::cookie::SameSite::Strict)

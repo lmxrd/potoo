@@ -44,7 +44,7 @@ Tasks that build something are cached by their `sources` and `outputs` in
 `mise run check` and `mise run test` must pass before a change can land.
 The checks cover formatting (rustfmt, oxfmt), linting (clippy, oxlint) and
 types (tsc) for both projects; the tests are end-to-end over real HTTP,
-against an in-memory database: setup, login and its throttle, users and
+against an in-memory database: setup, login and its limits, users and
 the last-admin rules, sites, collection (bots and Do-Not-Track
 included), the stats with a filter, and the export.
 
@@ -84,7 +84,7 @@ packages/backend/src/profile.rs     per-phase timers, compiled in only with the 
 packages/backend/src/openapi.rs     the OpenAPI document: title, tags, the cookie scheme (paths come from the routers)
 packages/backend/src/bin/openapi.rs writes the spec to a file (`mise run gen:spec`)
 packages/backend/migrations/        the schema, one numbered SQL file per change (sqlx migrations)
-packages/backend/src/auth.rs        password hashing, sessions, the login throttle
+packages/backend/src/auth.rs        password hashing, API keys
 packages/backend/src/oidc.rs        single sign-on: the settings (env over stored), the OIDC flow, the signed login cookie
 packages/backend/src/visitor.rs     user agent parsing, client IP, visitor hashes
 packages/backend/src/geo.rs         country lookup + the weekly DB-IP download

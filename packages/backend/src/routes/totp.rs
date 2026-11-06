@@ -12,20 +12,21 @@
 use crate::auth::User;
 use crate::error::{ErrorBody, HttpError};
 use crate::extract::ApiJson;
-use crate::routes::auth::{AuthUser, SessionUser, require_admin, secure};
+use crate::routes::auth::{AuthUser, SessionUser, require_admin};
 use crate::session::{self, AuthSession};
 use crate::state::AppState;
 use crate::totp;
+use crate::visitor::client_ip;
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use axum_extra::extract::{CookieJar, SignedCookieJar};
 use axum_login::AuthnBackend as _;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use sqlx::SqliteExecutor;
+use std::net::SocketAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
@@ -127,17 +128,12 @@ pub(crate) async fn next_step<'e>(
 
 /// The signed cookie that lets this browser finish the sign-in of a user
 /// who proved who they are: `<user id>.<expiry, unix seconds>.<step>`. It is
-/// signed with the instance's key (made at start, like the single sign-on
-/// cookie's): a restart makes the user sign in again.
-pub(crate) fn challenge_cookie(
-    state: &AppState,
-    user_id: i64,
-    step: Step,
-    secure: bool,
-) -> SignedCookieJar {
+/// signed with its own key, made at start: a restart makes the user sign in
+/// again.
+pub(crate) fn challenge_cookie(state: &AppState, user_id: i64, step: Step) -> SignedCookieJar {
     let expires = unix_now() + CHALLENGE_TTL.as_secs();
     let value = format!("{user_id}.{expires}.{}", step.as_str());
-    SignedCookieJar::new(state.oidc.key().clone()).add(challenge(value, secure))
+    SignedCookieJar::new(state.challenge_key.clone()).add(challenge(value, state.secure_cookies))
 }
 
 /// The user of a valid, unexpired challenge cookie for this step, or a 401.
@@ -148,8 +144,8 @@ fn challenged_user(state: &AppState, headers: &HeaderMap, step: Step) -> Result<
             "The sign-in expired, sign in again",
         )
     };
-    let (name, _) = challenge_name(secure(headers));
-    let value = SignedCookieJar::from_headers(headers, state.oidc.key().clone())
+    let (name, _) = challenge_name(state.secure_cookies);
+    let value = SignedCookieJar::from_headers(headers, state.challenge_key.clone())
         .get(name)
         .ok_or_else(expired)?
         .value()
@@ -170,8 +166,8 @@ fn challenged_user(state: &AppState, headers: &HeaderMap, step: Step) -> Result<
 /// Sign in the user of a sign-in that took its last step: the session,
 /// and the challenge cookie used up (the jar to answer with).
 async fn finish_sign_in(
+    state: &AppState,
     auth: &mut AuthSession,
-    headers: &HeaderMap,
     user_id: i64,
 ) -> Result<CookieJar, HttpError> {
     let user = auth
@@ -180,24 +176,9 @@ async fn finish_sign_in(
         .await?
         .ok_or_else(HttpError::unauthorized)?;
     session::sign_in(auth, &user).await?;
-    let mut removal = challenge(String::new(), secure(headers));
+    let mut removal = challenge(String::new(), state.secure_cookies);
     removal.make_removal();
     Ok(CookieJar::new().add(removal))
-}
-
-/// The throttle key of a user's codes. Per user, not per address: whoever
-/// gets this far has the password, and may have many addresses.
-fn throttle_key(user_id: i64) -> String {
-    format!("totp|{user_id}")
-}
-
-fn too_many(retry_after: i64) -> Response {
-    (
-        StatusCode::TOO_MANY_REQUESTS,
-        [("retry-after", retry_after.to_string())],
-        Json(json!({ "error": "Too many attempts, try again later" })),
-    )
-        .into_response()
 }
 
 fn invalid_code() -> HttpError {
@@ -206,7 +187,7 @@ fn invalid_code() -> HttpError {
 
 /// Whether `code` is a valid code of the user's authenticator app or one of
 /// their recovery codes; either is used up. False when two-factor
-/// authentication is off. Failures count towards the user's throttle.
+/// authentication is off. The caller counted the attempt (`state.limits`).
 async fn use_code(state: &AppState, user_id: i64, code: &str) -> Result<bool, HttpError> {
     if code.len() > 64 {
         return Ok(false);
@@ -251,11 +232,6 @@ async fn use_code(state: &AppState, user_id: i64, code: &str) -> Result<bool, Ht
         }
         used
     };
-    if used {
-        state.throttle.clear(&throttle_key(user_id));
-    } else {
-        state.throttle.record_failure(&throttle_key(user_id));
-    }
     Ok(used)
 }
 
@@ -319,17 +295,19 @@ pub struct RecoveryCodes {
 async fn login_totp(
     State(state): State<AppState>,
     mut auth: AuthSession,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
     let user_id = challenged_user(&state, &headers, Step::Code)?;
-    if let Some(retry_after) = state.throttle.locked_out(&throttle_key(user_id)) {
-        return Ok(too_many(retry_after));
-    }
+    state.limits.user(
+        user_id,
+        Some(&client_ip(&headers, Some(addr.ip()), state.trust_proxy)),
+    )?;
     if !use_code(&state, user_id, &body.code).await? {
         return Err(invalid_code());
     }
-    let jar = finish_sign_in(&mut auth, &headers, user_id).await?;
+    let jar = finish_sign_in(&state, &mut auth, user_id).await?;
     Ok((StatusCode::NO_CONTENT, jar).into_response())
 }
 
@@ -379,15 +357,17 @@ async fn login_setup(
 async fn login_enable(
     State(state): State<AppState>,
     mut auth: AuthSession,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
     let user_id = challenged_user(&state, &headers, Step::Enroll)?;
-    if let Some(retry_after) = state.throttle.locked_out(&throttle_key(user_id)) {
-        return Ok(too_many(retry_after));
-    }
+    state.limits.user(
+        user_id,
+        Some(&client_ip(&headers, Some(addr.ip()), state.trust_proxy)),
+    )?;
     let codes = confirm_setup(&state, user_id, &body.code).await?;
-    let jar = finish_sign_in(&mut auth, &headers, user_id).await?;
+    let jar = finish_sign_in(&state, &mut auth, user_id).await?;
     Ok((jar, Json(RecoveryCodes { codes })).into_response())
 }
 
@@ -461,9 +441,7 @@ async fn enable(
     mut auth: AuthSession,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
-    if let Some(retry_after) = state.throttle.locked_out(&throttle_key(user.id)) {
-        return Ok(too_many(retry_after));
-    }
+    state.limits.user(user.id, None)?;
     let codes = confirm_setup(&state, user.id, &body.code).await?;
     // The secret is part of what sessions are checked against: the user's
     // other sessions are signed out, this one stays.
@@ -472,14 +450,13 @@ async fn enable(
 }
 
 /// Turn two-factor authentication on with the pending secret, confirmed by
-/// a code of it: the new recovery codes. A wrong code counts towards the
-/// user's throttle.
+/// a code of it: the new recovery codes. The caller counted the attempt
+/// (`state.limits`).
 async fn confirm_setup(
     state: &AppState,
     user_id: i64,
     code: &str,
 ) -> Result<Vec<String>, HttpError> {
-    let key = throttle_key(user_id);
     let mut tx = state.db.writer().begin().await?;
     let (secret, pending): (Option<String>, Option<String>) =
         sqlx::query_as("SELECT totp_secret, totp_pending FROM users WHERE id = ?1")
@@ -493,7 +470,6 @@ async fn confirm_setup(
         return Err(HttpError::bad_request("Start the setup first"));
     };
     let Some(step) = totp::verify(&pending, code, totp::current_step(), 0) else {
-        state.throttle.record_failure(&key);
         return Err(invalid_code());
     };
     sqlx::query(
@@ -506,7 +482,6 @@ async fn confirm_setup(
     .await?;
     let codes = new_recovery_codes(&mut tx, user_id).await?;
     tx.commit().await?;
-    state.throttle.clear(&key);
     Ok(codes)
 }
 
@@ -540,9 +515,7 @@ async fn disable(
             "Two-factor authentication is required here",
         ));
     }
-    if let Some(retry_after) = state.throttle.locked_out(&throttle_key(user.id)) {
-        return Ok(too_many(retry_after));
-    }
+    state.limits.user(user.id, None)?;
     if !use_code(&state, user.id, &body.code).await? {
         return Err(invalid_code());
     }
@@ -594,9 +567,7 @@ async fn replace(
     SessionUser(user): SessionUser,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
-    if let Some(retry_after) = state.throttle.locked_out(&throttle_key(user.id)) {
-        return Ok(too_many(retry_after));
-    }
+    state.limits.user(user.id, None)?;
     if !use_code(&state, user.id, &body.code).await? {
         return Err(invalid_code());
     }
@@ -640,10 +611,7 @@ async fn confirm_replace(
     mut auth: AuthSession,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
-    let key = throttle_key(user.id);
-    if let Some(retry_after) = state.throttle.locked_out(&key) {
-        return Ok(too_many(retry_after));
-    }
+    state.limits.user(user.id, None)?;
     let mut tx = state.db.writer().begin().await?;
     let (secret, pending): (Option<String>, Option<String>) =
         sqlx::query_as("SELECT totp_secret, totp_pending FROM users WHERE id = ?1")
@@ -654,7 +622,6 @@ async fn confirm_replace(
         return Err(HttpError::bad_request("Start the replacement first"));
     };
     let Some(step) = totp::verify(&pending, &body.code, totp::current_step(), 0) else {
-        state.throttle.record_failure(&key);
         return Err(invalid_code());
     };
     sqlx::query(
@@ -666,7 +633,6 @@ async fn confirm_replace(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    state.throttle.clear(&key);
     session::refresh(&mut auth, user.id).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -693,9 +659,7 @@ async fn regenerate_recovery_codes(
     SessionUser(user): SessionUser,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
-    if let Some(retry_after) = state.throttle.locked_out(&throttle_key(user.id)) {
-        return Ok(too_many(retry_after));
-    }
+    state.limits.user(user.id, None)?;
     if !use_code(&state, user.id, &body.code).await? {
         return Err(invalid_code());
     }

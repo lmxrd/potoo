@@ -9,7 +9,8 @@
 //! - GET, HEAD and OPTIONS change nothing and always pass;
 //! - `Sec-Fetch-Site: same-origin` (or `none`, typed by the user) passes,
 //!   anything else (`same-site`, `cross-site`) is refused;
-//! - without it (an older browser), an `Origin` must match the host;
+//! - without it (an older browser), an `Origin` must be `PUBLIC_URL`'s, or,
+//!   without `PUBLIC_URL`, the request's `Host`;
 //! - without either, it is not a browser, so not a forgery: it passes.
 //!
 //! `/api/collect` is cross-origin by design (the tracker on every site)
@@ -25,14 +26,14 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
 pub async fn check(State(state): State<AppState>, request: Request, next: Next) -> Response {
-    if allowed(&request, state.trust_proxy) {
+    if allowed(&request, state.public_url.as_deref()) {
         next.run(request).await
     } else {
         HttpError::new(StatusCode::FORBIDDEN, "Cross-origin request refused").into_response()
     }
 }
 
-fn allowed(request: &Request, trust_proxy: bool) -> bool {
+fn allowed(request: &Request, public_url: Option<&str>) -> bool {
     let headers = request.headers();
     if request.method().is_safe()
         || request.uri().path() == "/api/collect"
@@ -47,23 +48,24 @@ fn allowed(request: &Request, trust_proxy: bool) -> bool {
         return matches!(site.to_str(), Ok("same-origin" | "none"));
     }
     match headers.get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
-        Some(origin) => same_host(origin, headers, trust_proxy),
+        Some(origin) => own_origin(origin, headers, public_url),
         None => true,
     }
 }
 
-/// Whether an `Origin` (`scheme://host[:port]`) names the host the request
-/// was sent to: the `Host` header, or the proxy's `X-Forwarded-Host` when
-/// it is trusted.
-fn same_host(origin: &str, headers: &HeaderMap, trust_proxy: bool) -> bool {
+/// Whether an `Origin` (`scheme://host[:port]`) is Potoo's own: the one of
+/// `PUBLIC_URL` (scheme included), or without it the host the request was
+/// sent to. Forwarded headers do not count: behind a proxy that rewrites
+/// `Host`, set `PUBLIC_URL`.
+fn own_origin(origin: &str, headers: &HeaderMap, public_url: Option<&str>) -> bool {
+    if let Some(public_url) = public_url {
+        return origin.eq_ignore_ascii_case(public_url);
+    }
     let Some((_, origin_host)) = origin.split_once("://") else {
         return false; // "null", or not a URL
     };
-    let forwarded = trust_proxy
-        .then(|| headers.get("x-forwarded-host"))
-        .flatten();
-    forwarded
-        .or_else(|| headers.get(header::HOST))
+    headers
+        .get(header::HOST)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|host| host.eq_ignore_ascii_case(origin_host))
 }
@@ -87,7 +89,7 @@ mod tests {
     #[test]
     fn fetch_metadata_decides_for_a_browser() {
         let post =
-            |headers: &[(&str, &str)]| allowed(&request("POST", "/api/sites", headers), false);
+            |headers: &[(&str, &str)]| allowed(&request("POST", "/api/sites", headers), None);
         assert!(post(&[("sec-fetch-site", "same-origin")]));
         assert!(post(&[("sec-fetch-site", "none")]));
         assert!(!post(&[("sec-fetch-site", "same-site")]));
@@ -101,33 +103,37 @@ mod tests {
 
     #[test]
     fn without_fetch_metadata_the_origin_must_match() {
-        let post = |headers: &[(&str, &str)], proxy| {
-            allowed(&request("DELETE", "/api/sites/1", headers), proxy)
+        let post = |headers: &[(&str, &str)], public_url| {
+            allowed(&request("DELETE", "/api/sites/1", headers), public_url)
         };
-        assert!(post(&[("origin", "https://potoo.example.com")], false));
-        assert!(post(&[("origin", "https://POTOO.example.com")], false));
-        assert!(!post(&[("origin", "https://blog.example.com")], false));
-        assert!(!post(&[("origin", "null")], false));
+        assert!(post(&[("origin", "https://potoo.example.com")], None));
+        assert!(post(&[("origin", "https://POTOO.example.com")], None));
+        assert!(!post(&[("origin", "https://blog.example.com")], None));
+        assert!(!post(&[("origin", "null")], None));
         // Not a browser: nothing to forge.
-        assert!(post(&[], false));
-        // Behind a trusted proxy, the host it forwarded.
-        let proxied = [
-            ("origin", "https://stats.example.org"),
-            ("x-forwarded-host", "stats.example.org"),
+        assert!(post(&[], None));
+        // With PUBLIC_URL, its origin, scheme included, whatever the Host
+        // a proxy sends; forwarded headers do not count.
+        let public = Some("https://stats.example.org");
+        assert!(post(&[("origin", "https://stats.example.org")], public));
+        assert!(!post(&[("origin", "http://stats.example.org")], public));
+        assert!(!post(&[("origin", "https://potoo.example.com")], public));
+        let forwarded = [
+            ("origin", "https://elsewhere.example.org"),
+            ("x-forwarded-host", "elsewhere.example.org"),
         ];
-        assert!(post(&proxied, true));
-        assert!(!post(&proxied, false));
+        assert!(!post(&forwarded, None));
     }
 
     #[test]
     fn reads_the_tracker_and_api_keys_pass() {
         let cross = [("sec-fetch-site", "cross-site")];
-        assert!(allowed(&request("GET", "/api/stats", &cross), false));
-        assert!(allowed(&request("POST", "/api/collect", &cross), false));
+        assert!(allowed(&request("GET", "/api/stats", &cross), None));
+        assert!(allowed(&request("POST", "/api/collect", &cross), None));
         let key = [
             ("sec-fetch-site", "cross-site"),
             ("authorization", "Bearer potoo_abc"),
         ];
-        assert!(allowed(&request("POST", "/api/sites", &key), false));
+        assert!(allowed(&request("POST", "/api/sites", &key), None));
     }
 }

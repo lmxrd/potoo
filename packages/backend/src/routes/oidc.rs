@@ -9,7 +9,7 @@
 use crate::error::{ErrorBody, HttpError};
 use crate::extract::ApiJson;
 use crate::oidc::{CALLBACK_PATH, Failure, Identity, LOGIN_COOKIE, LOGIN_TTL, Settings};
-use crate::routes::auth::{AuthUser, require_admin, secure, validate_email};
+use crate::routes::auth::{AuthUser, require_admin, validate_email};
 use crate::routes::totp::{Step, challenge_cookie, next_step};
 use crate::session::{self, AuthSession};
 use crate::state::AppState;
@@ -73,24 +73,25 @@ fn failed(failure: Failure) -> Redirect {
     tag = "Auth",
     operation_id = "oidcLogin",
     summary = "Sign in with single sign-on",
-    description = "Redirects the browser to the provider, or to `/login?error=unavailable` when single sign-on is off or the provider cannot be reached (it is not asked again for 30 seconds), or to `/login?error=misconfigured` when the callback URL is not on the scheme (http or https) Potoo is reached over. Sets a short-lived signed cookie that holds the login, so that only this browser can finish it.",
+    description = "Redirects the browser to the provider, or to `/login?error=unavailable` when single sign-on is off or the provider cannot be reached (it is not asked again for 30 seconds), or to `/login?error=misconfigured` when the callback URL is not on the scheme (http or https) of `PUBLIC_URL`. Sets a short-lived signed cookie that holds the login, so that only this browser can finish it.",
     responses(
         (status = 303, description = "To the provider, or back to the login page"),
     ),
 )]
 async fn login(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let secure = secure(&headers);
-    let redirect_url = state.oidc.callback_url(&headers, state.trust_proxy);
-    // The login cookie is named for this request's scheme and the callback
-    // reads the one of its own: a callback on the other scheme could never
-    // finish the login. Accepting the plain cookie over https would let a
-    // sibling subdomain plant one, so this is refused before the provider,
-    // with a reason that points at the setup.
+    let secure = state.secure_cookies;
+    let redirect_url = state
+        .oidc
+        .callback_url(&headers, state.public_url.as_deref());
+    // The login cookie is `__Host-` and Secure when PUBLIC_URL is https,
+    // and the callback must be on that same scheme, or it could never read
+    // it: a callback on the other scheme is a setup mistake, refused before
+    // the provider with a reason that points at it.
     if redirect_url.starts_with("https://") != secure {
         tracing::warn!(
-            "single sign-on: Potoo is reached over {} but its callback URL is {redirect_url}; \
-             check OIDC_REDIRECT_URL, TRUST_PROXY and the proxy's X-Forwarded-Proto",
-            if secure { "https" } else { "http" }
+            "single sign-on: PUBLIC_URL is {} but the callback URL is {redirect_url}; \
+             check PUBLIC_URL and OIDC_REDIRECT_URL",
+            state.public_url.as_deref().unwrap_or("not set")
         );
         return failed(Failure::Misconfigured).into_response();
     }
@@ -139,7 +140,7 @@ async fn callback(
     // The login cookie, if this server signed it. Any cookie of that name
     // is used up whatever happens next, errors included, and one this
     // server did not sign (from before a restart, say) too.
-    let secure = secure(&headers);
+    let secure = state.secure_cookies;
     let (name, _) = login_cookie_name(secure);
     let login = SignedCookieJar::from_headers(&headers, state.oidc.key().clone())
         .get(name)
@@ -168,7 +169,7 @@ async fn callback(
 async fn sign_in(
     state: &AppState,
     auth: &mut AuthSession,
-    headers: &HeaderMap,
+    _headers: &HeaderMap,
     params: CallbackParams,
     login: Option<String>,
 ) -> Result<Result<SignedIn, Failure>, HttpError> {
@@ -197,7 +198,7 @@ async fn sign_in(
     if let Some(step) = next_step(&mut *tx, state, user_id).await? {
         tx.commit().await?;
         return Ok(Ok(SignedIn::Step(
-            challenge_cookie(state, user_id, step, secure(headers)),
+            challenge_cookie(state, user_id, step),
             step,
         )));
     }
@@ -344,7 +345,9 @@ fn view(state: &AppState, headers: &HeaderMap) -> OidcSettings {
     OidcSettings {
         enabled: settings.enabled(),
         client_secret_set: !settings.client_secret.is_empty(),
-        callback_url: state.oidc.callback_url(headers, state.trust_proxy),
+        callback_url: state
+            .oidc
+            .callback_url(headers, state.public_url.as_deref()),
         locked: state
             .oidc
             .env()

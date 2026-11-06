@@ -24,17 +24,52 @@ async fn spawn_app_with(oidc_env: oidc::Env) -> TestApp {
 
 /// The app, with OIDC_* environment variables and TOTP_REQUIRED as given.
 async fn spawn_app_full(oidc_env: oidc::Env, totp_required: bool) -> TestApp {
+    spawn(Options {
+        oidc: oidc_env,
+        totp_required,
+        ..Options::default()
+    })
+    .await
+}
+
+/// What a test app is started with.
+struct Options {
+    oidc: oidc::Env,
+    totp_required: bool,
+    /// `PUBLIC_URL`; https makes every cookie Secure and `__Host-`.
+    public_url: Option<String>,
+    /// The login limits: large ones, but for the tests of the limits.
+    limits: potoo::limits::Limits,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options {
+            oidc: oidc::Env::default(),
+            totp_required: false,
+            public_url: None,
+            limits: potoo::limits::Limits::with_bursts(1_000, 1_000, 1_000),
+        }
+    }
+}
+
+async fn spawn(options: Options) -> TestApp {
     potoo::install_tls_provider();
     let db = db::open(":memory:").await;
     let state = AppState {
         ingest: potoo::ingest::Ingest::spawn(db.clone()).0,
-        oidc: Arc::new(oidc::Oidc::load(&db, oidc_env).await),
+        oidc: Arc::new(oidc::Oidc::load(&db, options.oidc).await),
         db,
         geo: Arc::new(geo::Geo::open("/nonexistent/country.mmdb", geo::Source::Disabled).await),
         trust_proxy: true,
-        throttle: Arc::new(auth::LoginThrottle::default()),
-        totp_required,
-        secure_cookies: false,
+        limits: Arc::new(options.limits),
+        secure_cookies: options
+            .public_url
+            .as_deref()
+            .is_some_and(|u| u.starts_with("https://")),
+        public_url: options.public_url,
+        challenge_key: axum_extra::extract::cookie::Key::generate(),
+        totp_required: options.totp_required,
     };
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -1842,18 +1877,18 @@ fn set_cookie_header(response: &Response, name: &str) -> Option<String> {
 /// cannot plant.
 #[tokio::test]
 async fn the_login_cookie_is_scoped_and_used_up() {
-    let app = spawn_app().await;
-    let admin = admin_session(&app).await;
     let provider = provider::spawn().await;
-    configure(&app, &admin, &provider, json!({})).await;
-    let start = |proto: &'static str| {
+    let start = |app: &TestApp| {
         no_redirects()
             .get(format!("{}/api/auth/oidc/login", app.base))
-            .header("x-forwarded-proto", proto)
             .send()
     };
 
-    let response = start("http").await.unwrap();
+    // Over plain http (no PUBLIC_URL): a plain cookie, for the callback only.
+    let app = spawn_app().await;
+    let admin = admin_session(&app).await;
+    configure(&app, &admin, &provider, json!({})).await;
+    let response = start(&app).await.unwrap();
     let cookie = set_cookie_header(&response, "potoo_oidc").expect("the login cookie");
     for attribute in [
         "HttpOnly",
@@ -1864,12 +1899,6 @@ async fn the_login_cookie_is_scoped_and_used_up() {
         assert!(cookie.contains(attribute), "{attribute} in {cookie}");
     }
     assert!(!cookie.contains("Secure"), "{cookie}");
-
-    let response = start("https").await.unwrap();
-    let cookie = set_cookie_header(&response, "__Host-potoo_oidc").expect("the login cookie");
-    for attribute in ["HttpOnly", "SameSite=Lax", "Path=/;", "Secure"] {
-        assert!(cookie.contains(attribute), "{attribute} in {cookie}");
-    }
 
     // Whatever the callback answers, the cookie is gone after it.
     let login = start_login(&app).await;
@@ -1883,18 +1912,30 @@ async fn the_login_cookie_is_scoped_and_used_up() {
         assert!(cleared.contains("Max-Age=0"), "{cleared}");
     }
 
-    // Over https too, where a removal without Secure would be ignored by
-    // the browser; and a cookie this server did not sign (from before a
-    // restart, say) is cleared as well.
-    let response = start("https").await.unwrap();
+    // With an https PUBLIC_URL: `__Host-`, Secure, the whole site's path.
+    let https = spawn(Options {
+        public_url: Some("https://potoo.example.com".into()),
+        ..Options::default()
+    })
+    .await;
+    let admin = secure_admin_session(&https).await;
+    configure(&https, &admin, &provider, json!({})).await;
+    let response = start(&https).await.unwrap();
+    let header = set_cookie_header(&response, "__Host-potoo_oidc").expect("the login cookie");
+    for attribute in ["HttpOnly", "SameSite=Lax", "Path=/;", "Secure"] {
+        assert!(header.contains(attribute), "{attribute} in {header}");
+    }
+
+    // There, the removal is Secure too (a browser ignores a `__Host-`
+    // removal without it); and a cookie this server did not sign (from
+    // before a restart, say) is cleared as well.
     let cookie = set_cookie(&response, "__Host-potoo_oidc").expect("the login cookie");
     for cookie in [cookie.as_str(), "__Host-potoo_oidc=not-signed-here"] {
         let response = no_redirects()
             .get(format!(
                 "{}/api/auth/oidc/callback?state=x&code=y",
-                app.base
+                https.base
             ))
-            .header("x-forwarded-proto", "https")
             .header("cookie", cookie)
             .send()
             .await
@@ -1911,6 +1952,24 @@ async fn the_login_cookie_is_scoped_and_used_up() {
             assert!(cleared.contains(attribute), "{attribute} in {cleared}");
         }
     }
+}
+
+/// The first admin of an app with an https PUBLIC_URL: its session cookie
+/// is `__Host-potoo_session` (as a `cookie` header value).
+async fn secure_admin_session(app: &TestApp) -> String {
+    let response = request(
+        app,
+        Method::POST,
+        "/api/auth/setup",
+        None,
+        Some(json!({ "email": "admin@example.com", "password": "correct horse battery" })),
+    )
+    .await;
+    let header = set_cookie_header(&response, "__Host-potoo_session").expect("the session cookie");
+    for attribute in ["HttpOnly", "SameSite=Strict", "Path=/", "Secure"] {
+        assert!(header.contains(attribute), "{attribute} in {header}");
+    }
+    set_cookie(&response, "__Host-potoo_session").unwrap()
 }
 
 /// A second account at the provider with the email of a user who is
@@ -2089,26 +2148,31 @@ async fn a_signing_key_replaced_under_the_same_id_is_fetched_at_once() {
 /// points at the setup rather than at the user.
 #[tokio::test]
 async fn a_callback_on_another_scheme_is_a_misconfiguration() {
-    let app = spawn_app().await;
-    let admin = admin_session(&app).await;
+    // An https callback, but no https PUBLIC_URL: the login cookie would
+    // be a plain one the callback could not be trusted with.
     let provider = provider::spawn().await;
-    configure(
-        &app,
-        &admin,
-        &provider,
-        json!({ "redirect_url": "https://potoo.example.com/api/auth/oidc/callback" }),
-    )
-    .await;
-    let start = |proto: &'static str| {
+    let callback = json!({ "redirect_url": "https://potoo.example.com/api/auth/oidc/callback" });
+    let plain = spawn_app().await;
+    let admin = admin_session(&plain).await;
+    configure(&plain, &admin, &provider, callback.clone()).await;
+    let start = |app: &TestApp| {
         no_redirects()
             .get(format!("{}/api/auth/oidc/login", app.base))
-            .header("x-forwarded-proto", proto)
             .send()
     };
-    let response = start("http").await.unwrap();
+    let response = start(&plain).await.unwrap();
     assert_eq!(location(&response), "/login?error=misconfigured");
     assert_eq!(set_cookie(&response, "potoo_oidc"), None);
-    let response = start("https").await.unwrap();
+
+    // With PUBLIC_URL on the same scheme it goes to the provider.
+    let https = spawn(Options {
+        public_url: Some("https://potoo.example.com".into()),
+        ..Options::default()
+    })
+    .await;
+    let admin = secure_admin_session(&https).await;
+    configure(&https, &admin, &provider, callback).await;
+    let response = start(&https).await.unwrap();
     assert!(location(&response).starts_with(&provider.issuer));
 }
 
@@ -2312,18 +2376,74 @@ async fn two_factor_authentication() {
         400
     );
 
-    // Five wrong codes in a row (a right one starts the count again) and the
-    // user's codes are refused for a while, even a right one. One failure
-    // just now, four more.
-    for _ in 0..4 {
-        assert_eq!(
-            second_step(&app, Some(&challenge), wrong).await.status(),
-            400
-        );
+    // The new codes work (the limits have their own test).
+    assert_eq!(
+        second_step(&app, Some(&challenge), &new_codes[0])
+            .await
+            .status(),
+        204
+    );
+}
+
+#[tokio::test]
+async fn attempts_are_limited_per_email_address_and_user() {
+    // The real limits: 5 per email, 30 per address, 5 codes per user.
+    let app = spawn(Options {
+        limits: potoo::limits::Limits::default(),
+        ..Options::default()
+    })
+    .await;
+    let admin = admin_session(&app).await;
+    let attempt = |password: &'static str| {
+        request(
+            &app,
+            Method::POST,
+            "/api/auth/login",
+            None,
+            Some(json!({ "email": "admin@example.com", "password": password })),
+        )
+    };
+    // Right or wrong, every attempt counts: the sixth is refused.
+    assert_eq!(attempt("wrong password").await.status(), 401);
+    for _ in 0..3 {
+        assert_eq!(attempt("correct horse battery").await.status(), 204);
     }
-    let response = second_step(&app, Some(&challenge), &new_codes[0]).await;
+    assert_eq!(attempt("wrong password").await.status(), 401);
+    let response = attempt("correct horse battery").await;
     assert_eq!(response.status(), 429);
-    assert!(response.headers().contains_key("retry-after"));
+    let wait: u64 = response.headers()["retry-after"]
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!((1..=60).contains(&wait), "{wait}");
+    assert_eq!(
+        json(response).await,
+        json!({ "error": "Too many attempts, try again later" })
+    );
+    // Nobody is locked out: the session goes on, and another email can
+    // still try (from the same address, under its 30).
+    assert!(session_of(&app, Some(&admin)).await["user"].is_object());
+    let other = request(
+        &app,
+        Method::POST,
+        "/api/auth/login",
+        None,
+        Some(json!({ "email": "b@example.com", "password": "wrong password" })),
+    )
+    .await;
+    assert_eq!(other.status(), 401);
+
+    // Codes: five per user, then 429 even for a right one.
+    let secret = enable(&app, &admin).await;
+    for _ in 0..4 {
+        let body = json!({ "code": "000000" });
+        let response = post(&app, "/api/auth/totp/recovery-codes", &admin, Some(body)).await;
+        assert_eq!(response.status(), 400);
+    }
+    let body = json!({ "code": totp_code(&secret, 1) });
+    let response = post(&app, "/api/auth/totp/recovery-codes", &admin, Some(body)).await;
+    assert_eq!(response.status(), 429);
 }
 
 #[tokio::test]

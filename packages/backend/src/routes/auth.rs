@@ -13,7 +13,6 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum_login::AuthnBackend as _;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use sqlx::SqliteExecutor;
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime};
@@ -171,15 +170,6 @@ fn validate_theme(raw: &str) -> Result<String, HttpError> {
         return Err(invalid());
     }
     Ok(format!("{{\"base\":\"{base}\",\"accent\":\"{accent}\"}}"))
-}
-
-/// The cookie is secure behind an https proxy that says so.
-pub(crate) fn secure(headers: &HeaderMap) -> bool {
-    headers
-        .get("x-forwarded-proto")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.eq_ignore_ascii_case("https"))
-        .unwrap_or(false)
 }
 
 pub(crate) fn validate_email(raw: &str) -> Result<String, HttpError> {
@@ -404,7 +394,7 @@ async fn setup(
     tag = "Auth",
     operation_id = "login",
     summary = "Sign in",
-    description = "Sets the session cookie. For a user with two-factor authentication on it answers `totp_required` instead, with a cookie good for five minutes: `/login/totp` with a code finishes the sign-in. With `TOTP_REQUIRED`, a user without it gets `totp_setup_required`: `/login/totp/setup` and `/login/totp/enable` set the app up and finish the sign-in. After five failed attempts for one IP and email within 15 minutes the pair is locked out (429, with a Retry-After header).",
+    description = "Sets the session cookie. For a user with two-factor authentication on it answers `totp_required` instead, with a cookie good for five minutes: `/login/totp` with a code finishes the sign-in. With `TOTP_REQUIRED`, a user without it gets `totp_setup_required`: `/login/totp/setup` and `/login/totp/enable` set the app up and finish the sign-in. Every attempt counts: 5 per email, then 1 a minute, and 30 per address, then 1 every 6 seconds; over that, 429 with a Retry-After header.",
     request_body(content = Credentials, content_type = "application/json"),
     responses(
         (status = 200, description = "The password is right; two-factor authentication is next", body = LoginStep),
@@ -434,18 +424,9 @@ async fn login(
     let email = validate_email(&creds.email)
         .map_err(|_| HttpError::new(StatusCode::UNAUTHORIZED, "Invalid email or password"))?;
 
-    let key = format!(
-        "{}|{email}",
-        client_ip(&headers, Some(addr.ip()), state.trust_proxy)
-    );
-    if let Some(retry_after) = state.throttle.locked_out(&key) {
-        return Ok((
-            StatusCode::TOO_MANY_REQUESTS,
-            [("retry-after", retry_after.to_string())],
-            Json(json!({ "error": "Too many attempts, try again later" })),
-        )
-            .into_response());
-    }
+    // Every attempt counts, per address and per email (see `limits.rs`).
+    let ip = client_ip(&headers, Some(addr.ip()), state.trust_proxy);
+    state.limits.sign_in(&ip, &email)?;
 
     // The same work and the same answer whether or not the user exists,
     // or has a password (see `session::Backend::authenticate`).
@@ -457,16 +438,14 @@ async fn login(
         .await
         .map_err(anyhow::Error::new)?;
     let Some(user) = user else {
-        state.throttle.record_failure(&key);
         return Err(HttpError::new(
             StatusCode::UNAUTHORIZED,
             "Invalid email or password",
         ));
     };
-    state.throttle.clear(&key);
     if let Some(step) = next_step(state.db.reader(), &state, user.id).await? {
         return Ok((
-            challenge_cookie(&state, user.id, step, secure(&headers)),
+            challenge_cookie(&state, user.id, step),
             Json(LoginStep {
                 totp_required: step == Step::Code,
                 totp_setup_required: step == Step::Enroll,
@@ -631,6 +610,8 @@ async fn change_password(
     if !state.oidc.passwords_allowed() {
         return Err(HttpError::passwords_off());
     }
+    // The current password is a guess like any other (see `limits.rs`).
+    state.limits.user(user.0.id, None)?;
     let invalid = || HttpError::new(StatusCode::UNAUTHORIZED, "Invalid password");
     let current = body.current_password.unwrap_or_default();
     if current.len() > 200 {

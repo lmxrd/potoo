@@ -13,7 +13,12 @@ async fn main() -> anyhow::Result<()> {
         return healthcheck().await.context("unhealthy");
     }
 
-    tracing_subscriber::fmt().init();
+    // RUST_LOG picks what is logged (default: info).
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
+        .init();
 
     // The binary is built for musl (the Docker image is Alpine), so the
     // TLS stack is ring rather than aws-lc; reqwest is built without a
@@ -40,20 +45,38 @@ async fn main() -> anyhow::Result<()> {
     let db = db::open_with(&db_path, &synchronous).await;
     let (ingest, writer) = potoo::ingest::Ingest::spawn(db.clone());
     let geo = Arc::new(geo::Geo::open(&geo_path, geo_source).await);
+    let public_url = potoo::config::public_url();
+    let limits = Arc::new(potoo::limits::Limits::default());
     let state = AppState {
         db: db.clone(),
         ingest,
         geo: geo.clone(),
-        trust_proxy: std::env::var("TRUST_PROXY")
-            .map(|v| v == "1")
-            .unwrap_or(false),
-        throttle: Arc::new(potoo::auth::LoginThrottle::default()),
+        trust_proxy: env_flag("TRUST_PROXY")?,
+        limits: limits.clone(),
+        secure_cookies: public_url
+            .as_deref()
+            .is_some_and(|u| u.starts_with("https://")),
+        public_url,
+        challenge_key: axum_extra::extract::cookie::Key::generate(),
         // Single sign-on: the stored settings, with the OIDC_* environment
         // variables on top.
-        oidc: Arc::new(potoo::oidc::Oidc::load(&db, potoo::oidc::Env::from_env()).await),
+        oidc: Arc::new(
+            potoo::oidc::Oidc::load(
+                &db,
+                potoo::oidc::Env::from_env().map_err(anyhow::Error::msg)?,
+            )
+            .await,
+        ),
         totp_required: env_flag("TOTP_REQUIRED")?,
-        secure_cookies: env_flag("SECURE_COOKIES")?,
     };
+
+    // The login limits forget the keys that are back to their full quota.
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(600)).await;
+            limits.forget_idle();
+        }
+    });
 
     // Expired sessions are deleted every hour (a session past its expiry
     // is refused anyway: this only keeps the table small).
@@ -144,12 +167,9 @@ async fn main() -> anyhow::Result<()> {
 /// A yes or no environment variable: unset or empty is no, and a value
 /// that is not understood stops the start rather than quietly meaning no.
 fn env_flag(name: &str) -> anyhow::Result<bool> {
-    match std::env::var(name).ok().filter(|v| !v.is_empty()) {
-        None => Ok(false),
-        Some(v) => potoo::oidc::flag(&v).with_context(|| {
-            format!("{name} must be true or false (1/0, yes/no, on/off), not {v}")
-        }),
-    }
+    Ok(potoo::config::flag(name)
+        .map_err(anyhow::Error::msg)?
+        .unwrap_or(false))
 }
 
 /// Resolves on SIGINT or SIGTERM.

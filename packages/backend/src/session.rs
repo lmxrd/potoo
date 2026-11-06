@@ -24,8 +24,19 @@ use tower_sessions::session::{Id, Record};
 use tower_sessions::session_store::{self, ExpiredDeletion, SessionStore};
 use tower_sessions::{Expiry, Session};
 
-/// The session cookie's name.
+/// The session cookie's name; `__Host-potoo_session` when `PUBLIC_URL` is
+/// https (see [`cookie_name`]).
 pub const COOKIE: &str = "potoo_session";
+
+/// The session cookie's name: with the `__Host-` prefix when cookies are
+/// Secure, so that a sibling subdomain can neither set nor read one.
+pub fn cookie_name(secure: bool) -> &'static str {
+    if secure {
+        "__Host-potoo_session"
+    } else {
+        COOKIE
+    }
+}
 
 /// The extractor of the signed-in session.
 pub type AuthSession = axum_login::AuthSession<Backend>;

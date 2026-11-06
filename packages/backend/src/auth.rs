@@ -4,9 +4,7 @@ use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier, generate_salt};
 use serde::{Deserialize, Serialize};
 use sqlx::SqliteExecutor;
-use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 use utoipa::ToSchema;
 
 pub use crate::session::COOKIE;
@@ -149,72 +147,6 @@ pub async fn key_user<'e>(db: impl SqliteExecutor<'e>, token: &str) -> Option<(U
             last_used_at: row.last_used_at,
         },
     ))
-}
-
-/// In-memory throttle for failed logins: after MAX_FAILURES within the
-/// window the IP + email pair is locked out until the oldest failure
-/// expires. It resets when the server restarts, which keeps the
-/// no-storage promise.
-const WINDOW_MS: i64 = 15 * 60_000;
-const MAX_FAILURES: usize = 5;
-
-#[derive(Default)]
-pub struct LoginThrottle {
-    failures: Mutex<HashMap<String, VecDeque<i64>>>,
-}
-
-impl LoginThrottle {
-    /// The failures of a key that are still inside the window.
-    fn recent(&self, key: &str) -> VecDeque<i64> {
-        let now = now_ms();
-        let mut map = self.failures.lock().unwrap();
-        let recent: VecDeque<i64> = map
-            .get(key)
-            .map(|times| {
-                times
-                    .iter()
-                    .copied()
-                    .filter(|t| now - t < WINDOW_MS)
-                    .collect()
-            })
-            .unwrap_or_default();
-        if recent.is_empty() {
-            map.remove(key);
-        } else {
-            map.insert(key.to_string(), recent.clone());
-        }
-        recent
-    }
-
-    /// Whether the key is locked out, and how long to wait if it is.
-    pub fn locked_out(&self, key: &str) -> Option<i64> {
-        let recent = self.recent(key);
-        if recent.len() < MAX_FAILURES {
-            return None;
-        }
-        let retry_ms = recent[0] + WINDOW_MS - now_ms();
-        Some((retry_ms + 999) / 1000)
-    }
-
-    pub fn record_failure(&self, key: &str) {
-        let now = now_ms();
-        let mut map = self.failures.lock().unwrap();
-        map.entry(key.to_string()).or_default().push_back(now);
-        if map.len() > 10_000 {
-            map.clear();
-        }
-    }
-
-    pub fn clear(&self, key: &str) {
-        self.failures.lock().unwrap().remove(key);
-    }
-}
-
-fn now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 pub fn now_iso() -> String {

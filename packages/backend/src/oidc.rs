@@ -115,28 +115,20 @@ pub struct Env {
 }
 
 impl Env {
-    pub fn from_env() -> Self {
-        let var = |name: &str| std::env::var(name).ok().filter(|v| !v.is_empty());
-        Env {
+    /// The OIDC_* variables. A yes/no value that is not understood is an
+    /// error, which stops the start rather than quietly meaning "off".
+    pub fn from_env() -> Result<Self, String> {
+        use crate::config::{flag, var};
+        Ok(Env {
             issuer: var("OIDC_ISSUER"),
             client_id: var("OIDC_CLIENT_ID"),
             client_secret: var("OIDC_CLIENT_SECRET"),
             scopes: var("OIDC_SCOPES"),
             label: var("OIDC_LABEL"),
             redirect_url: var("OIDC_REDIRECT_URL"),
-            // A value that is not understood stops the start, rather than
-            // quietly meaning "off".
-            auto_create: var("OIDC_AUTO_CREATE").map(|v| {
-                flag(&v).unwrap_or_else(|| {
-                    panic!("OIDC_AUTO_CREATE must be 1 or 0 (true/false, yes/no, on/off), not {v}")
-                })
-            }),
-            only: var("OIDC_ONLY").is_some_and(|v| {
-                flag(&v).unwrap_or_else(|| {
-                    panic!("OIDC_ONLY must be 1 or 0 (true/false, yes/no, on/off), not {v}")
-                })
-            }),
-        }
+            auto_create: flag("OIDC_AUTO_CREATE")?,
+            only: flag("OIDC_ONLY")?.unwrap_or(false),
+        })
     }
 
     /// The stored settings with the variables that are set on top.
@@ -168,15 +160,6 @@ impl Env {
         .filter(|(_, locked)| *locked)
         .map(|(field, _)| field)
         .collect()
-    }
-}
-
-/// A yes or no environment variable.
-pub fn flag(value: &str) -> Option<bool> {
-    match value.to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Some(true),
-        "0" | "false" | "no" | "off" => Some(false),
-        _ => None,
     }
 }
 
@@ -339,21 +322,23 @@ impl Oidc {
         self.started.elapsed().as_secs()
     }
 
-    /// The callback URL: the configured one, or the one this request came
-    /// to. Behind a proxy (`trust_proxy`), its X-Forwarded-Proto and
-    /// X-Forwarded-Host say what that is; otherwise they are not trusted.
-    pub fn callback_url(&self, headers: &HeaderMap, trust_proxy: bool) -> String {
+    /// The callback URL: the configured one (`OIDC_REDIRECT_URL` or the
+    /// admin settings), else the one under `PUBLIC_URL`, else plain http on
+    /// the host this request came to (development). Forwarded headers are
+    /// not trusted for it: behind a proxy, set `PUBLIC_URL`.
+    pub fn callback_url(&self, headers: &HeaderMap, public_url: Option<&str>) -> String {
         let settings = self.settings();
         if !settings.redirect_url.is_empty() {
             return settings.redirect_url;
         }
-        let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
-        let forwarded = |name: &str| header(name).filter(|_| trust_proxy);
-        let scheme = forwarded("x-forwarded-proto").unwrap_or("http");
-        let host = forwarded("x-forwarded-host")
-            .or_else(|| header("host"))
+        if let Some(public_url) = public_url {
+            return format!("{public_url}{CALLBACK_PATH}");
+        }
+        let host = headers
+            .get("host")
+            .and_then(|v| v.to_str().ok())
             .unwrap_or("localhost");
-        format!("{scheme}://{host}{CALLBACK_PATH}")
+        format!("http://{host}{CALLBACK_PATH}")
     }
 
     /// Hold while saving the settings: a save reads the stored row, asks
@@ -750,17 +735,6 @@ mod tests {
     }
 
     #[test]
-    fn a_flag_is_yes_or_no_or_not_understood() {
-        for yes in ["1", "true", "YES", "on"] {
-            assert_eq!(flag(yes), Some(true), "{yes}");
-        }
-        for no in ["0", "false", "No", "off"] {
-            assert_eq!(flag(no), Some(false), "{no}");
-        }
-        assert_eq!(flag("maybe"), None);
-    }
-
-    #[test]
     fn openid_is_asked_for_once() {
         let settings = Settings {
             scopes: "openid email profile".into(),
@@ -771,19 +745,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn forwarded_headers_count_only_behind_a_proxy() {
+    async fn the_callback_is_under_the_public_url_and_forwarded_headers_do_not_count() {
         let oidc = Oidc::load(&crate::db::open(":memory:").await, Env::default()).await;
         let mut headers = HeaderMap::new();
         headers.insert("host", "potoo.example.com".parse().unwrap());
         headers.insert("x-forwarded-proto", "https".parse().unwrap());
         headers.insert("x-forwarded-host", "elsewhere.example.com".parse().unwrap());
         assert_eq!(
-            oidc.callback_url(&headers, false),
+            oidc.callback_url(&headers, None),
             "http://potoo.example.com/api/auth/oidc/callback"
         );
         assert_eq!(
-            oidc.callback_url(&headers, true),
-            "https://elsewhere.example.com/api/auth/oidc/callback"
+            oidc.callback_url(&headers, Some("https://stats.example.org")),
+            "https://stats.example.org/api/auth/oidc/callback"
         );
     }
 

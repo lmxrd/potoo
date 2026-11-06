@@ -21,6 +21,9 @@ pub enum HttpError {
     /// An answer for the client: the status, and a message fit to show.
     #[error("{status}: {message}")]
     Status { status: StatusCode, message: String },
+    /// Too many attempts (see `limits.rs`): try again in this many seconds.
+    #[error("too many attempts, retry after {retry_after} s")]
+    TooManyRequests { retry_after: u64 },
     /// The database failed.
     #[error("database error")]
     Database(#[from] sqlx::Error),
@@ -81,6 +84,7 @@ impl HttpError {
     pub fn status(&self) -> StatusCode {
         match self {
             Self::Status { status, .. } => *status,
+            Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
             Self::Database(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -91,6 +95,12 @@ impl IntoResponse for HttpError {
         let status = self.status();
         let error = match self {
             Self::Status { message, .. } => message,
+            Self::TooManyRequests { retry_after } => {
+                let body = Json(ErrorBody {
+                    error: "Too many attempts, try again later".into(),
+                });
+                return (status, [("retry-after", retry_after.to_string())], body).into_response();
+            }
             // `{:#}` is the error with its causes, on one line.
             Self::Database(e) => {
                 tracing::error!("database error: {e:#}");
