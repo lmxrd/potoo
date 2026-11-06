@@ -23,8 +23,8 @@ backend).
 | -------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `mise run dev`             | Runs the backend and the frontend (Vite) together                                                              |
 | `mise run start`           | Builds, then runs the server (never a stale binary)                                                            |
-| `mise run gen:spec`        | Writes the OpenAPI spec to `backend/target/specs/openapi.json`                                                 |
-| `mise run gen:client`      | Generates the frontend API client from the spec (`frontend/src/client`, not committed)                         |
+| `mise run gen:spec`        | Writes the OpenAPI spec to `packages/backend/target/specs/openapi.json`                                                 |
+| `mise run gen:sdk`      | Generates the frontend API client from the spec (`packages/sdk/src`, not committed)                         |
 | `mise run build`           | Builds the frontend and the release binary for this machine, copied to `dist/potoo`                            |
 | `mise run build:linux`     | The static Linux binary the image copies, `dist/potoo-linux-<arch>` (zig cross-compiles; `ARCH=amd64`/`arm64`) |
 | `mise run build:docker`    | `build:linux`, then the Docker image (podman), which only copies that binary                                   |
@@ -53,13 +53,13 @@ included), the stats with a filter, and the export.
 Every endpoint is documented in code: a `#[utoipa::path]` on the handler, named
 request and response structs with `ToSchema`, and the handler registered with
 `routes!` on its module's `OpenApiRouter` (utoipa-axum), which is both the route
-and the spec entry, so the two cannot drift. The spec is written to `backend/target/specs/openapi.json` by `mise run gen:spec` and is
-not served. The frontend's client is generated from it (`mise run gen:client`)
+and the spec entry, so the two cannot drift. The spec is written to `packages/backend/target/specs/openapi.json` by `mise run gen:spec` and is
+not served. The frontend's client is generated from it (`mise run gen:sdk`)
 with hey-api, and uses TanStack Query and zod; it is not committed.
 
 ## Changing the schema
 
-Add a new numbered file to `backend/migrations/` (`0003_what_it_does.sql`).
+Add a new numbered file to `packages/backend/migrations/` (`0003_what_it_does.sql`).
 It is applied, in order, when the server or the seed starts, and recorded in
 the `_sqlx_migrations` table. Never edit a migration that has shipped: its
 checksum is recorded, and a changed file stops the server from starting.
@@ -72,36 +72,36 @@ foreign keys off, or `ON DELETE CASCADE` empties the tables that point at it.
 ## The code
 
 ```
-backend/src/main.rs        entrypoint: env config, geo refresh, retention, graceful stop
-backend/src/lib.rs         the app: the API routes plus the frontend, and the TLS provider
-backend/src/frontend.rs    the embedded frontend: static files, cache headers, the SPA fallback
-backend/src/state.rs       the shared AppState
-backend/src/error.rs       HttpError, answered as {"error": "..."}
-backend/src/extract.rs     ApiJson: the JSON request body extractor
-backend/src/db.rs          the SQLite pools (one writer, read-only readers), caches, migrations on startup
-backend/src/ingest.rs      the hit queue and the batched writer
-backend/src/profile.rs     per-phase timers, compiled in only with the profiling feature
-backend/src/openapi.rs     the OpenAPI document: title, tags, the cookie scheme (paths come from the routers)
-backend/src/bin/openapi.rs writes the spec to a file (`mise run gen:spec`)
-backend/migrations/        the schema, one numbered SQL file per change (sqlx migrations)
-backend/src/auth.rs        password hashing, sessions, the login throttle
-backend/src/oidc.rs        single sign-on: the settings (env over stored), the OIDC flow, the signed login cookie
-backend/src/visitor.rs     user agent parsing, client IP, visitor hashes
-backend/src/geo.rs         country lookup + the weekly DB-IP download
-backend/src/stats.rs       ranges, chart buckets, the aggregations
-backend/src/filter.rs      the RSQL filter subset the dashboard uses
-backend/src/csv.rs         the CSV writer + the export download (the import reads CSV in routes/import.rs)
-backend/src/tracker.rs     the tracker script and the pixel GIF
-backend/src/util.rs        sha256 and random hex helpers
-backend/src/routes/        auth, users, oidc (login, callback, admin settings), sites, stats, export, import, collect
-backend/src/bin/seed.rs    a year of demo data, for development
-backend/examples/          the load generator behind `mise run loadtest`
-backend/tests/api.rs       the end-to-end tests (with a stand-in OpenID provider; its test keys in tests/fixtures/)
+packages/backend/src/main.rs        entrypoint: env config, geo refresh, retention, graceful stop
+packages/backend/src/lib.rs         the app: the API routes plus the frontend, and the TLS provider
+packages/backend/src/frontend.rs    the embedded frontend: static files, cache headers, the SPA fallback
+packages/backend/src/state.rs       the shared AppState
+packages/backend/src/error.rs       HttpError, answered as {"error": "..."}
+packages/backend/src/extract.rs     ApiJson: the JSON request body extractor
+packages/backend/src/db.rs          the SQLite pools (one writer, read-only readers), caches, migrations on startup
+packages/backend/src/ingest.rs      the hit queue and the batched writer
+packages/backend/src/profile.rs     per-phase timers, compiled in only with the profiling feature
+packages/backend/src/openapi.rs     the OpenAPI document: title, tags, the cookie scheme (paths come from the routers)
+packages/backend/src/bin/openapi.rs writes the spec to a file (`mise run gen:spec`)
+packages/backend/migrations/        the schema, one numbered SQL file per change (sqlx migrations)
+packages/backend/src/auth.rs        password hashing, sessions, the login throttle
+packages/backend/src/oidc.rs        single sign-on: the settings (env over stored), the OIDC flow, the signed login cookie
+packages/backend/src/visitor.rs     user agent parsing, client IP, visitor hashes
+packages/backend/src/geo.rs         country lookup + the weekly DB-IP download
+packages/backend/src/stats.rs       ranges, chart buckets, the aggregations
+packages/backend/src/filter.rs      the RSQL filter subset the dashboard uses
+packages/backend/src/csv.rs         the CSV writer + the export download (the import reads CSV in routes/import.rs)
+packages/backend/src/tracker.rs     the tracker script and the pixel GIF
+packages/backend/src/util.rs        sha256 and random hex helpers
+packages/backend/src/routes/        auth, users, oidc (login, callback, admin settings), sites, stats, export, import, collect
+packages/backend/src/bin/seed.rs    a year of demo data, for development
+packages/backend/examples/          the load generator behind `mise run loadtest`
+packages/backend/tests/api.rs       the end-to-end tests (with a stand-in OpenID provider; its test keys in tests/fixtures/)
 scripts/                   the load test script and its generator image
-frontend/src/routes/       dashboard, sites table, site page, admin settings (users.tsx), settings
-frontend/src/components/   the shared UI pieces
-frontend/src/client/       the generated API client (hey-api; gitignored, never edited)
-frontend/src/lib/          error messages, ranges, filters, date formatting
+packages/frontend/src/routes/       dashboard, sites table, site page, admin settings (users.tsx), settings
+packages/frontend/src/components/   the shared UI pieces
+packages/sdk/src/       the generated API client (hey-api; gitignored, never edited)
+packages/frontend/src/lib/          error messages, ranges, filters, date formatting
 ```
 
 ## The rules a change must keep
@@ -148,7 +148,7 @@ the minor version, `fix:` the patch, `feat!:` (or a `BREAKING CHANGE:`
 footer) the major; `ci:`, `chore:`, `docs:` and the like release nothing.
 
 1. Every push to `main` updates one open "release PR": the version in
-   `backend/Cargo.toml`, `backend/Cargo.lock` and `frontend/package.json`,
+   `packages/backend/Cargo.toml`, `packages/backend/Cargo.lock` and `packages/frontend/package.json`,
    and the changelog.
 2. Merge that PR when you want to ship. The release (tag `v1.2.3`) is
    created, and the release workflow builds the Linux binaries (static

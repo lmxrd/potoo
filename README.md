@@ -373,7 +373,7 @@ waiting hits the tracker answers `503` instead of buffering more.
 
 Every endpoint is described in an OpenAPI 3.1 document, generated from the code
 rather than hosted: `mise run gen:spec` writes it to
-`backend/target/specs/openapi.json`. The dashboard's API client is generated from
+`packages/backend/target/specs/openapi.json`. The dashboard's API client is generated from
 it, and you can load it into any OpenAPI viewer or client generator.
 
 ## Notes

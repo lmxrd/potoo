@@ -1,0 +1,49 @@
+{
+  "name": "potoo-frontend",
+  "version": "0.6.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "preview": "vite preview",
+    "lint": "oxlint",
+    "fmt": "oxfmt",
+    "fmt:check": "oxfmt --check",
+    "fix": "oxfmt && oxlint --fix",
+    "check": "oxfmt --check && oxlint && tsc --noEmit"
+  },
+  "dependencies": {
+    "@rsql/ast": "^1.6.0",
+    "@rsql/builder": "^1.6.0",
+    "@rsql/emitter": "^1.6.0",
+    "@rsql/parser": "^1.6.0",
+    "@tabler/icons-react": "^3.50.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/react-query": "^5.105.0",
+    "@tanstack/react-router": "^1.170.46",
+    "@visx/axis": "^4.0.0",
+    "@visx/group": "^4.0.0",
+    "@visx/responsive": "^4.0.0",
+    "@visx/scale": "^4.0.0",
+    "@visx/shape": "^4.0.0",
+    "@visx/tooltip": "^4.0.0",
+    "potoo-sdk": "workspace:*",
+    "qrcode.react": "^4.2.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "tailwindcss": "^4.3.3",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@tanstack/router-plugin": "^1.168.48",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "oxfmt": "^0.75.0",
+    "oxlint": "^1.90.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5"
+  }
+}

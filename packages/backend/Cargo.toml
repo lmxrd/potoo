@@ -1,0 +1,80 @@
+[package]
+name = "potoo"
+version = "0.6.0"
+edition = "2024"
+# `cargo run` without --bin: the server, not the seed.
+default-run = "potoo"
+
+[dependencies]
+# The binaries' errors (main, the seed, the healthcheck), with context.
+anyhow = "1.0.104"
+argon2 = "0.6.0"
+axum = { version = "0.8.9", features = ["multipart"] }
+axum-extra = { version = "0.12.6", features = ["cookie", "cookie-signed"] }
+chrono = "0.4.45"
+csv = "1.4.0"
+flate2 = "1.1.10"
+hex = "0.4.3"
+maxminddb = "0.32.0"
+mime_guess = "2.0.5"
+# Single sign-on (src/oidc.rs). Without its default features: it would bring
+# reqwest 0.12; our own reqwest is handed to it instead.
+openidconnect = { version = "4.1.0", default-features = false }
+rand = "0.10.3"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
+rust-embed = "8.13.0"
+# SQLite only (bundled, so the static musl build needs no system library); no
+# TLS or other drivers. Queries are checked at run time: `sqlx::query`, never
+# the `query!` macros, which need a database at compile time.
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+# The API's typed error (src/error.rs).
+thiserror = "2.0.21"
+# Two-factor authentication (src/totp.rs). `otpauth` for the URI the apps scan.
+totp-rs = { version = "6.0.0", features = ["otpauth"] }
+time = { version = "0.3.55", default-features = false }
+tokio = { version = "1.53.2", features = ["full"] }
+tower-http = { version = "0.7.1", features = ["cors", "trace"] }
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+# The OpenAPI spec (see src/openapi.rs): derives on the request and response
+# types and a path annotation on every handler; the spec is written to a file
+# by the `openapi` binary, never served.
+utoipa = "6.0.0"
+# Profiling only, never in a production build (see the profiling feature).
+pprof = { version = "0.15.0", optional = true, features = ["flamegraph"] }
+utoipa-axum = "0.3.0"
+axum-login = "0.18.0"
+tower-sessions = { version = "0.14.0", default-features = false, features = ["axum-core"] }
+async-trait = "0.1.92"
+
+[features]
+# Builds without packages/frontend/dist, for the `openapi` binary only (never ship it):
+# the frontend client is generated from the spec, so the spec comes first.
+spec = []
+# A CPU profile of the running server: sampled while it runs, written as a
+# flamegraph (PROFILE_FLAMEGRAPH=<path>) when it is stopped with SIGINT or
+# SIGTERM, and per-phase timers of the hit path printed every 5 seconds.
+# Off by default; build with `--features profiling --profile profiling`.
+profiling = ["dep:pprof"]
+
+[[bin]]
+name = "openapi"
+path = "src/bin/openapi.rs"
+required-features = ["spec"]
+
+# Smaller, faster release binaries; the release workflow and the image
+# both build with this profile.
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+
+# A release build that keeps its symbols, so a profile has names in it.
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = 1

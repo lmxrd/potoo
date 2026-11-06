@@ -23,8 +23,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            backend/target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-check-${{ hashFiles('backend/Cargo.lock') }}
+            packages/backend/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-check-${{ hashFiles('packages/backend/Cargo.lock') }}
       - run: mise run check
       - run: mise run test
 
@@ -42,8 +42,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            backend/target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-build-${{ hashFiles('backend/Cargo.lock') }}
+            packages/backend/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-build-${{ hashFiles('packages/backend/Cargo.lock') }}
       - run: mise run build
 
   # The image copies the static binary built just before it, with the
@@ -60,8 +60,8 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            backend/target
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-linux-${{ hashFiles('backend/Cargo.lock') }}
+            packages/backend/target
+          key: ${{ runner.os }}-${{ runner.arch }}-cargo-linux-${{ hashFiles('packages/backend/Cargo.lock') }}
       - run: mise run build:linux
       - run: docker build -t potoo:ci .
       # Started once, until its own HEALTHCHECK (`potoo healthcheck`) says

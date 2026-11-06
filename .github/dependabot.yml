@@ -15,14 +15,14 @@
 # - A routine update waits 5 days after its release (cooldown): most
 #   hijacked releases are found and pulled within that time. Security
 #   updates do not wait. pnpm's own minimum release age (1 day, in
-#   frontend/pnpm-workspace.yaml) is shorter, so it never blocks an update
+#   pnpm-workspace.yaml) is shorter, so it never blocks an update
 #   Dependabot proposes; it holds an npm security fix back by a day at most.
 version: 2
 
 updates:
   # The backend. Cargo.lock is bumped with the manifest.
   - package-ecosystem: cargo
-    directory: /backend
+    directory: /packages/backend
     schedule:
       interval: weekly
       day: monday
@@ -40,7 +40,7 @@ updates:
   # The frontend (pnpm: Dependabot reads pnpm-lock.yaml through this
   # ecosystem). It is embedded in the binary, so it ships.
   - package-ecosystem: npm
-    directory: /frontend
+    directory: /
     schedule:
       interval: weekly
       day: monday

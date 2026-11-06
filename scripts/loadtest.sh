@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Write-load test of the tracker against the production image, in a
-# container limited like a small server. The generator (backend/examples/
+# container limited like a small server. The generator (packages/backend/examples/
 # loadtest.rs) runs in a container on the same network, so the host's
 # network stack is not measured, and sends POST /api/collect at each rate in
 # turn; per step this prints throughput, latency and the container's CPU
