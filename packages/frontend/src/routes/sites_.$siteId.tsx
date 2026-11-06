@@ -19,6 +19,7 @@ import { buildFilter, useDashboardFilters } from "../lib/filter";
 import { useDateRange, validateDashboardSearch } from "../lib/date-range";
 import { Checkbox } from "../components/ui/checkbox";
 import { useConfirm } from "../components/confirm";
+import { trackingSnippet } from "../lib/snippet";
 
 export const Route = createFileRoute("/sites_/$siteId")({
   validateSearch: validateDashboardSearch,
@@ -142,11 +143,7 @@ function Snippet({ hostname }: { hostname: string }) {
   const [outbound, setOutbound] = useState(false);
   const [clicks, setClicks] = useState(false);
   const [pixel, setPixel] = useState(false);
-  const origin = location.origin;
-  const script = `<script async src="${origin}/tracker.js"${clicks ? " data-clicks" : ""}${
-    outbound ? " data-outbound" : ""
-  }></script>`;
-  const img = `<noscript><img src="${origin}/api/pixel?h=${hostname}" alt="" /></noscript>`;
+  const snippet = trackingSnippet(location.origin, hostname, { clicks, outbound, pixel });
   return (
     <Card>
       <CardHeader>
@@ -170,9 +167,7 @@ function Snippet({ hostname }: { hostname: string }) {
             No-JS pixel fallback
           </label>
         </div>
-        <pre className="overflow-x-auto rounded bg-muted p-3 text-xs">
-          {script + (pixel ? `\n${img}` : "")}
-        </pre>
+        <pre className="overflow-x-auto rounded bg-muted p-3 text-xs">{snippet}</pre>
         <p className="mt-2 text-xs text-muted-foreground">
           No cookies or IP addresses are stored. Visitors are counted with a hash that rotates
           daily.

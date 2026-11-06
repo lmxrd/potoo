@@ -2,11 +2,11 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { importHitsMutation } from "potoo-sdk/react-query";
-import type { ImportProblem } from "potoo-sdk/types";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { ErrorText } from "../components/error-text";
 import { errorMessage } from "../lib/api";
+import { problemsOf } from "../lib/import";
 import { Checkbox } from "../components/ui/checkbox";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -17,14 +17,6 @@ export const Route = createFileRoute("/import")({
   },
   component: Import,
 });
-
-/** What a refused file looks like: the API says what is wrong with it. */
-function problemsOf(error: unknown): { problems: ImportProblem[]; total: number } | null {
-  if (typeof error !== "object" || error === null) return null;
-  if (!("problems" in error) || !Array.isArray(error.problems)) return null;
-  const total = "total_problems" in error ? Number(error.total_problems) : error.problems.length;
-  return { problems: error.problems, total };
-}
 
 function Import() {
   const queryClient = useQueryClient();

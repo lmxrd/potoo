@@ -30,6 +30,11 @@ export function parseTheme(raw: string | undefined | null): Theme {
   return DEFAULT_THEME;
 }
 
+/** Whether two themes are the same (the accent's case does not count). */
+export function sameTheme(a: Theme, b: Theme): boolean {
+  return a.base === b.base && a.accent.toLowerCase() === b.accent.toLowerCase();
+}
+
 /** A theme as the settings endpoint stores it. */
 export function themeJson(theme: Theme): string {
   return JSON.stringify(theme);

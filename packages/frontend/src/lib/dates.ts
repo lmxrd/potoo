@@ -27,7 +27,7 @@ export function formatTime(time: string, use24 = true): string {
 export function chartLabel(day: string, range: number, use24 = true): string {
   if (range === 1) return formatTime(day.slice(11, 16), use24);
   if (range > 90) {
-    const [, month, year] = day.split("-");
+    const [year, month] = day.split("-");
     return Number(month) === 1 ? `${MONTHS[0]} ${year.slice(2)}` : MONTHS[Number(month) - 1];
   }
   const [, month, date] = day.split("-");

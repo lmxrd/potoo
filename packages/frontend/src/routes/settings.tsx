@@ -14,7 +14,7 @@ import {
 } from "potoo-sdk/react-query";
 import { errorMessage } from "../lib/api";
 import { DATE_FORMATS, formatDate, formatTime } from "../lib/dates";
-import { THEMES, applyTheme, parseTheme, themeJson, type Theme } from "../lib/theme";
+import { THEMES, applyTheme, parseTheme, sameTheme, themeJson, type Theme } from "../lib/theme";
 import { Checkbox } from "../components/ui/checkbox";
 import { Label } from "../components/ui/label";
 import {
@@ -185,10 +185,6 @@ function TimeFormat({ current }: { current: boolean }) {
       <ErrorText>{error}</ErrorText>
     </div>
   );
-}
-
-function sameTheme(a: Theme, b: Theme): boolean {
-  return a.base === b.base && a.accent.toLowerCase() === b.accent.toLowerCase();
 }
 
 /**

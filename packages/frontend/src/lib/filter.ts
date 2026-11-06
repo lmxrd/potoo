@@ -16,7 +16,9 @@ import { storedValue } from "./labels";
 /**
  * The dashboard's filters, as RSQL in the page's `?q=` param: equality
  * comparisons of the facets, OR (`,`) within a facet and AND (`;`) across
- * facets — for example `country==NO,country==DE;path==/pricing`.
+ * facets — for example `path==/pricing;(country==no,country==de)`. AND binds
+ * tighter than OR in RSQL, so an OR group next to an AND needs its
+ * parentheses (buildFilter writes them).
  */
 
 /** Each facet a filter can select, with its label: the dashboard's breakdowns. */
