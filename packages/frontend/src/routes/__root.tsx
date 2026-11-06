@@ -91,7 +91,9 @@ function UserMenu({ user }: { user: User }) {
         <DropdownMenuItem render={<Link to="/settings" />}>Settings</DropdownMenuItem>
         {user.is_admin && (
           <>
-            <DropdownMenuItem render={<Link to="/users" />}>Admin settings</DropdownMenuItem>
+            <DropdownMenuItem render={<Link to="/settings/admin/users" />}>
+              Admin settings
+            </DropdownMenuItem>
             <DropdownMenuItem render={<Link to="/import" />}>Import hits</DropdownMenuItem>
           </>
         )}

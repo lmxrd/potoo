@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import {
   changeUserRoleMutation,
   createUserMutation,
@@ -14,15 +14,11 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { ErrorText } from "../components/common/error-text";
 import { Input } from "../components/ui/input";
-import { SsoTab } from "../components/admin/sso-tab";
 import { errorMessage } from "../lib/api";
 import { Checkbox } from "../components/ui/checkbox";
 import { useConfirm } from "../components/common/confirm-dialog";
 
-export const Route = createFileRoute("/users")({
-  beforeLoad: ({ context }) => {
-    if (!context.session.user?.is_admin) throw redirect({ to: "/" });
-  },
+export const Route = createFileRoute("/settings/admin/users")({
   component: Users,
 });
 
@@ -59,7 +55,6 @@ function Users() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">Admin settings</h1>
       <ErrorText>{error && errorMessage(error)}</ErrorText>
       <Card>
         <CardHeader>
@@ -256,14 +251,6 @@ function Users() {
               Without a password, the user signs in with single sign-on.
             </p>
           )}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Single sign-on</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <SsoTab />
         </CardContent>
       </Card>
     </div>

@@ -15,8 +15,15 @@ import { Route as LoginRouteImport } from "./routes/login";
 import { Route as SettingsRouteImport } from "./routes/settings";
 import { Route as SetupRouteImport } from "./routes/setup";
 import { Route as SitesRouteImport } from "./routes/sites";
-import { Route as UsersRouteImport } from "./routes/users";
+import { Route as SettingsIndexRouteImport } from "./routes/settings.index";
+import { Route as SettingsAccountRouteImport } from "./routes/settings.account";
+import { Route as SettingsAdminRouteImport } from "./routes/settings.admin";
+import { Route as SettingsAppearanceRouteImport } from "./routes/settings.appearance";
+import { Route as SettingsPasswordRouteImport } from "./routes/settings.password";
 import { Route as SitesSiteIdRouteImport } from "./routes/sites_.$siteId";
+import { Route as SettingsAdminIndexRouteImport } from "./routes/settings.admin.index";
+import { Route as SettingsAdminSsoRouteImport } from "./routes/settings.admin.sso";
+import { Route as SettingsAdminUsersRouteImport } from "./routes/settings.admin.users";
 
 const IndexRoute = IndexRouteImport.update({
   id: "/",
@@ -48,47 +55,101 @@ const SitesRoute = SitesRouteImport.update({
   path: "/sites",
   getParentRoute: () => rootRouteImport,
 } as any);
-const UsersRoute = UsersRouteImport.update({
-  id: "/users",
-  path: "/users",
-  getParentRoute: () => rootRouteImport,
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => SettingsRoute,
+} as any);
+const SettingsAccountRoute = SettingsAccountRouteImport.update({
+  id: "/account",
+  path: "/account",
+  getParentRoute: () => SettingsRoute,
+} as any);
+const SettingsAdminRoute = SettingsAdminRouteImport.update({
+  id: "/admin",
+  path: "/admin",
+  getParentRoute: () => SettingsRoute,
+} as any);
+const SettingsAppearanceRoute = SettingsAppearanceRouteImport.update({
+  id: "/appearance",
+  path: "/appearance",
+  getParentRoute: () => SettingsRoute,
+} as any);
+const SettingsPasswordRoute = SettingsPasswordRouteImport.update({
+  id: "/password",
+  path: "/password",
+  getParentRoute: () => SettingsRoute,
 } as any);
 const SitesSiteIdRoute = SitesSiteIdRouteImport.update({
   id: "/sites_/$siteId",
   path: "/sites/$siteId",
   getParentRoute: () => rootRouteImport,
 } as any);
+const SettingsAdminIndexRoute = SettingsAdminIndexRouteImport.update({
+  id: "/",
+  path: "/",
+  getParentRoute: () => SettingsAdminRoute,
+} as any);
+const SettingsAdminSsoRoute = SettingsAdminSsoRouteImport.update({
+  id: "/sso",
+  path: "/sso",
+  getParentRoute: () => SettingsAdminRoute,
+} as any);
+const SettingsAdminUsersRoute = SettingsAdminUsersRouteImport.update({
+  id: "/users",
+  path: "/users",
+  getParentRoute: () => SettingsAdminRoute,
+} as any);
 
 export interface FileRoutesByFullPath {
   "/": typeof IndexRoute;
   "/import": typeof ImportRoute;
   "/login": typeof LoginRoute;
-  "/settings": typeof SettingsRoute;
+  "/settings": typeof SettingsRouteWithChildren;
   "/setup": typeof SetupRoute;
   "/sites": typeof SitesRoute;
-  "/users": typeof UsersRoute;
+  "/settings/account": typeof SettingsAccountRoute;
+  "/settings/admin": typeof SettingsAdminRouteWithChildren;
+  "/settings/appearance": typeof SettingsAppearanceRoute;
+  "/settings/password": typeof SettingsPasswordRoute;
   "/sites/$siteId": typeof SitesSiteIdRoute;
+  "/settings/": typeof SettingsIndexRoute;
+  "/settings/admin/sso": typeof SettingsAdminSsoRoute;
+  "/settings/admin/users": typeof SettingsAdminUsersRoute;
+  "/settings/admin/": typeof SettingsAdminIndexRoute;
 }
 export interface FileRoutesByTo {
   "/": typeof IndexRoute;
   "/import": typeof ImportRoute;
   "/login": typeof LoginRoute;
-  "/settings": typeof SettingsRoute;
   "/setup": typeof SetupRoute;
   "/sites": typeof SitesRoute;
-  "/users": typeof UsersRoute;
+  "/settings/account": typeof SettingsAccountRoute;
+  "/settings/appearance": typeof SettingsAppearanceRoute;
+  "/settings/password": typeof SettingsPasswordRoute;
   "/sites/$siteId": typeof SitesSiteIdRoute;
+  "/settings": typeof SettingsIndexRoute;
+  "/settings/admin/sso": typeof SettingsAdminSsoRoute;
+  "/settings/admin/users": typeof SettingsAdminUsersRoute;
+  "/settings/admin": typeof SettingsAdminIndexRoute;
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport;
   "/": typeof IndexRoute;
   "/import": typeof ImportRoute;
   "/login": typeof LoginRoute;
-  "/settings": typeof SettingsRoute;
+  "/settings": typeof SettingsRouteWithChildren;
   "/setup": typeof SetupRoute;
   "/sites": typeof SitesRoute;
-  "/users": typeof UsersRoute;
+  "/settings/account": typeof SettingsAccountRoute;
+  "/settings/admin": typeof SettingsAdminRouteWithChildren;
+  "/settings/appearance": typeof SettingsAppearanceRoute;
+  "/settings/password": typeof SettingsPasswordRoute;
   "/sites_/$siteId": typeof SitesSiteIdRoute;
+  "/settings/": typeof SettingsIndexRoute;
+  "/settings/admin/sso": typeof SettingsAdminSsoRoute;
+  "/settings/admin/users": typeof SettingsAdminUsersRoute;
+  "/settings/admin/": typeof SettingsAdminIndexRoute;
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath;
@@ -99,18 +160,30 @@ export interface FileRouteTypes {
     | "/settings"
     | "/setup"
     | "/sites"
-    | "/users"
-    | "/sites/$siteId";
+    | "/settings/account"
+    | "/settings/admin"
+    | "/settings/appearance"
+    | "/settings/password"
+    | "/sites/$siteId"
+    | "/settings/"
+    | "/settings/admin/sso"
+    | "/settings/admin/users"
+    | "/settings/admin/";
   fileRoutesByTo: FileRoutesByTo;
   to:
     | "/"
     | "/import"
     | "/login"
-    | "/settings"
     | "/setup"
     | "/sites"
-    | "/users"
-    | "/sites/$siteId";
+    | "/settings/account"
+    | "/settings/appearance"
+    | "/settings/password"
+    | "/sites/$siteId"
+    | "/settings"
+    | "/settings/admin/sso"
+    | "/settings/admin/users"
+    | "/settings/admin";
   id:
     | "__root__"
     | "/"
@@ -119,18 +192,24 @@ export interface FileRouteTypes {
     | "/settings"
     | "/setup"
     | "/sites"
-    | "/users"
-    | "/sites_/$siteId";
+    | "/settings/account"
+    | "/settings/admin"
+    | "/settings/appearance"
+    | "/settings/password"
+    | "/sites_/$siteId"
+    | "/settings/"
+    | "/settings/admin/sso"
+    | "/settings/admin/users"
+    | "/settings/admin/";
   fileRoutesById: FileRoutesById;
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute;
   ImportRoute: typeof ImportRoute;
   LoginRoute: typeof LoginRoute;
-  SettingsRoute: typeof SettingsRoute;
+  SettingsRoute: typeof SettingsRouteWithChildren;
   SetupRoute: typeof SetupRoute;
   SitesRoute: typeof SitesRoute;
-  UsersRoute: typeof UsersRoute;
   SitesSiteIdRoute: typeof SitesSiteIdRoute;
 }
 
@@ -178,12 +257,40 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof SitesRouteImport;
       parentRoute: typeof rootRouteImport;
     };
-    "/users": {
-      id: "/users";
-      path: "/users";
-      fullPath: "/users";
-      preLoaderRoute: typeof UsersRouteImport;
-      parentRoute: typeof rootRouteImport;
+    "/settings/": {
+      id: "/settings/";
+      path: "/";
+      fullPath: "/settings/";
+      preLoaderRoute: typeof SettingsIndexRouteImport;
+      parentRoute: typeof SettingsRoute;
+    };
+    "/settings/account": {
+      id: "/settings/account";
+      path: "/account";
+      fullPath: "/settings/account";
+      preLoaderRoute: typeof SettingsAccountRouteImport;
+      parentRoute: typeof SettingsRoute;
+    };
+    "/settings/admin": {
+      id: "/settings/admin";
+      path: "/admin";
+      fullPath: "/settings/admin";
+      preLoaderRoute: typeof SettingsAdminRouteImport;
+      parentRoute: typeof SettingsRoute;
+    };
+    "/settings/appearance": {
+      id: "/settings/appearance";
+      path: "/appearance";
+      fullPath: "/settings/appearance";
+      preLoaderRoute: typeof SettingsAppearanceRouteImport;
+      parentRoute: typeof SettingsRoute;
+    };
+    "/settings/password": {
+      id: "/settings/password";
+      path: "/password";
+      fullPath: "/settings/password";
+      preLoaderRoute: typeof SettingsPasswordRouteImport;
+      parentRoute: typeof SettingsRoute;
     };
     "/sites_/$siteId": {
       id: "/sites_/$siteId";
@@ -192,17 +299,73 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof SitesSiteIdRouteImport;
       parentRoute: typeof rootRouteImport;
     };
+    "/settings/admin/": {
+      id: "/settings/admin/";
+      path: "/";
+      fullPath: "/settings/admin/";
+      preLoaderRoute: typeof SettingsAdminIndexRouteImport;
+      parentRoute: typeof SettingsAdminRoute;
+    };
+    "/settings/admin/sso": {
+      id: "/settings/admin/sso";
+      path: "/sso";
+      fullPath: "/settings/admin/sso";
+      preLoaderRoute: typeof SettingsAdminSsoRouteImport;
+      parentRoute: typeof SettingsAdminRoute;
+    };
+    "/settings/admin/users": {
+      id: "/settings/admin/users";
+      path: "/users";
+      fullPath: "/settings/admin/users";
+      preLoaderRoute: typeof SettingsAdminUsersRouteImport;
+      parentRoute: typeof SettingsAdminRoute;
+    };
   }
 }
+
+interface SettingsAdminRouteChildren {
+  SettingsAdminSsoRoute: typeof SettingsAdminSsoRoute;
+  SettingsAdminUsersRoute: typeof SettingsAdminUsersRoute;
+  SettingsAdminIndexRoute: typeof SettingsAdminIndexRoute;
+}
+
+const SettingsAdminRouteChildren: SettingsAdminRouteChildren = {
+  SettingsAdminSsoRoute: SettingsAdminSsoRoute,
+  SettingsAdminUsersRoute: SettingsAdminUsersRoute,
+  SettingsAdminIndexRoute: SettingsAdminIndexRoute,
+};
+
+const SettingsAdminRouteWithChildren = SettingsAdminRoute._addFileChildren(
+  SettingsAdminRouteChildren,
+);
+
+interface SettingsRouteChildren {
+  SettingsAccountRoute: typeof SettingsAccountRoute;
+  SettingsAdminRoute: typeof SettingsAdminRouteWithChildren;
+  SettingsAppearanceRoute: typeof SettingsAppearanceRoute;
+  SettingsPasswordRoute: typeof SettingsPasswordRoute;
+  SettingsIndexRoute: typeof SettingsIndexRoute;
+}
+
+const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsAccountRoute: SettingsAccountRoute,
+  SettingsAdminRoute: SettingsAdminRouteWithChildren,
+  SettingsAppearanceRoute: SettingsAppearanceRoute,
+  SettingsPasswordRoute: SettingsPasswordRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
+};
+
+const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
+  SettingsRouteChildren,
+);
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ImportRoute: ImportRoute,
   LoginRoute: LoginRoute,
-  SettingsRoute: SettingsRoute,
+  SettingsRoute: SettingsRouteWithChildren,
   SetupRoute: SetupRoute,
   SitesRoute: SitesRoute,
-  UsersRoute: UsersRoute,
   SitesSiteIdRoute: SitesSiteIdRoute,
 };
 export const routeTree = rootRouteImport

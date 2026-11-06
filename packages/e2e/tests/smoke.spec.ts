@@ -51,7 +51,7 @@ let app: Authenticator | undefined;
 
 test("two-factor authentication: set up, then sign in with a code", async ({ page }) => {
   await signIn(page);
-  await page.goto("/settings");
+  await page.goto("/settings/password");
   await page.getByRole("button", { name: "Set up" }).click();
   app = new Authenticator((await page.locator("code").first().textContent())!.trim());
   await page.getByPlaceholder("Code from the app").fill(await app.code());
