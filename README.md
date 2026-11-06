@@ -101,6 +101,16 @@ Mac builds it too; `ARCH=amd64` or `arm64` builds the other architecture.
 Behind a reverse proxy, set `TRUST_PROXY=1` so the client IP is read from
 `X-Forwarded-For`, and terminate TLS there.
 
+### Staying up to date
+
+Dependencies and the image's base are updated automatically, and a security
+fix leads to a patch release (`1.2.3` → `1.2.4`). To pick those up without
+taking new features unannounced, run the minor tag (`ghcr.io/lmxrd/potoo:1.2`)
+and pull it regularly, or let a tool such as
+[Watchtower](https://containrrr.dev/watchtower/) or
+[Diun](https://crazymax.dev/diun/) do it or tell you. `latest` follows every
+release.
+
 ### A single binary
 
 With [mise](https://mise.jdx.dev) (or Rust and [pnpm](https://pnpm.io) directly)

@@ -14,6 +14,9 @@ rust = {
 # so that it builds on a Mac too.
 zig = "0.15.2"
 "github:rust-cross/cargo-zigbuild" = "0.24.0"
+# The vulnerability scanners of `mise run audit` and `audit:image`.
+"aqua:google/osv-scanner" = "2.7.0"
+"aqua:aquasecurity/trivy" = "0.76.1"
 
 # Development: the Rust backend on :8000 (with the Vite proxy in front of
 # the frontend for /api), or the frontend dev server alone.
@@ -170,6 +173,20 @@ depends = ["build:frontend"]
 run = "cargo test"
 sources = ["src/**/*", "tests/**/*", "migrations/**/*", "Cargo.toml", "Cargo.lock"]
 dir = "{{ config_root }}/backend"
+
+# Known vulnerabilities in the locked dependencies (the OSV database, which
+# has the RustSec and GitHub advisories). Every day in CI (security.yml), as
+# new advisories come out for dependencies that did not change. A finding
+# to accept goes in osv-scanner.toml, with the reason.
+[tasks.audit]
+run = "osv-scanner scan source --lockfile backend/Cargo.lock --lockfile frontend/pnpm-lock.yaml"
+dir = "{{ config_root }}"
+
+# Known vulnerabilities in an image (its Alpine packages): the fixable HIGH
+# and CRITICAL ones fail. IMAGE picks it, by default the published one; CI
+# scans the one it builds. The binary is static, so this is about the base.
+[tasks."audit:image"]
+run = 'trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "${IMAGE:-ghcr.io/lmxrd/potoo:latest}"'
 
 # Write load against the production image in a 2 CPU, 2 GB container; see
 # scripts/loadtest.sh for the settings (CPUS, MEMORY, RATES, DURATION).
