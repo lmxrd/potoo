@@ -23,6 +23,8 @@ async fn main() -> anyhow::Result<()> {
     // TLS stack is ring rather than aws-lc; reqwest is built without a
     // provider and uses this default one.
     potoo::install_tls_provider();
+    // The dummy password hash is made now, so the first sign-in it serves is not slower.
+    potoo::auth::warm_up();
 
     let port: u16 = std::env::var("PORT")
         .ok()

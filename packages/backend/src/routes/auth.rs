@@ -1,5 +1,6 @@
 use crate::auth::{
-    CurrentUser, DATE_FORMATS, SessionUser, User, hash_password, require_admin, verify_password,
+    CurrentUser, DATE_FORMATS, SessionOnlyUser, User, hash_password, require_admin,
+    verify_password, verify_user_password,
 };
 use crate::error::{ApiError, ErrorBody};
 use crate::extract::ApiJson;
@@ -272,9 +273,10 @@ async fn bootstrap(
         .backend
         .get_user(&id)
         .await?
-        .ok_or_else(|| ApiError::internal("the new admin is gone"))?;
-    sessions::sign_in(&mut auth, &user).await?;
-    Ok((StatusCode::CREATED, Json(user)).into_response())
+        .ok_or_else(|| ApiError::internal("the new admin is gone"))?
+        .user;
+    let jar = sessions::sign_in(&mut auth, &state, &user).await?;
+    Ok((StatusCode::CREATED, jar, Json(user)).into_response())
 }
 
 #[utoipa::path(
@@ -319,15 +321,24 @@ async fn login(
     state.limits.email(&email)?;
 
     // The same work and the same answer whether or not the user exists,
-    // or has a password (see `sessions::Backend::authenticate`).
-    let user = auth
-        .authenticate(sessions::Credentials {
-            email,
-            password: creds.password,
-        })
-        .await
-        .map_err(anyhow::Error::new)?;
-    let Some(user) = user else {
+    // or has a password (`verify_user_password`).
+    let found: Option<(Uuid, Option<String>)> =
+        sqlx::query_as("SELECT id, password_hash FROM users WHERE email = ?1")
+            .bind(&email)
+            .fetch_optional(state.db.reader())
+            .await?;
+    let user = match &found {
+        Some((id, hash)) if verify_user_password(&creds.password, hash.as_deref()) => {
+            sessions::session_user(&state.db, *id).await?
+        }
+        _ => {
+            if found.is_none() {
+                verify_user_password(&creds.password, None);
+            }
+            None
+        }
+    };
+    let Some(user) = user.map(|s| s.user) else {
         return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "Invalid email or password",
@@ -343,8 +354,8 @@ async fn login(
         )
             .into_response());
     }
-    sessions::sign_in(&mut auth, &user).await?;
-    Ok(StatusCode::NO_CONTENT.into_response())
+    let jar = sessions::sign_in(&mut auth, &state, &user).await?;
+    Ok((StatusCode::NO_CONTENT, jar).into_response())
 }
 
 /// The password was right, and two-factor authentication is the next step.
@@ -394,7 +405,7 @@ async fn logout(mut auth: AuthSession) -> Result<Response, ApiError> {
 async fn update_me(
     State(state): State<AppState>,
     auth: AuthSession,
-    user: SessionUser,
+    user: SessionOnlyUser,
     ApiJson(body): ApiJson<UpdateMe>,
 ) -> Result<Json<User>, ApiError> {
     if body.email.is_none()
@@ -455,7 +466,8 @@ async fn update_me(
         .backend
         .get_user(&user.0.id)
         .await?
-        .ok_or_else(ApiError::unauthorized)?;
+        .ok_or_else(ApiError::unauthorized)?
+        .user;
     Ok(Json(updated))
 }
 
@@ -479,7 +491,7 @@ async fn update_me(
 )]
 async fn change_password(
     State(state): State<AppState>,
-    user: SessionUser,
+    user: SessionOnlyUser,
     mut auth: AuthSession,
     ApiJson(body): ApiJson<ChangePassword>,
 ) -> Result<Response, ApiError> {

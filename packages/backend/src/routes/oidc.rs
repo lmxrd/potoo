@@ -157,7 +157,7 @@ async fn callback(
         CookieJar::new()
     };
     match sign_in(&state, &mut auth, &headers, params, login).await {
-        Ok(Ok(SignedIn::Session)) => (logins, Redirect::to("/")).into_response(),
+        Ok(Ok(SignedIn::Session(jar))) => (logins, jar, Redirect::to("/")).into_response(),
         Ok(Ok(SignedIn::Step(challenge, step))) => {
             (logins, challenge, Redirect::to(step.page())).into_response()
         }
@@ -211,15 +211,16 @@ async fn sign_in(
         .backend
         .get_user(&user_id)
         .await?
-        .ok_or_else(|| ApiError::internal("the signed-in user is gone"))?;
-    sessions::sign_in(auth, &user).await?;
-    Ok(Ok(SignedIn::Session))
+        .ok_or_else(|| ApiError::internal("the signed-in user is gone"))?
+        .user;
+    let jar = sessions::sign_in(auth, state, &user).await?;
+    Ok(Ok(SignedIn::Session(jar)))
 }
 
 /// What a callback that proved who the user is leads to.
 enum SignedIn {
-    /// Signed in: the session cookie is set.
-    Session,
+    /// Signed in: the session cookie is set (and the jar clears an old one).
+    Session(CookieJar),
     /// Two-factor authentication first, on the login page.
     Step(SignedCookieJar, Step),
 }

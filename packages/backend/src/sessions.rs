@@ -13,11 +13,12 @@
 //! password or the two-factor secret signs the user's other sessions out
 //! (the one that made the change signs in again: [`refresh`]).
 
-use crate::auth::{User, verify_password};
+use crate::auth::User;
 use crate::db::Db;
 use crate::error::ApiError;
 use crate::state::AppState;
 use async_trait::async_trait;
+use axum_extra::extract::cookie::{Cookie, CookieJar};
 use axum_login::AuthnBackend as _;
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -226,18 +227,27 @@ impl Backend {
     }
 }
 
-/// An email and a password, as the login form sends them.
+/// The signed-in user, with the hash that ties their sessions to their
+/// password and two-factor secret.
 #[derive(Clone)]
-pub struct Credentials {
-    pub email: String,
-    pub password: String,
+pub struct SessionOnlyUser {
+    pub user: User,
+    auth_hash: Vec<u8>,
 }
 
-impl axum_login::AuthUser for User {
+impl fmt::Debug for SessionOnlyUser {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SessionOnlyUser")
+            .field("id", &self.user.id)
+            .finish_non_exhaustive()
+    }
+}
+
+impl axum_login::AuthUser for SessionOnlyUser {
     type Id = Uuid;
 
     fn id(&self) -> Uuid {
-        self.id
+        self.user.id
     }
 
     fn session_auth_hash(&self) -> &[u8] {
@@ -245,17 +255,16 @@ impl axum_login::AuthUser for User {
     }
 }
 
-/// A valid hash to verify against when the user does not exist, so the
-/// answer takes the same time either way.
-fn dummy_hash() -> &'static str {
-    static DUMMY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-    DUMMY.get_or_init(|| crate::auth::hash_password("potoo-dummy"))
+/// SHA-256 of the password hash and the two-factor secret (each may be
+/// empty), separated by a NUL, which neither contains.
+fn auth_hash(password_hash: Option<&str>, totp_secret: Option<&str>) -> Vec<u8> {
+    Sha256::new()
+        .chain_update(password_hash.unwrap_or("").as_bytes())
+        .chain_update([0])
+        .chain_update(totp_secret.unwrap_or("").as_bytes())
+        .finalize()
+        .to_vec()
 }
-
-/// The columns of a [`User`], plus what its auth hash is made of.
-const USER_COLUMNS: &str = "id, email, is_admin, date_format, use_24, theme,
-    password_hash IS NOT NULL AS has_password, totp_secret IS NOT NULL AS totp_enabled,
-    password_hash, totp_secret";
 
 #[derive(sqlx::FromRow)]
 struct UserRow {
@@ -265,68 +274,73 @@ struct UserRow {
     totp_secret: Option<String>,
 }
 
-impl UserRow {
-    /// The user, with the hash of the credentials their sessions are
-    /// checked against: the password hash and the two-factor secret.
-    fn into_user(self) -> User {
-        let mut hasher = Sha256::new();
-        hasher.update(self.password_hash.as_deref().unwrap_or("").as_bytes());
-        hasher.update([0]);
-        hasher.update(self.totp_secret.as_deref().unwrap_or("").as_bytes());
-        User {
-            auth_hash: hasher.finalize().to_vec(),
-            ..self.user
-        }
-    }
+/// The user as a session holds them; `None` for a missing account.
+pub async fn session_user(db: &Db, user_id: Uuid) -> Result<Option<SessionOnlyUser>, ApiError> {
+    let row: Option<UserRow> = sqlx::query_as(
+        "SELECT id, email, is_admin, date_format, use_24, theme,
+            password_hash IS NOT NULL AS has_password, totp_secret IS NOT NULL AS totp_enabled,
+            password_hash, totp_secret
+         FROM users WHERE id = ?1",
+    )
+    .bind(user_id)
+    .fetch_optional(db.reader())
+    .await?;
+    Ok(row.map(|row| SessionOnlyUser {
+        auth_hash: auth_hash(row.password_hash.as_deref(), row.totp_secret.as_deref()),
+        user: row.user,
+    }))
 }
 
+/// axum-login's view of our users. Sign-in itself is ours (`routes::auth`,
+/// `routes::oidc`, `routes::totp`): they check the password, the code or
+/// the provider, then call [`sign_in`].
 impl axum_login::AuthnBackend for Backend {
-    type User = User;
-    type Credentials = Credentials;
-    type Error = sqlx::Error;
+    type User = SessionOnlyUser;
+    type Credentials = std::convert::Infallible;
+    type Error = ApiError;
 
-    /// The user of an email and a password. The same work whether or not
-    /// the user exists, or has a password.
-    async fn authenticate(&self, creds: Credentials) -> Result<Option<User>, sqlx::Error> {
-        let row: Option<UserRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {USER_COLUMNS} FROM users WHERE email = ?1"
-        )))
-        .bind(&creds.email)
-        .fetch_optional(self.db.reader())
-        .await?;
-        let hash = row
-            .as_ref()
-            .and_then(|r| r.password_hash.clone())
-            .unwrap_or_else(|| dummy_hash().to_string());
-        let valid = verify_password(&creds.password, &hash);
-        Ok(row
-            .filter(|r| valid && r.password_hash.is_some())
-            .map(UserRow::into_user))
+    async fn authenticate(
+        &self,
+        credentials: std::convert::Infallible,
+    ) -> Result<Option<SessionOnlyUser>, ApiError> {
+        match credentials {}
     }
 
-    async fn get_user(&self, id: &Uuid) -> Result<Option<User>, sqlx::Error> {
-        let row: Option<UserRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "SELECT {USER_COLUMNS} FROM users WHERE id = ?1"
-        )))
-        .bind(id)
-        .fetch_optional(self.db.reader())
-        .await?;
-        Ok(row.map(UserRow::into_user))
+    async fn get_user(&self, id: &Uuid) -> Result<Option<SessionOnlyUser>, ApiError> {
+        session_user(&self.db, *id).await
     }
 }
 
 fn login_error(e: axum_login::Error<Backend>) -> ApiError {
     match e {
-        axum_login::Error::Backend(e) => e.into(),
+        axum_login::Error::Backend(e) => e,
         axum_login::Error::Session(e) => anyhow::Error::new(e).context("session").into(),
     }
 }
 
-/// Sign the user in on this session (a new session id), lasting
-/// [`SESSION_TTL_SECS`].
-pub async fn sign_in(auth: &mut AuthSession, user: &User) -> Result<(), ApiError> {
-    auth.login(user).await.map_err(login_error)?;
-    keep_until(auth, jiff::Timestamp::now().as_second() + SESSION_TTL_SECS).await
+/// Start a session for `user` (after their password, code or provider was
+/// checked), lasting [`SESSION_TTL_SECS`]. Over https, the answer also clears
+/// a plain-named session cookie from before the site used the `__Host-`
+/// prefix (the jar to answer with).
+pub async fn sign_in(
+    auth: &mut AuthSession,
+    state: &AppState,
+    user: &User,
+) -> Result<CookieJar, ApiError> {
+    let session_user = session_user(&state.db, user.id)
+        .await?
+        .ok_or_else(ApiError::unauthorized)?;
+    auth.login(&session_user).await.map_err(login_error)?;
+    keep_until(auth, jiff::Timestamp::now().as_second() + SESSION_TTL_SECS).await?;
+    let mut jar = CookieJar::new();
+    if state.secure_cookies {
+        let mut old = Cookie::new(SESSION_COOKIE, "");
+        old.set_path("/");
+        old.set_secure(true);
+        old.make_removal();
+        jar = jar.add(old);
+    }
+    Ok(jar)
 }
 
 async fn keep_until(auth: &AuthSession, unix_seconds: i64) -> Result<(), ApiError> {
@@ -381,6 +395,16 @@ mod tests {
             data: HashMap::from([("k".to_string(), serde_json::json!("v"))]),
             expiry_date: OffsetDateTime::from_unix_timestamp(expiry_date.unix_timestamp()).unwrap(),
         }
+    }
+
+    #[test]
+    fn the_hash_changes_with_the_password_and_the_secret() {
+        let base = auth_hash(Some("a"), None);
+        assert_ne!(base, auth_hash(Some("b"), None));
+        assert_ne!(base, auth_hash(Some("a"), Some("S")));
+        assert_eq!(base, auth_hash(Some("a"), Some("")));
+        // The separator keeps "ab" + "" apart from "a" + "b".
+        assert_ne!(auth_hash(Some("ab"), None), auth_hash(Some("a"), Some("b")));
     }
 
     #[tokio::test]

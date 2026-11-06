@@ -39,11 +39,6 @@ pub struct User {
     pub has_password: bool,
     /// Whether a code from an authenticator app is asked for at sign-in.
     pub totp_enabled: bool,
-    /// The hash of the credentials the user's sessions are checked against
-    /// (see `session.rs`); never sent.
-    #[serde(skip)]
-    #[sqlx(default)]
-    pub auth_hash: Vec<u8>,
 }
 
 // Not derived: the auth hash stays out of logs.
@@ -64,6 +59,31 @@ pub fn hash_password(password: &str) -> String {
         .to_string()
 }
 
+/// A hash of nothing anyone knows, checked when there is no real one (an
+/// unknown email, or an account without a password), so that answer takes as
+/// long as a wrong password.
+static DUMMY_HASH: std::sync::LazyLock<String> =
+    std::sync::LazyLock::new(|| hash_password(&crate::random::hex::<16>()));
+
+/// Make the dummy hash now (at start), so the first login it serves takes no
+/// longer than the rest.
+pub fn warm_up() {
+    std::sync::LazyLock::force(&DUMMY_HASH);
+}
+
+/// Verify a password against a user's stored hash. No hash never matches,
+/// after the same work as a wrong password.
+pub fn verify_user_password(password: &str, phc: Option<&str>) -> bool {
+    match phc {
+        Some(phc) => verify_password(password, phc),
+        None => {
+            verify_password(password, &DUMMY_HASH);
+            false
+        }
+    }
+}
+
+/// Verify a password against a stored PHC hash.
 pub fn verify_password(password: &str, stored: &str) -> bool {
     PasswordHash::new(stored)
         .ok()
@@ -160,7 +180,7 @@ pub async fn key_user<'e>(db: impl SqliteExecutor<'e>, token: &str) -> Option<(U
 /// else an API key (`Authorization: Bearer`), or a 401. A read key is
 /// refused anything but GET and HEAD (403); admin endpoints check the rest
 /// in [`require_admin`]. The account's own settings (email, password,
-/// two-factor authentication, API keys) take a [`SessionUser`] instead: no
+/// two-factor authentication, API keys) take a [`SessionOnlyUser`] instead: no
 /// key reaches them.
 pub struct CurrentUser {
     pub user: User,
@@ -191,7 +211,7 @@ impl FromRequestParts<AppState> for CurrentUser {
         let session = AuthSession::from_request_parts(parts, state)
             .await
             .map_err(|(_, e)| ApiError::internal(format!("no session layer: {e}")))?;
-        let user = session.user.ok_or_else(ApiError::unauthorized)?;
+        let user = session.user.ok_or_else(ApiError::unauthorized)?.user;
         Ok(CurrentUser {
             user,
             api_key: None,
@@ -201,9 +221,9 @@ impl FromRequestParts<AppState> for CurrentUser {
 
 /// The signed-in user of a session cookie only: an API key is refused
 /// (403), so a leaked key cannot change the account or make more keys.
-pub struct SessionUser(pub User);
+pub struct SessionOnlyUser(pub User);
 
-impl FromRequestParts<AppState> for SessionUser {
+impl FromRequestParts<AppState> for SessionOnlyUser {
     type Rejection = ApiError;
 
     async fn from_request_parts(
@@ -214,7 +234,7 @@ impl FromRequestParts<AppState> for SessionUser {
             CurrentUser {
                 user,
                 api_key: None,
-            } => Ok(SessionUser(user)),
+            } => Ok(SessionOnlyUser(user)),
             CurrentUser {
                 api_key: Some(_), ..
             } => Err(ApiError::forbidden("Not with an API key: sign in")),

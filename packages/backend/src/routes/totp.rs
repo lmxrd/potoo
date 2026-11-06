@@ -10,7 +10,7 @@
 //! the latter starts the session.
 
 use crate::auth::User;
-use crate::auth::{CurrentUser, SessionUser, require_admin};
+use crate::auth::{CurrentUser, SessionOnlyUser, require_admin};
 use crate::error::{ApiError, ErrorBody};
 use crate::extract::ApiJson;
 use crate::limits::UserAction;
@@ -61,11 +61,12 @@ async fn finish_sign_in(
         .backend
         .get_user(&user_id)
         .await?
-        .ok_or_else(ApiError::unauthorized)?;
-    sessions::sign_in(auth, &user).await?;
+        .ok_or_else(ApiError::unauthorized)?
+        .user;
+    let jar = sessions::sign_in(auth, state, &user).await?;
     let mut removal = totp::challenge(String::new(), state.secure_cookies);
     removal.make_removal();
-    Ok(CookieJar::new().add(removal))
+    Ok(jar.add(removal))
 }
 
 fn invalid_code() -> ApiError {
@@ -208,7 +209,7 @@ async fn login_enable(
 )]
 async fn setup(
     State(state): State<AppState>,
-    SessionUser(user): SessionUser,
+    SessionOnlyUser(user): SessionOnlyUser,
 ) -> Result<Json<TotpSetup>, ApiError> {
     Ok(Json(start_setup(&state, user.id, &user.email).await?))
 }
@@ -258,7 +259,7 @@ fn already_on() -> ApiError {
 )]
 async fn enable(
     State(state): State<AppState>,
-    SessionUser(user): SessionUser,
+    SessionOnlyUser(user): SessionOnlyUser,
     mut auth: AuthSession,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, ApiError> {
@@ -326,7 +327,7 @@ async fn confirm_setup(
 )]
 async fn disable(
     State(state): State<AppState>,
-    SessionUser(user): SessionUser,
+    SessionOnlyUser(user): SessionOnlyUser,
     mut auth: AuthSession,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, ApiError> {
@@ -365,7 +366,7 @@ async fn disable(
 )]
 async fn replace(
     State(state): State<AppState>,
-    SessionUser(user): SessionUser,
+    SessionOnlyUser(user): SessionOnlyUser,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, ApiError> {
     state.limits.user(UserAction::Code, user.id)?;
@@ -408,7 +409,7 @@ async fn replace(
 )]
 async fn confirm_replace(
     State(state): State<AppState>,
-    SessionUser(user): SessionUser,
+    SessionOnlyUser(user): SessionOnlyUser,
     mut auth: AuthSession,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, ApiError> {
@@ -457,7 +458,7 @@ async fn confirm_replace(
 )]
 async fn regenerate_recovery_codes(
     State(state): State<AppState>,
-    SessionUser(user): SessionUser,
+    SessionOnlyUser(user): SessionOnlyUser,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, ApiError> {
     state.limits.user(UserAction::Code, user.id)?;

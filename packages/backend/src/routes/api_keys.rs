@@ -2,7 +2,7 @@
 //! `Authorization: Bearer <token>`. Managed with the session only (a key
 //! cannot list, make or revoke keys); the token is shown once, on creation.
 
-use crate::auth::SessionUser;
+use crate::auth::SessionOnlyUser;
 use crate::auth::sha256_hex;
 use crate::auth::{API_KEY_PREFIX, Scope};
 use crate::error::{ApiError, ErrorBody};
@@ -107,7 +107,7 @@ const COLUMNS: &str = "id, name, prefix, scope, created_at, last_used_at, expire
 )]
 async fn list_keys(
     State(state): State<AppState>,
-    SessionUser(user): SessionUser,
+    SessionOnlyUser(user): SessionOnlyUser,
 ) -> Result<Json<Vec<ApiKey>>, ApiError> {
     let rows: Vec<ApiKeyRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {COLUMNS} FROM api_keys WHERE user_id = ?1 ORDER BY id DESC"
@@ -138,7 +138,7 @@ async fn list_keys(
 )]
 async fn create_key(
     State(state): State<AppState>,
-    SessionUser(user): SessionUser,
+    SessionOnlyUser(user): SessionOnlyUser,
     ApiJson(body): ApiJson<CreateApiKey>,
 ) -> Result<Response, ApiError> {
     let name = body.name.trim();
@@ -218,7 +218,7 @@ async fn create_key(
 )]
 async fn revoke_key(
     State(state): State<AppState>,
-    SessionUser(user): SessionUser,
+    SessionOnlyUser(user): SessionOnlyUser,
     Path(id): Path<Uuid>,
 ) -> Result<Response, ApiError> {
     let deleted = sqlx::query("DELETE FROM api_keys WHERE id = ?1 AND user_id = ?2")
