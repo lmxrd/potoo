@@ -27,7 +27,7 @@ it provides Rust, Node, pnpm and the other tools at their pinned versions).
 Run `mise run check` and `mise run test` before you call a change done
 (`--force` runs a task that would be skipped).
 Tasks with `sources`/`outputs` in `mise.toml` are skipped when unchanged,
-so a repeat run is instant. Use `DATABASE_PATH=/some/tmp/potoo.db` when
+so a repeat run is instant. Use `DATABASE_URL=sqlite:/some/tmp/potoo.db` when
 you run the server or the seed and must not touch `data/`, and
 `GEOIP_URL=` (empty) so the server does not download the GeoIP database.
 The environment variables are in the README's Configuration table.

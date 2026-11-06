@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8000);
-    let db_path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "data/potoo.db".into());
+    let db_path = potoo::config::database_path().map_err(anyhow::Error::msg)?;
     let geo_path = std::env::var("GEOIP_DB_PATH").unwrap_or_else(|_| "data/country.mmdb".into());
     // Set GEOIP_URL to another URL, or to an empty string to never
     // download anything.

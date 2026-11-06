@@ -86,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
     // Deterministic: the same seed gives the same data.
     let mut rng = StdRng::seed_from_u64(42);
 
-    let path = std::env::var("DATABASE_PATH").unwrap_or_else(|_| "data/potoo.db".into());
+    let path = potoo::config::database_path().map_err(anyhow::Error::msg)?;
     let db = db::open(&path).await;
     let pool = db.writer();
 

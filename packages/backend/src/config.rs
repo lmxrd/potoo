@@ -17,6 +17,27 @@ pub fn public_url() -> Option<String> {
     var("PUBLIC_URL").map(|u| u.trim_end_matches('/').to_string())
 }
 
+/// The database's file, from `DATABASE_URL` (default `sqlite:data/potoo.db`).
+/// A URL rather than a path, so another database could take its place
+/// later; for now it must be SQLite (`sqlite:path`, `sqlite://path`, with
+/// sqlx's options such as `?mode=rwc` allowed).
+pub fn database_path() -> Result<String, String> {
+    parse_database_url(&var("DATABASE_URL").unwrap_or_else(|| "sqlite:data/potoo.db".into()))
+}
+
+/// [`database_path`] for a value already read.
+pub fn parse_database_url(url: &str) -> Result<String, String> {
+    use std::str::FromStr;
+    if !url.starts_with("sqlite:") {
+        return Err(format!(
+            "DATABASE_URL must be a SQLite URL (sqlite:path), not `{url}`"
+        ));
+    }
+    let options = sqlx::sqlite::SqliteConnectOptions::from_str(url)
+        .map_err(|e| format!("DATABASE_URL is not a valid SQLite URL: {e}"))?;
+    Ok(options.get_filename().to_string_lossy().into_owned())
+}
+
 /// A yes/no setting: `1`/`0`, `true`/`false`, `yes`/`no` or `on`/`off` (any
 /// case); `None` while unset or blank. Anything else is an error, so a typo
 /// stops the server instead of silently meaning "off".
@@ -40,6 +61,24 @@ pub fn parse_flag(name: &str, value: &str) -> Result<Option<bool>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_database_url_names_a_sqlite_file() {
+        assert_eq!(
+            parse_database_url("sqlite:data/potoo.db").unwrap(),
+            "data/potoo.db"
+        );
+        assert_eq!(
+            parse_database_url("sqlite:///data/potoo.db").unwrap(),
+            "/data/potoo.db"
+        );
+        assert_eq!(
+            parse_database_url("sqlite:/data/potoo.db?mode=rwc").unwrap(),
+            "/data/potoo.db"
+        );
+        assert!(parse_database_url("postgres://db/potoo").is_err());
+        assert!(parse_database_url("data/potoo.db").is_err());
+    }
 
     #[test]
     fn flags_take_the_usual_spellings_and_refuse_the_rest() {

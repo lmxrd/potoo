@@ -245,7 +245,7 @@ are not checked for duplicates.
 | Variable             | Default             | Purpose                                                                                                                                     |
 | -------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PORT`               | `8000`              | HTTP port                                                                                                                                   |
-| `DATABASE_PATH`      | `data/potoo.db`     | SQLite file                                                                                                                                 |
+| `DATABASE_URL`       | `sqlite:data/potoo.db` | The database, as a URL. SQLite only for now: `sqlite:` and the file's path, e.g. `sqlite:/data/potoo.db`                               |
 | `SQLITE_SYNCHRONOUS` | `NORMAL`            | How hard SQLite syncs to disk: `NORMAL` is fast and safe (a power cut can lose the last few hits, never corrupt); `FULL` syncs every commit |
 | `GEOIP_DB_PATH`      | `data/country.mmdb` | MaxMind-format country DB. Downloaded from DB-IP on boot when missing or older than a week, and refreshed weekly (the current month's file, or last month's until the new one is published)                            |
 | `GEOIP_URL`          | unset               | Override the download URL, e.g. your own mirror. Empty string disables downloading; a missing file then leaves country empty                |
@@ -397,6 +397,9 @@ does:
   numbers. The upgrade converts them, keeping every relation; it rewrites
   the hits table, so on a large database it takes a while. Today's unique
   visitors may be counted twice across the upgrade.
+- **`DATABASE_PATH` is now `DATABASE_URL`**, a database URL:
+  `DATABASE_PATH=/data/potoo.db` becomes `DATABASE_URL=sqlite:/data/potoo.db`
+  (the image sets it already).
 - **`RUST_LOG`** now picks what is logged (default `info`).
 
 ## The API
