@@ -39,7 +39,7 @@ export function themeJson(theme: Theme): string {
  * The color to put on the accent: whichever of black and white contrasts
  * more with it, so a light accent (amber, sky) gets dark text.
  */
-function accentInk(accent: string): string {
+export function accentInk(accent: string): string {
   const hex = accent.replace("#", "");
   if (hex.length !== 6) return "#ffffff";
   const channel = (i: number) => {
@@ -50,10 +50,14 @@ function accentInk(accent: string): string {
   return luminance > 0.18 ? "#0f172a" : "#ffffff";
 }
 
-/** Apply a theme to the page: the base as data-theme, the accent inline. */
+/**
+ * Apply a theme to the page: the base as data-theme, the accent inline as
+ * `--accent-color` (shadcn's `--primary` and everything derived from it read
+ * it) and the color on it as `--on-accent-color`.
+ */
 export function applyTheme(theme: Theme) {
   const root = document.documentElement;
   root.dataset.theme = theme.base;
-  root.style.setProperty("--accent", theme.accent);
-  root.style.setProperty("--accent-ink", accentInk(theme.accent));
+  root.style.setProperty("--accent-color", theme.accent);
+  root.style.setProperty("--on-accent-color", accentInk(theme.accent));
 }

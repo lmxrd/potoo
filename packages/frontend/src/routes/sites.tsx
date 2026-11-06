@@ -2,12 +2,20 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { createSiteMutation, listSitesOptions, listSitesQueryKey } from "potoo-sdk/react-query";
-import { Button } from "../components/button";
-import { Card } from "../components/card";
+import { Button } from "../components/ui/button";
+import { Card, CardContent } from "../components/ui/card";
 import { ErrorText } from "../components/error-text";
-import { Input } from "../components/input";
+import { Input } from "../components/ui/input";
 import { errorMessage } from "../lib/api";
 import { formatDate } from "../lib/dates";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../components/ui/table";
 
 export const Route = createFileRoute("/sites")({ component: SitesPage });
 
@@ -52,42 +60,44 @@ function SitesPage() {
         </form>
       )}
       <Card>
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left text-muted">
-              <th className="py-2 font-medium">Hostname</th>
-              <th className="py-2 font-medium">Created</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-line">
-            {sites?.length === 0 && (
-              <tr>
-                <td colSpan={2} className="py-2 text-muted">
-                  No sites yet.
-                </td>
-              </tr>
-            )}
-            {sites?.map((s) => (
-              <tr
-                key={s.id}
-                className="cursor-pointer hover:bg-subtle"
-                onClick={() =>
-                  navigate({
-                    to: "/sites/$siteId",
-                    params: { siteId: String(s.id) },
-                  })
-                }
-              >
-                <td className="py-2 font-medium">{s.hostname}</td>
-                <td className="py-2 text-muted">
-                  {formatDate(s.created_at, session.user?.date_format ?? "YYYY-MM-DD")}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Hostname</TableHead>
+                <TableHead>Created</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {sites?.length === 0 && (
+                <TableRow>
+                  <TableCell colSpan={2} className="text-muted-foreground">
+                    No sites yet.
+                  </TableCell>
+                </TableRow>
+              )}
+              {sites?.map((s) => (
+                <TableRow
+                  key={s.id}
+                  className="cursor-pointer"
+                  onClick={() =>
+                    navigate({
+                      to: "/sites/$siteId",
+                      params: { siteId: s.id },
+                    })
+                  }
+                >
+                  <TableCell className="font-medium">{s.hostname}</TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDate(s.created_at, session.user?.date_format ?? "YYYY-MM-DD")}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </CardContent>
       </Card>
-      <p className="text-xs text-muted">Each subdomain is its own site.</p>
+      <p className="text-xs text-muted-foreground">Each subdomain is its own site.</p>
     </div>
   );
 }

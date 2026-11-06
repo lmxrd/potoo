@@ -78,7 +78,7 @@ function Overview() {
           onToggleFilter={toggle}
         />
       ) : (
-        !statsError && <p className="text-muted">Loading…</p>
+        !statsError && <p className="text-muted-foreground">Loading…</p>
       )}
     </div>
   );

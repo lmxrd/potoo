@@ -1,4 +1,8 @@
 import type { ReactNode } from "react";
 
 export const ErrorText = ({ children }: { children?: ReactNode }) =>
-  children ? <p className="text-sm text-danger">{children}</p> : null;
+  children ? (
+    <p role="alert" className="text-sm text-destructive">
+      {children}
+    </p>
+  ) : null;

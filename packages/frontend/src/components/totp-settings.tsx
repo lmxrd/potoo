@@ -2,9 +2,9 @@ import { useMutation } from "@tanstack/react-query";
 import { useRouter } from "@tanstack/react-router";
 import { QRCodeSVG } from "qrcode.react";
 import { useState } from "react";
-import { Button } from "./button";
+import { Button } from "./ui/button";
 import { ErrorText } from "./error-text";
-import { Input } from "./input";
+import { Input } from "./ui/input";
 import {
   confirmReplaceTotpMutation,
   disableTotpMutation,
@@ -96,11 +96,11 @@ export function TotpSettings({ enabled, required }: { enabled: boolean; required
   if (enabled) {
     return (
       <form className="flex flex-col gap-3" onSubmit={(e) => e.preventDefault()}>
-        <p className="text-sm text-ok">
+        <p className="text-sm text-success">
           On: a code from your authenticator app is asked for at sign-in.
         </p>
-        {replaced && <p className="text-sm text-ok">Authenticator app replaced.</p>}
-        <p className="text-xs text-muted">
+        {replaced && <p className="text-sm text-success">Authenticator app replaced.</p>}
+        <p className="text-xs text-muted-foreground">
           {required
             ? "A code from the app, or a recovery code, to make new recovery codes or to move to a new app. It is required here: it cannot be turned off."
             : "A code from the app, or a recovery code, to make new recovery codes, to move to a new app, or to turn it off."}
@@ -138,7 +138,7 @@ export function TotpSettings({ enabled, required }: { enabled: boolean; required
           {!required && (
             <Button
               type="submit"
-              variant="danger"
+              variant="destructive"
               onClick={() =>
                 code &&
                 run(async () => {
@@ -186,7 +186,7 @@ export function TotpSettings({ enabled, required }: { enabled: boolean; required
 
   return (
     <div className="space-y-3">
-      <p className="text-sm text-muted">
+      <p className="text-sm text-muted-foreground">
         Off. With it on, signing in also asks for a code from an authenticator app.
       </p>
       <ErrorText>{error}</ErrorText>
@@ -206,8 +206,9 @@ export function QrCode({ setup }: { setup: TotpSetup }) {
       <div className="self-start rounded bg-white p-3">
         <QRCodeSVG value={setup.uri} size={176} />
       </div>
-      <p className="text-xs text-muted">
-        Or type this key: <code className="break-all font-mono text-soft-ink">{setup.secret}</code>
+      <p className="text-xs text-muted-foreground">
+        Or type this key:{" "}
+        <code className="break-all font-mono text-soft-foreground">{setup.secret}</code>
       </p>
     </>
   );
@@ -229,7 +230,7 @@ export function RecoveryCodeList({
         Your recovery codes. Each one signs you in once without the app. Keep them somewhere safe:
         they are not shown again.
       </p>
-      <ul className="grid grid-cols-2 gap-1 rounded border border-line bg-subtle p-3 font-mono text-sm">
+      <ul className="grid grid-cols-2 gap-1 rounded border border-border bg-muted p-3 font-mono text-sm">
         {codes.map((c) => (
           <li key={c}>{c}</li>
         ))}

@@ -1,8 +1,8 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { Button } from "./button";
+import { Button } from "./ui/button";
 import { ErrorText } from "./error-text";
-import { Input } from "./input";
+import { Input } from "./ui/input";
 import { QrCode, RecoveryCodeList } from "./totp-settings";
 import { loginTotpEnableMutation, loginTotpSetupMutation } from "potoo-sdk/react-query";
 import type { TotpSetup } from "potoo-sdk/types";
@@ -31,7 +31,7 @@ export function TotpEnroll({ onDone, onRestart }: { onDone: () => void; onRestar
   if (!setup) {
     return (
       <div className="flex max-w-sm flex-col gap-3">
-        <p className="text-sm text-muted">
+        <p className="text-sm text-muted-foreground">
           Two-factor authentication is required here. Set up an authenticator app to continue.
         </p>
         <ErrorText>{error}</ErrorText>
@@ -47,13 +47,15 @@ export function TotpEnroll({ onDone, onRestart }: { onDone: () => void; onRestar
         >
           Set up
         </Button>
-        <button
+        <Button
           type="button"
-          className="self-end text-xs text-muted underline hover:text-soft-ink"
+          variant="link"
+          size="xs"
+          className="self-end px-0 text-muted-foreground"
           onClick={onRestart}
         >
           Start over
-        </button>
+        </Button>
       </div>
     );
   }

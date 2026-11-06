@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Button } from "./button";
+import { Button } from "./ui/button";
 import { ErrorText } from "./error-text";
-import { Input } from "./input";
+import { Input } from "./ui/input";
 import {
   createApiKeyMutation,
   listApiKeysOptions,
@@ -12,6 +12,9 @@ import {
 import type { Scope } from "potoo-sdk/types";
 import { errorMessage } from "../lib/api";
 import { formatDate } from "../lib/dates";
+import { Label } from "./ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { useConfirm } from "./confirm";
 
 const SCOPES: { value: Scope; label: string; help: string }[] = [
   { value: "read", label: "Read", help: "Reads only: stats, sites, exports." },
@@ -32,6 +35,7 @@ const EXPIRIES = [
  * `Authorization: Bearer <token>`.
  */
 export function ApiKeys({ isAdmin, dateFormat }: { isAdmin: boolean; dateFormat: string }) {
+  const confirm = useConfirm();
   const queryClient = useQueryClient();
   const { data: keys, error: listError } = useQuery(listApiKeysOptions());
   const create = useMutation(createApiKeyMutation());
@@ -49,7 +53,7 @@ export function ApiKeys({ isAdmin, dateFormat }: { isAdmin: boolean; dateFormat:
   return (
     <div className="space-y-4">
       {token && (
-        <div className="space-y-2 rounded border border-line bg-subtle p-3">
+        <div className="space-y-2 rounded border border-border bg-muted p-3">
           <p className="text-sm">Your new key. Copy it now: it is not shown again.</p>
           <code className="block break-all font-mono text-xs">{token}</code>
           <div className="flex gap-2">
@@ -91,36 +95,44 @@ export function ApiKeys({ isAdmin, dateFormat }: { isAdmin: boolean; dateFormat:
           onChange={(e) => setName(e.target.value)}
         />
         <div className="flex gap-2 text-sm">
-          <label className="flex flex-1 flex-col gap-1">
-            <span className="text-muted">Permission</span>
-            <select
-              className="rounded border border-line-strong bg-card px-2 py-2"
-              value={scope}
-              onChange={(e) => setScope(e.target.value as Scope)}
-            >
-              {scopes.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-1 flex-col gap-1">
-            <span className="text-muted">Expires</span>
-            <select
-              className="rounded border border-line-strong bg-card px-2 py-2"
-              value={expiry}
-              onChange={(e) => setExpiry(Number(e.target.value))}
-            >
-              {EXPIRIES.map((x, i) => (
-                <option key={x.label} value={i}>
-                  {x.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-1 flex-col gap-1">
+            <Label htmlFor="api-key-scope" className="font-normal text-muted-foreground">
+              Permission
+            </Label>
+            <Select value={scope} onValueChange={(next) => setScope(next as Scope)}>
+              <SelectTrigger id="api-key-scope" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {scopes.map((s) => (
+                  <SelectItem key={s.value} value={s.value}>
+                    {s.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-1 flex-col gap-1">
+            <Label htmlFor="api-key-expiry" className="font-normal text-muted-foreground">
+              Expires
+            </Label>
+            <Select value={String(expiry)} onValueChange={(next) => setExpiry(Number(next))}>
+              <SelectTrigger id="api-key-expiry" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {EXPIRIES.map((x, i) => (
+                  <SelectItem key={x.label} value={String(i)}>
+                    {x.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-        <p className="text-xs text-muted">{SCOPES.find((s) => s.value === scope)?.help}</p>
+        <p className="text-xs text-muted-foreground">
+          {SCOPES.find((s) => s.value === scope)?.help}
+        </p>
         <ErrorText>{error}</ErrorText>
         <Button type="submit" disabled={create.isPending}>
           Create key
@@ -128,7 +140,7 @@ export function ApiKeys({ isAdmin, dateFormat }: { isAdmin: boolean; dateFormat:
       </form>
       <ErrorText>{listError && errorMessage(listError)}</ErrorText>
       {keys && keys.length > 0 && (
-        <ul className="divide-y divide-line border-t border-line text-sm">
+        <ul className="divide-y divide-border border-t border-border text-sm">
           {keys.map((k) => {
             const expired = k.expires_at !== null && new Date(k.expires_at) < new Date();
             return (
@@ -136,12 +148,12 @@ export function ApiKeys({ isAdmin, dateFormat }: { isAdmin: boolean; dateFormat:
                 <div className="min-w-0">
                   <div className="truncate">
                     {k.name}{" "}
-                    <span className="text-xs text-muted">
+                    <span className="text-xs text-muted-foreground">
                       {SCOPES.find((s) => s.value === k.scope)?.label}
                     </span>
-                    {expired && <span className="ml-2 text-xs text-danger">expired</span>}
+                    {expired && <span className="ml-2 text-xs text-destructive">expired</span>}
                   </div>
-                  <div className="text-xs text-muted">
+                  <div className="text-xs text-muted-foreground">
                     <code className="font-mono">{k.prefix}…</code> · created {date(k.created_at)}
                     {" · "}
                     {k.last_used_at ? `last used ${date(k.last_used_at)}` : "never used"}
@@ -149,9 +161,17 @@ export function ApiKeys({ isAdmin, dateFormat }: { isAdmin: boolean; dateFormat:
                   </div>
                 </div>
                 <Button
-                  variant="danger"
+                  variant="destructive"
                   onClick={async () => {
-                    if (!confirm(`Revoke ${k.name}? Whatever uses it stops working.`)) return;
+                    if (
+                      !(await confirm({
+                        title: `Revoke ${k.name}?`,
+                        description: "Whatever uses it stops working.",
+                        action: "Revoke",
+                        destructive: true,
+                      }))
+                    )
+                      return;
                     try {
                       await revoke.mutateAsync({ path: { id: k.id } });
                       reload();

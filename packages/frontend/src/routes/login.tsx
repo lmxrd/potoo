@@ -68,12 +68,12 @@ function Login() {
           {/* A navigation, not a request: the browser goes to the provider. */}
           <a
             href="/api/auth/oidc/login"
-            className="rounded bg-accent px-3 py-2 text-center text-sm font-medium text-accent-ink hover:bg-accent-hover"
+            className="rounded bg-primary px-3 py-2 text-center text-sm font-medium text-primary-foreground hover:bg-primary/90"
           >
             Sign in with {session.oidc.label}
           </a>
           {session.password_login && (
-            <p className="text-center text-xs text-muted">or with your password</p>
+            <p className="text-center text-xs text-muted-foreground">or with your password</p>
           )}
         </div>
       )}

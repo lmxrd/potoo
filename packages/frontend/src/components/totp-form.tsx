@@ -1,8 +1,8 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
-import { Button } from "./button";
+import { Button } from "./ui/button";
 import { ErrorText } from "./error-text";
-import { Input } from "./input";
+import { Input } from "./ui/input";
 import { loginTotpMutation } from "potoo-sdk/react-query";
 import { errorMessage } from "../lib/api";
 
@@ -29,7 +29,7 @@ export function TotpForm({ onDone, onRestart }: { onDone: () => void; onRestart:
         }
       }}
     >
-      <p className="text-sm text-muted">
+      <p className="text-sm text-muted-foreground">
         {recovery
           ? "Enter one of your recovery codes. Each one works once."
           : "Enter the code from your authenticator app."}
@@ -50,9 +50,11 @@ export function TotpForm({ onDone, onRestart }: { onDone: () => void; onRestart:
         Verify
       </Button>
       <div className="flex justify-between text-xs">
-        <button
+        <Button
           type="button"
-          className="text-muted underline hover:text-soft-ink"
+          variant="link"
+          size="xs"
+          className="px-0 text-muted-foreground"
           onClick={() => {
             setRecovery(!recovery);
             setCode("");
@@ -60,14 +62,16 @@ export function TotpForm({ onDone, onRestart }: { onDone: () => void; onRestart:
           }}
         >
           {recovery ? "Use a code from the app" : "Use a recovery code"}
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
-          className="text-muted underline hover:text-soft-ink"
+          variant="link"
+          size="xs"
+          className="px-0 text-muted-foreground"
           onClick={onRestart}
         >
           Start over
-        </button>
+        </Button>
       </div>
     </form>
   );

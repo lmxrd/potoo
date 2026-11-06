@@ -8,8 +8,8 @@ import {
   getStatsOptions,
   updateSiteMutation,
 } from "potoo-sdk/react-query";
-import { Button } from "../components/button";
-import { Card } from "../components/card";
+import { Button } from "../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { DateRangeBar } from "../components/date-range-bar";
 import { ErrorText } from "../components/error-text";
 import { StatsDashboard } from "../components/stats-dashboard";
@@ -17,6 +17,8 @@ import { errorMessage } from "../lib/api";
 import { exportHref, statsQuery } from "../lib/stats-query";
 import { buildFilter, useDashboardFilters } from "../lib/filter";
 import { useDateRange, validateDashboardSearch } from "../lib/date-range";
+import { Checkbox } from "../components/ui/checkbox";
+import { useConfirm } from "../components/confirm";
 
 export const Route = createFileRoute("/sites_/$siteId")({
   validateSearch: validateDashboardSearch,
@@ -24,6 +26,7 @@ export const Route = createFileRoute("/sites_/$siteId")({
 });
 
 function SitePage() {
+  const confirm = useConfirm();
   const { siteId } = Route.useParams();
   const { session } = Route.useRouteContext();
   const navigate = useNavigate();
@@ -32,9 +35,7 @@ function SitePage() {
   const queryClient = useQueryClient();
   const isAdmin = session.user?.is_admin;
 
-  const { data: site, error: siteError } = useQuery(
-    getSiteOptions({ path: { id: Number(siteId) } }),
-  );
+  const { data: site, error: siteError } = useQuery(getSiteOptions({ path: { id: siteId } }));
   // The stats are asked for by hostname, so they wait for the site.
   const params = site ? statsQuery(query, site.hostname, buildFilter(filters)) : null;
   // The previous numbers stay on screen while the next range loads.
@@ -48,10 +49,10 @@ function SitePage() {
   const updateSite = useMutation(updateSiteMutation());
   const deleteSite = useMutation(deleteSiteMutation());
   const reloadSite = () =>
-    queryClient.invalidateQueries({ queryKey: getSiteQueryKey({ path: { id: Number(siteId) } }) });
+    queryClient.invalidateQueries({ queryKey: getSiteQueryKey({ path: { id: siteId } }) });
 
   if (siteError) return <ErrorText>{errorMessage(siteError)}</ErrorText>;
-  if (!site) return <p className="text-muted">Loading…</p>;
+  if (!site) return <p className="text-muted-foreground">Loading…</p>;
 
   return (
     <div className="space-y-6">
@@ -78,43 +79,54 @@ function SitePage() {
           onToggleFilter={toggle}
         />
       ) : (
-        !statsError && <p className="text-muted">Loading…</p>
+        !statsError && <p className="text-muted-foreground">Loading…</p>
       )}
 
       <Snippet hostname={site.hostname} />
 
       {isAdmin && (
-        <Card title="Site settings">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={site.honor_dnt}
-              onChange={async (e) => {
-                try {
-                  await updateSite.mutateAsync({
-                    path: { id: Number(siteId) },
-                    body: { honor_dnt: e.target.checked },
-                  });
-                } catch {
-                  // Not saved: the reload below shows what the server has.
-                }
-                await reloadSite();
-              }}
-            />
-            Honor Do Not Track / Global Privacy Control
-          </label>
-          <p className="mt-2 text-xs text-muted">
-            When enabled, visitors who ask not to be tracked are ignored.
-          </p>
+        <Card>
+          <CardHeader>
+            <CardTitle>Site settings</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={site.honor_dnt}
+                onCheckedChange={async (checked) => {
+                  try {
+                    await updateSite.mutateAsync({
+                      path: { id: siteId },
+                      body: { honor_dnt: checked === true },
+                    });
+                  } catch {
+                    // Not saved: the reload below shows what the server has.
+                  }
+                  await reloadSite();
+                }}
+              />
+              Honor Do Not Track / Global Privacy Control
+            </label>
+            <p className="mt-2 text-xs text-muted-foreground">
+              When enabled, visitors who ask not to be tracked are ignored.
+            </p>
+          </CardContent>
         </Card>
       )}
 
       {isAdmin && (
         <Button
-          variant="danger"
+          variant="destructive"
           onClick={async () => {
-            if (confirm(`Delete ${site.hostname} and all its data?`)) {
-              await deleteSite.mutateAsync({ path: { id: Number(siteId) } });
+            if (
+              await confirm({
+                title: `Delete ${site.hostname}?`,
+                description: "All its data is deleted with it.",
+                action: "Delete",
+                destructive: true,
+              })
+            ) {
+              await deleteSite.mutateAsync({ path: { id: siteId } });
               await navigate({ to: "/" });
             }
           }}
@@ -136,31 +148,36 @@ function Snippet({ hostname }: { hostname: string }) {
   }></script>`;
   const img = `<noscript><img src="${origin}/api/pixel?h=${hostname}" alt="" /></noscript>`;
   return (
-    <Card title="Tracking snippet">
-      <div className="mb-3 flex flex-wrap gap-4 text-sm">
-        <label className="flex items-center gap-2">
-          <input type="checkbox" checked={clicks} onChange={(e) => setClicks(e.target.checked)} />
-          Track elements with data-potoo-click="label"
-        </label>
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={outbound}
-            onChange={(e) => setOutbound(e.target.checked)}
-          />
-          Track outbound links
-        </label>
-        <label className="flex items-center gap-2">
-          <input type="checkbox" checked={pixel} onChange={(e) => setPixel(e.target.checked)} />
-          No-JS pixel fallback
-        </label>
-      </div>
-      <pre className="overflow-x-auto rounded bg-subtle p-3 text-xs">
-        {script + (pixel ? `\n${img}` : "")}
-      </pre>
-      <p className="mt-2 text-xs text-muted">
-        No cookies or IP addresses are stored. Visitors are counted with a hash that rotates daily.
-      </p>
+    <Card>
+      <CardHeader>
+        <CardTitle>Tracking snippet</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="mb-3 flex flex-wrap gap-4 text-sm">
+          <label className="flex items-center gap-2">
+            <Checkbox checked={clicks} onCheckedChange={(checked) => setClicks(checked === true)} />
+            Track elements with data-potoo-click="label"
+          </label>
+          <label className="flex items-center gap-2">
+            <Checkbox
+              checked={outbound}
+              onCheckedChange={(checked) => setOutbound(checked === true)}
+            />
+            Track outbound links
+          </label>
+          <label className="flex items-center gap-2">
+            <Checkbox checked={pixel} onCheckedChange={(checked) => setPixel(checked === true)} />
+            No-JS pixel fallback
+          </label>
+        </div>
+        <pre className="overflow-x-auto rounded bg-muted p-3 text-xs">
+          {script + (pixel ? `\n${img}` : "")}
+        </pre>
+        <p className="mt-2 text-xs text-muted-foreground">
+          No cookies or IP addresses are stored. Visitors are counted with a hash that rotates
+          daily.
+        </p>
+      </CardContent>
     </Card>
   );
 }

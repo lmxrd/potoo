@@ -8,9 +8,10 @@ import {
   updateOidcSettingsMutation,
 } from "potoo-sdk/react-query";
 import { errorMessage } from "../lib/api";
-import { Button } from "./button";
+import { Button } from "./ui/button";
 import { ErrorText } from "./error-text";
-import { Input } from "./input";
+import { Input } from "./ui/input";
+import { Checkbox } from "./ui/checkbox";
 
 type TextField = "issuer" | "client_id" | "scopes" | "label" | "redirect_url";
 
@@ -59,7 +60,7 @@ function Form({
 
   const field = (name: TextField, label: string, placeholder: string, hint?: string) => (
     <label className="flex flex-col gap-1 text-sm">
-      <span className="text-muted">{label}</span>
+      <span className="text-muted-foreground">{label}</span>
       <Input
         value={values[name]}
         placeholder={placeholder}
@@ -67,7 +68,7 @@ function Form({
         onChange={(e) => setValues({ ...values, [name]: e.target.value })}
       />
       {(lockedNote(name) ?? hint) && (
-        <span className="text-xs text-muted">{lockedNote(name) ?? hint}</span>
+        <span className="text-xs text-muted-foreground">{lockedNote(name) ?? hint}</span>
       )}
     </label>
   );
@@ -105,7 +106,7 @@ function Form({
         }
       }}
     >
-      <p className="text-sm text-soft-ink">
+      <p className="text-sm text-soft-foreground">
         {settings.enabled
           ? "On: the login page offers to sign in with the provider."
           : "Off. Set an issuer and a client id to turn it on."}
@@ -113,7 +114,7 @@ function Form({
       {field("issuer", "Issuer URL", "https://id.example.com/realms/main")}
       {field("client_id", "Client id", "potoo")}
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-muted">Client secret</span>
+        <span className="text-muted-foreground">Client secret</span>
         <Input
           type="password"
           autoComplete="off"
@@ -122,17 +123,16 @@ function Form({
           disabled={locked("client_secret") || removeSecret}
           onChange={(e) => setSecret(e.target.value)}
         />
-        <span className="text-xs text-muted">
+        <span className="text-xs text-muted-foreground">
           {lockedNote("client_secret") ??
             "A new issuer removes the secret, unless you enter one with it."}
         </span>
       </label>
       {settings.client_secret_set && !locked("client_secret") && (
         <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={removeSecret}
-            onChange={(e) => setRemoveSecret(e.target.checked)}
+            onCheckedChange={(checked) => setRemoveSecret(checked === true)}
           />
           Remove the secret (a public client, with PKCE only)
         </label>
@@ -146,27 +146,26 @@ function Form({
         "Leave empty to use the address Potoo is reached at.",
       )}
       <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
+        <Checkbox
           checked={autoCreate}
           disabled={locked("auto_create")}
-          onChange={(e) => setAutoCreate(e.target.checked)}
+          onCheckedChange={(checked) => setAutoCreate(checked === true)}
         />
         Create a regular user for a verified email that has no account
       </label>
       {lockedNote("auto_create") && (
-        <span className="text-xs text-muted">{lockedNote("auto_create")}</span>
+        <span className="text-xs text-muted-foreground">{lockedNote("auto_create")}</span>
       )}
-      <div className="rounded border border-line bg-subtle p-3 text-xs">
-        <p className="text-muted">Register this callback URL with the provider:</p>
+      <div className="rounded border border-border bg-muted p-3 text-xs">
+        <p className="text-muted-foreground">Register this callback URL with the provider:</p>
         <code className="break-all">{settings.callback_url}</code>
       </div>
-      <p className="text-xs text-muted">
+      <p className="text-xs text-muted-foreground">
         An existing user is matched by the verified email the provider gives, then stays linked to
         that provider account.
       </p>
       <ErrorText>{error}</ErrorText>
-      {saved && <p className="text-sm text-ok">Saved.</p>}
+      {saved && <p className="text-sm text-success">Saved.</p>}
       <div>
         <Button type="submit" disabled={update.isPending}>
           Save

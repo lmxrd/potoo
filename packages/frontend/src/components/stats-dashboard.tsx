@@ -1,4 +1,4 @@
-import { Card } from "./card";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { BarList } from "./bar-list";
 import { PageViewsChart } from "./page-views-chart";
 import { bucketLabel, chartLabel, formatDate, formatTime } from "../lib/dates";
@@ -25,95 +25,145 @@ export function StatsDashboard({
   return (
     <>
       <div className="grid grid-cols-2 gap-4">
-        <Card title="Page views">
-          <div className="text-3xl font-semibold tabular-nums">{stats.pageviews}</div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Page views</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-semibold tabular-nums">{stats.pageviews}</div>
+          </CardContent>
         </Card>
-        <Card title="Visitors (unique per day)">
-          <div className="text-3xl font-semibold tabular-nums">{stats.visitors}</div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Visitors (unique per day)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-semibold tabular-nums">{stats.visitors}</div>
+          </CardContent>
         </Card>
       </div>
 
-      <Card title="Page views">
-        <PageViewsChart
-          rows={stats.byDay}
-          axisLabel={label}
-          describe={(day) =>
-            day.length > 10
-              ? `${formatDate(day.slice(0, 10), dateFormat)} ${formatTime(day.slice(11, 16), use24)}`
-              : formatDate(day, dateFormat)
-          }
-        />
+      <Card>
+        <CardHeader>
+          <CardTitle>Page views</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <PageViewsChart
+            rows={stats.byDay}
+            axisLabel={label}
+            describe={(day) =>
+              day.length > 10
+                ? `${formatDate(day.slice(0, 10), dateFormat)} ${formatTime(day.slice(11, 16), use24)}`
+                : formatDate(day, dateFormat)
+            }
+          />
+        </CardContent>
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Card title="Paths">
-          <BarList
-            rows={stats.paths.map((p) => ({ label: p.path, value: p.pageviews }))}
-            active={filters.get("path")}
-            onToggle={(value) => onToggleFilter("path", value)}
-          />
+        <Card>
+          <CardHeader>
+            <CardTitle>Paths</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <BarList
+              rows={stats.paths.map((p) => ({ label: p.path, value: p.pageviews }))}
+              active={filters.get("path")}
+              onToggle={(value) => onToggleFilter("path", value)}
+            />
+          </CardContent>
         </Card>
-        <Card title="Referrers">
-          <BarList
-            rows={stats.referrers.map((r) => ({ label: r.referrer, value: r.pageviews }))}
-            active={filters.get("referrer")}
-            onToggle={(value) => onToggleFilter("referrer", value)}
-          />
+        <Card>
+          <CardHeader>
+            <CardTitle>Referrers</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <BarList
+              rows={stats.referrers.map((r) => ({ label: r.referrer, value: r.pageviews }))}
+              active={filters.get("referrer")}
+              onToggle={(value) => onToggleFilter("referrer", value)}
+            />
+          </CardContent>
         </Card>
-        <Card title="Countries">
-          <BarList
-            rows={stats.countries.map((c) => ({
-              label: c.country,
-              value: c.visitors,
-            }))}
-            active={filters.get("country")}
-            onToggle={(value) => onToggleFilter("country", value)}
-            format={(value) => facetLabel("country", value)}
-          />
+        <Card>
+          <CardHeader>
+            <CardTitle>Countries</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <BarList
+              rows={stats.countries.map((c) => ({
+                label: c.country,
+                value: c.visitors,
+              }))}
+              active={filters.get("country")}
+              onToggle={(value) => onToggleFilter("country", value)}
+              format={(value) => facetLabel("country", value)}
+            />
+          </CardContent>
         </Card>
-        <Card title="Devices">
-          <BarList
-            rows={stats.devices.map((d) => ({
-              label: d.device,
-              value: d.visitors,
-            }))}
-            active={filters.get("device")}
-            onToggle={(value) => onToggleFilter("device", value)}
-            format={(value) => facetLabel("device", value)}
-          />
+        <Card>
+          <CardHeader>
+            <CardTitle>Devices</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <BarList
+              rows={stats.devices.map((d) => ({
+                label: d.device,
+                value: d.visitors,
+              }))}
+              active={filters.get("device")}
+              onToggle={(value) => onToggleFilter("device", value)}
+              format={(value) => facetLabel("device", value)}
+            />
+          </CardContent>
         </Card>
-        <Card title="Browsers">
-          <BarList
-            rows={stats.browsers.map((b) => ({
-              label: b.browser,
-              value: b.visitors,
-            }))}
-            active={filters.get("browser")}
-            onToggle={(value) => onToggleFilter("browser", value)}
-            format={(value) => facetLabel("browser", value)}
-          />
+        <Card>
+          <CardHeader>
+            <CardTitle>Browsers</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <BarList
+              rows={stats.browsers.map((b) => ({
+                label: b.browser,
+                value: b.visitors,
+              }))}
+              active={filters.get("browser")}
+              onToggle={(value) => onToggleFilter("browser", value)}
+              format={(value) => facetLabel("browser", value)}
+            />
+          </CardContent>
         </Card>
-        <Card title="Operating systems">
-          <BarList
-            rows={stats.os.map((o) => ({
-              label: o.os,
-              value: o.visitors,
-            }))}
-            active={filters.get("os")}
-            onToggle={(value) => onToggleFilter("os", value)}
-            format={(value) => facetLabel("os", value)}
-          />
+        <Card>
+          <CardHeader>
+            <CardTitle>Operating systems</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <BarList
+              rows={stats.os.map((o) => ({
+                label: o.os,
+                value: o.visitors,
+              }))}
+              active={filters.get("os")}
+              onToggle={(value) => onToggleFilter("os", value)}
+              format={(value) => facetLabel("os", value)}
+            />
+          </CardContent>
         </Card>
-        <Card title="Clicks">
-          <BarList
-            rows={stats.clicks.map((c) => ({
-              label: c.name,
-              value: c.clicks,
-            }))}
-            empty="No clicks tracked. Enable click tracking in the snippet."
-            active={filters.get("name")}
-            onToggle={(value) => onToggleFilter("name", value)}
-          />
+        <Card>
+          <CardHeader>
+            <CardTitle>Clicks</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <BarList
+              rows={stats.clicks.map((c) => ({
+                label: c.name,
+                value: c.clicks,
+              }))}
+              empty="No clicks tracked. Enable click tracking in the snippet."
+              active={filters.get("name")}
+              onToggle={(value) => onToggleFilter("name", value)}
+            />
+          </CardContent>
         </Card>
       </div>
     </>

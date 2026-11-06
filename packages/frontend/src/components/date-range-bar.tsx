@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { IconDownload } from "@tabler/icons-react";
-import { Button } from "./button";
+import { DownloadIcon } from "lucide-react";
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 import type { SiteStats } from "potoo-sdk";
 import { FACETS, type FacetFilters } from "../lib/filter";
 import { facetLabel } from "../lib/labels";
@@ -78,21 +80,17 @@ export function DateRangeBar({
     onFilters(next);
   };
 
-  const chip = "rounded px-2.5 py-1.5 text-sm";
   const count = [...filters.values()].reduce((n, values) => n + values.size, 0);
 
   return (
-    <div className="rounded-lg border border-line bg-bg p-3">
+    <div className="rounded-lg border border-border bg-background p-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap gap-1" role="group" aria-label="Date range">
           {RANGE_PRESETS.map((preset) => (
-            <button
+            <Button
               key={preset.label}
-              className={`${chip} ${
-                !open && range.preset === preset.value
-                  ? "bg-accent font-medium text-accent-ink"
-                  : "border border-line-strong bg-card hover:bg-subtle"
-              }`}
+              size="sm"
+              variant={!open && range.preset === preset.value ? "default" : "outline"}
               onClick={() => {
                 // Explicit: the URL effect alone would miss the case where
                 // this preset is already the one in the URL.
@@ -102,47 +100,44 @@ export function DateRangeBar({
               }}
             >
               {preset.label}
-            </button>
+            </Button>
           ))}
-          <button
-            className={`${chip} ${
-              open
-                ? "bg-accent font-medium text-accent-ink"
-                : "border border-line-strong bg-card hover:bg-subtle"
-            }`}
+          <Button
+            size="sm"
+            variant={open ? "default" : "outline"}
             onClick={() => {
               setOpen(true);
               setDraft(null);
             }}
           >
             Custom&hellip;
-          </button>
+          </Button>
         </div>
         <div className="flex items-center gap-2">
-          <a href={exportUrl} download>
-            <Button aria-label="Export as CSV" className="flex items-center gap-1.5">
-              <IconDownload size={16} stroke={2} aria-hidden />
-            </Button>
-          </a>
+          <Button asChild size="icon-sm">
+            <a href={exportUrl} download aria-label="Export as CSV" title="Export as CSV">
+              <DownloadIcon aria-hidden />
+            </a>
+          </Button>
         </div>
       </div>
 
       {open && (
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <input
+          <Input
             type="datetime-local"
             aria-label="Range start"
-            className="min-w-0 flex-1 rounded border border-line-strong px-2 py-1.5 text-sm sm:flex-none"
+            className="min-w-0 flex-1 sm:w-auto sm:flex-none"
             value={shown.from}
             onChange={(e) => setDraft({ from: e.target.value, to: shown.to })}
           />
           <span aria-hidden="true" className="text-faint">
             &ndash;
           </span>
-          <input
+          <Input
             type="datetime-local"
             aria-label="Range end"
-            className="min-w-0 flex-1 rounded border border-line-strong px-2 py-1.5 text-sm sm:flex-none"
+            className="min-w-0 flex-1 sm:w-auto sm:flex-none"
             value={shown.to}
             onChange={(e) => setDraft({ from: shown.from, to: e.target.value })}
           />
@@ -155,34 +150,35 @@ export function DateRangeBar({
       <div className="mt-3 flex flex-wrap items-center gap-1.5 text-sm">
         {[...filters].flatMap(([facet, values]) =>
           [...values].map((value) => (
-            <span
-              key={`${facet}:${value}`}
-              className="rounded bg-accent px-2 py-0.5 text-xs text-accent-ink"
-            >
+            <Badge key={`${facet}:${value}`}>
               {FACETS[facet]}: {facetLabel(facet, value)}{" "}
               <button
                 aria-label={`Remove the ${FACETS[facet]} ${facetLabel(facet, value)} filter`}
-                className="text-accent-ink/70 hover:text-accent-ink"
+                className="text-primary-foreground/70 hover:text-primary-foreground"
                 onClick={() => removeFilter(facet, value)}
               >
                 &times;
               </button>
-            </span>
+            </Badge>
           )),
         )}
         {count === 0 ? (
-          <span className="text-xs text-muted">Click any item of a breakdown to filter by it.</span>
+          <span className="text-xs text-muted-foreground">
+            Click any item of a breakdown to filter by it.
+          </span>
         ) : (
-          <button
-            className="text-xs text-muted underline hover:text-soft-ink"
+          <Button
+            variant="link"
+            size="xs"
+            className="text-muted-foreground"
             onClick={() => onFilters(new Map())}
           >
             Clear all
-          </button>
+          </Button>
         )}
       </div>
 
-      <p className="mt-2 text-xs text-muted">
+      <p className="mt-2 text-xs text-muted-foreground">
         {rangeSummary(range, dateFormat, use24)}
         {stats &&
           ` \u00b7 ${stats.pageviews.toLocaleString()} page views \u00b7 ${stats.visitors.toLocaleString()} visitors`}

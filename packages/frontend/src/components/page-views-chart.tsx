@@ -15,7 +15,7 @@ const LABEL_WIDTH = 60;
 /**
  * The page views per period as bars, in the page's theme: the bars and the
  * text take their colors from the same CSS variables as everything else
- * (`fill-accent`, `fill-faint`), so a theme or accent change shows at once.
+ * (`fill-primary`, `fill-faint`), so a theme or accent change shows at once.
  * The bars share the width equally, and the axis shows only as many labels
  * as fit, whatever the width and the number of bars.
  *
@@ -116,7 +116,7 @@ function Chart({
                 width={x.bandwidth()}
                 height={innerHeight - y(row.pageviews)}
                 rx={Math.min(2, x.bandwidth() / 2)}
-                className={`fill-accent${dimmed ? " opacity-40" : ""}`}
+                className={`fill-primary${dimmed ? " opacity-40" : ""}`}
               />
             );
           })}
@@ -126,7 +126,7 @@ function Chart({
             tickValues={ticks}
             tickFormat={axisLabel}
             hideTicks
-            axisLineClassName="stroke-line"
+            axisLineClassName="stroke-border"
             tickLabelProps={{ className: "fill-faint text-[10px]", textAnchor: "middle", dy: 4 }}
           />
           {/* A bar and its gaps are one target, so a thin or empty bar is easy to hit. */}
@@ -151,10 +151,10 @@ function Chart({
           applyPositionStyle
           top={tooltipTop}
           left={tooltipLeft}
-          className="pointer-events-none z-10 rounded border border-line bg-card px-2 py-1 text-xs text-ink shadow-md"
+          className="pointer-events-none z-10 rounded border border-border bg-card px-2 py-1 text-xs text-foreground shadow-md"
         >
           <div className="font-medium">{describe(tooltipData.day)}</div>
-          <div className="tabular-nums text-soft-ink">
+          <div className="tabular-nums text-soft-foreground">
             {tooltipData.pageviews} page views · {tooltipData.visitors} visitors
           </div>
         </TooltipWithBounds>

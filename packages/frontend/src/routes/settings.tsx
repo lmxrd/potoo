@@ -1,11 +1,11 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
-import { Button } from "../components/button";
+import { Button } from "../components/ui/button";
 import { ApiKeys } from "../components/api-keys";
-import { Card } from "../components/card";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { ErrorText } from "../components/error-text";
-import { Input } from "../components/input";
+import { Input } from "../components/ui/input";
 import { TotpSettings } from "../components/totp-settings";
 import {
   changeEmailMutation,
@@ -15,6 +15,15 @@ import {
 import { errorMessage } from "../lib/api";
 import { DATE_FORMATS, formatDate, formatTime } from "../lib/dates";
 import { THEMES, applyTheme, parseTheme, themeJson, type Theme } from "../lib/theme";
+import { Checkbox } from "../components/ui/checkbox";
+import { Label } from "../components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../components/ui/select";
 
 export const Route = createFileRoute("/settings")({ component: Settings });
 
@@ -26,40 +35,80 @@ function Settings() {
   return (
     <div className="max-w-sm space-y-6">
       <h1 className="text-xl font-semibold">Settings</h1>
-      <Card title="Account">
-        <dl className="space-y-2 text-sm">
-          <div className="flex justify-between gap-4">
-            <dt className="text-muted">Email</dt>
-            <dd>{user.email}</dd>
-          </div>
-          <div className="flex justify-between gap-4">
-            <dt className="text-muted">Role</dt>
-            <dd>{user.is_admin ? "Admin" : "User"}</dd>
-          </div>
-        </dl>
+      <Card>
+        <CardHeader>
+          <CardTitle>Account</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <dl className="space-y-2 text-sm">
+            <div className="flex justify-between gap-4">
+              <dt className="text-muted-foreground">Email</dt>
+              <dd>{user.email}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-muted-foreground">Role</dt>
+              <dd>{user.is_admin ? "Admin" : "User"}</dd>
+            </div>
+          </dl>
+        </CardContent>
       </Card>
-      <Card title="Date format">
-        <DateFormat current={user.date_format} />
+      <Card>
+        <CardHeader>
+          <CardTitle>Date format</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <DateFormat current={user.date_format} />
+        </CardContent>
       </Card>
-      <Card title="Time format">
-        <TimeFormat current={user.use_24} />
+      <Card>
+        <CardHeader>
+          <CardTitle>Time format</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <TimeFormat current={user.use_24} />
+        </CardContent>
       </Card>
-      <Card title="Theme">
-        <ThemePicker current={parseTheme(user.theme)} />
+      <Card>
+        <CardHeader>
+          <CardTitle>Theme</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ThemePicker current={parseTheme(user.theme)} />
+        </CardContent>
       </Card>
-      <Card title="Change email">
-        <ChangeEmail current={user.email} />
+      <Card>
+        <CardHeader>
+          <CardTitle>Change email</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ChangeEmail current={user.email} />
+        </CardContent>
       </Card>
       {passwords && (
-        <Card title={user.has_password ? "Change password" : "Set a password"}>
-          <ChangePassword hasPassword={user.has_password} />
+        <Card>
+          <CardHeader>
+            <CardTitle>{user.has_password ? "Change password" : "Set a password"}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ChangePassword hasPassword={user.has_password} />
+          </CardContent>
         </Card>
       )}
-      <Card title="Two-factor authentication">
-        <TotpSettings enabled={user.totp_enabled} required={session.totp_required} />
+      <Card>
+        <CardHeader>
+          <CardTitle>Two-factor authentication</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <TotpSettings enabled={user.totp_enabled} required={session.totp_required} />
+        </CardContent>
       </Card>
-      <Card title="API keys">
-        <ApiKeys isAdmin={user.is_admin} dateFormat={user.date_format} />
+      <Card>
+        <CardHeader>
+          <CardTitle>API keys</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ApiKeys isAdmin={user.is_admin} dateFormat={user.date_format} />
+        </CardContent>
       </Card>
     </div>
   );
@@ -72,11 +121,9 @@ function DateFormat({ current }: { current: string }) {
   const change = useMutation(changeSettingsMutation());
   return (
     <div className="space-y-2">
-      <select
-        className="rounded border border-line-strong px-2 py-2 text-sm"
+      <Select
         value={value}
-        onChange={async (e) => {
-          const next = e.target.value;
+        onValueChange={async (next) => {
           setValue(next);
           setError(undefined);
           try {
@@ -89,13 +136,18 @@ function DateFormat({ current }: { current: string }) {
           }
         }}
       >
-        {DATE_FORMATS.map((f) => (
-          <option key={f.value} value={f.value}>
-            {f.label}
-          </option>
-        ))}
-      </select>
-      <p className="text-xs text-muted">
+        <SelectTrigger aria-label="Date format">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {DATE_FORMATS.map((f) => (
+            <SelectItem key={f.value} value={f.value}>
+              {f.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground">
         Dates across the app, for example {formatDate(new Date().toISOString(), value)}.
       </p>
       <ErrorText>{error}</ErrorText>
@@ -111,11 +163,10 @@ function TimeFormat({ current }: { current: boolean }) {
   return (
     <div className="space-y-2">
       <label className="flex items-center gap-2 text-sm">
-        <input
-          type="checkbox"
+        <Checkbox
           checked={value}
-          onChange={async (e) => {
-            const next = e.target.checked;
+          onCheckedChange={async (checked) => {
+            const next = checked === true;
             setValue(next);
             setError(undefined);
             try {
@@ -128,7 +179,7 @@ function TimeFormat({ current }: { current: boolean }) {
         />
         24-hour time
       </label>
-      <p className="text-xs text-muted">
+      <p className="text-xs text-muted-foreground">
         Times across the app, for example {formatTime("14:30", value)}.
       </p>
       <ErrorText>{error}</ErrorText>
@@ -173,12 +224,12 @@ function ThemePicker({ current }: { current: Theme }) {
             key={preset.label}
             aria-pressed={active?.label === preset.label}
             className={`rounded-lg border p-1.5 text-center ${
-              active?.label === preset.label ? "border-accent" : "border-line hover:bg-subtle"
+              active?.label === preset.label ? "border-primary" : "border-border hover:bg-muted"
             }`}
             onClick={() => save(preset.theme)}
           >
             <span
-              className="flex h-10 items-end overflow-hidden rounded border border-line p-1"
+              className="flex h-10 items-end overflow-hidden rounded border border-border p-1"
               style={{ background: preset.theme.base === "dark" ? "#0f172a" : "#f8fafc" }}
             >
               <span
@@ -186,38 +237,41 @@ function ThemePicker({ current }: { current: Theme }) {
                 style={{ background: preset.theme.accent }}
               />
             </span>
-            <span className="mt-1 block text-xs text-soft-ink">{preset.label}</span>
+            <span className="mt-1 block text-xs text-soft-foreground">{preset.label}</span>
           </button>
         ))}
       </div>
-      <div className="flex items-center justify-between gap-4 border-t border-line pt-3 text-sm">
-        <label htmlFor="theme-base" className="text-muted">
+      <div className="flex items-center justify-between gap-4 border-t border-border pt-3 text-sm">
+        <Label htmlFor="theme-base" className="font-normal text-muted-foreground">
           Base
-        </label>
-        <select
-          id="theme-base"
-          className="rounded border border-line-strong bg-card px-2 py-1.5"
+        </Label>
+        <Select
           value={current.base}
-          onChange={(e) => save({ ...current, base: e.target.value as Theme["base"] })}
+          onValueChange={(base) => save({ ...current, base: base as Theme["base"] })}
         >
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-        </select>
-        <label htmlFor="theme-accent" className="text-muted">
+          <SelectTrigger id="theme-base" size="sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="light">Light</SelectItem>
+            <SelectItem value="dark">Dark</SelectItem>
+          </SelectContent>
+        </Select>
+        <label htmlFor="theme-accent" className="text-muted-foreground">
           Accent
         </label>
         <input
           id="theme-accent"
           type="color"
           aria-label="Accent color"
-          className="h-9 w-14 cursor-pointer rounded border border-line-strong bg-card p-0.5"
+          className="h-9 w-14 cursor-pointer rounded border border-input bg-card p-0.5"
           value={current.accent}
           // input previews live while dragging; change saves.
           onInput={(e) => applyTheme({ ...current, accent: e.currentTarget.value })}
           onChange={(e) => save({ ...current, accent: e.target.value })}
         />
       </div>
-      <p className="text-xs text-muted">Applies to the whole app, for your account.</p>
+      <p className="text-xs text-muted-foreground">Applies to the whole app, for your account.</p>
       <ErrorText>{error}</ErrorText>
     </div>
   );
@@ -254,7 +308,7 @@ function ChangeEmail({ current }: { current: string }) {
         onChange={(e) => setEmail(e.target.value)}
       />
       <ErrorText>{error}</ErrorText>
-      {saved && <p className="text-sm text-ok">Email updated.</p>}
+      {saved && <p className="text-sm text-success">Email updated.</p>}
       <Button type="submit">Update email</Button>
     </form>
   );
@@ -303,7 +357,7 @@ function ChangePassword({ hasPassword }: { hasPassword: boolean }) {
           onChange={(e) => setCurrent(e.target.value)}
         />
       ) : (
-        <p className="text-xs text-muted">
+        <p className="text-xs text-muted-foreground">
           You sign in with single sign-on. A password lets you sign in without it too.
         </p>
       )}
@@ -316,7 +370,7 @@ function ChangePassword({ hasPassword }: { hasPassword: boolean }) {
         onChange={(e) => setNext(e.target.value)}
       />
       <ErrorText>{error}</ErrorText>
-      {saved && <p className="text-sm text-ok">Password updated.</p>}
+      {saved && <p className="text-sm text-success">Password updated.</p>}
       <Button type="submit">{hasPassword ? "Update password" : "Set password"}</Button>
     </form>
   );

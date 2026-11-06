@@ -18,7 +18,7 @@ export function BarList({
   format?: (label: string) => string;
 }) {
   const max = Math.max(1, ...rows.map((r) => r.value));
-  if (!rows.length) return <p className="text-sm text-muted">{empty}</p>;
+  if (!rows.length) return <p className="text-sm text-muted-foreground">{empty}</p>;
   return (
     <ul className="space-y-1">
       {rows.map((r) => {
@@ -43,15 +43,15 @@ export function BarList({
             }
             className={`relative flex justify-between rounded px-2 py-1 text-sm${
               onToggle ? " cursor-pointer" : ""
-            }${on ? " bg-accent text-accent-ink" : ""}`}
+            }${on ? " bg-primary text-primary-foreground" : ""}`}
           >
             <span
-              className={`absolute inset-y-0 left-0 rounded ${on ? "hidden" : "bg-subtle"}`}
+              className={`absolute inset-y-0 left-0 rounded ${on ? "hidden" : "bg-muted"}`}
               style={{ width: `${(r.value / max) * 100}%` }}
             />
             <span className="relative truncate">{format ? format(r.label) : r.label}</span>
             <span
-              className={`relative tabular-nums ${on ? "text-accent-ink/70" : "text-soft-ink"}`}
+              className={`relative tabular-nums ${on ? "text-primary-foreground/70" : "text-soft-foreground"}`}
             >
               {r.value}
             </span>

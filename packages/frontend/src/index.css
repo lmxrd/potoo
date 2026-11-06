@@ -1,64 +1,103 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+/* `dark:` follows the base of the theme: `data-theme="dark"` on the root
+   element, set by applyTheme (src/lib/theme.ts). */
+@custom-variant dark (&:is([data-theme="dark"] *));
 
 /*
- * The theme. The app styles itself only through these semantic tokens,
- * so a theme is nothing but their values. Each base defines the same
- * set; --shade is the color hovers mix toward (black on light, white on
- * dark). The accent and its ink are per-user and set at runtime by
- * lib/theme.ts; the defaults keep the page presentable before it loads.
+ * The theme. shadcn's components (src/components/ui) and the app read only
+ * the semantic tokens below, so a theme is nothing but their values. Each
+ * base defines the same set; the accent and the color on it are per-user
+ * and set at runtime by lib/theme.ts (`--accent-color`, `--on-accent-color`);
+ * the defaults keep the page presentable before it loads.
+ *
+ *   primary   = the user's accent: buttons, the chart, what is selected
+ *   accent    = a wash of it over the background: hovers, selected items
+ *   muted     = the subtle ground of disabled fields and table heads
+ *   soft-foreground, faint, success: Potoo's own, for secondary text, the
+ *   chart's rest and confirmations
  */
 :root,
 [data-theme="light"] {
-  --bg: #f8fafc;
+  --background: #f8fafc;
+  --foreground: #0f172a;
   --card: #ffffff;
-  --subtle: #f1f5f9;
-  --line: #e2e8f0;
-  --line-strong: #cbd5e1;
-  --ink: #0f172a;
-  --soft-ink: #334155;
-  --muted: #64748b;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --soft-foreground: #334155;
   --faint: #94a3b8;
-  --danger: #dc2626;
-  --ok: #059669;
-  --shade: #000000;
+  --border: #e2e8f0;
+  --input: #cbd5e1;
+  --destructive: #dc2626;
+  --success: #059669;
 }
 
 [data-theme="dark"] {
-  --bg: #0f172a;
+  --background: #0f172a;
+  --foreground: #f1f5f9;
   --card: #1e293b;
-  --subtle: #334155;
-  --line: #334155;
-  --line-strong: #475569;
-  --ink: #f1f5f9;
-  --soft-ink: #cbd5e1;
-  --muted: #94a3b8;
+  --card-foreground: #f1f5f9;
+  --popover: #1e293b;
+  --popover-foreground: #f1f5f9;
+  --muted: #334155;
+  --muted-foreground: #94a3b8;
+  --soft-foreground: #cbd5e1;
   --faint: #64748b;
-  --danger: #f87171;
-  --ok: #34d399;
-  --shade: #ffffff;
+  --border: #334155;
+  --input: #475569;
+  --destructive: #f87171;
+  --success: #34d399;
 }
 
 :root {
-  --accent: #0f172a;
-  --accent-ink: #ffffff;
-  --accent-hover: color-mix(in oklab, var(--accent) 85%, var(--shade));
-  --danger-hover: color-mix(in oklab, var(--danger) 85%, var(--shade));
+  --radius: 0.5rem;
+  --primary: var(--accent-color, #0f172a);
+  --primary-foreground: var(--on-accent-color, #ffffff);
+  --secondary: var(--muted);
+  --secondary-foreground: var(--foreground);
+  --accent: color-mix(in oklab, var(--primary) 10%, var(--card));
+  --accent-foreground: var(--foreground);
+  --ring: var(--primary);
 }
 
 @theme inline {
-  --color-bg: var(--bg);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
   --color-card: var(--card);
-  --color-subtle: var(--subtle);
-  --color-line: var(--line);
-  --color-line-strong: var(--line-strong);
-  --color-ink: var(--ink);
-  --color-soft-ink: var(--soft-ink);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
-  --color-faint: var(--faint);
-  --color-danger: var(--danger);
-  --color-danger-hover: var(--danger-hover);
-  --color-ok: var(--ok);
+  --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
-  --color-accent-ink: var(--accent-ink);
-  --color-accent-hover: var(--accent-hover);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-soft-foreground: var(--soft-foreground);
+  --color-faint: var(--faint);
+  --color-success: var(--success);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
 }

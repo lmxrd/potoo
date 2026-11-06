@@ -1,3 +1,5 @@
+import { Checkbox } from "./ui/checkbox";
+
 /** The site selection chips: "All sites", or any subset of them. */
 export function SiteSelect({
   sites,
@@ -5,7 +7,7 @@ export function SiteSelect({
   onToggle,
   onClear,
 }: {
-  sites: { id: number; hostname: string }[] | null | undefined;
+  sites: { id: string; hostname: string }[] | null | undefined;
   /** The selected hostnames. */
   selected: Set<string>;
   onToggle: (hostname: string) => void;
@@ -13,19 +15,18 @@ export function SiteSelect({
 }) {
   return (
     <div className="flex flex-wrap gap-2 text-sm">
-      <label className="flex items-center gap-2 rounded border border-line-strong bg-card px-3 py-1.5">
-        <input type="checkbox" checked={selected.size === 0} onChange={onClear} />
+      <label className="flex items-center gap-2 rounded border border-input bg-card px-3 py-1.5">
+        <Checkbox checked={selected.size === 0} onCheckedChange={onClear} />
         All sites
       </label>
       {sites?.map((s) => (
         <label
           key={s.id}
-          className="flex items-center gap-2 rounded border border-line-strong bg-card px-3 py-1.5"
+          className="flex items-center gap-2 rounded border border-input bg-card px-3 py-1.5"
         >
-          <input
-            type="checkbox"
+          <Checkbox
             checked={selected.has(s.hostname)}
-            onChange={() => onToggle(s.hostname)}
+            onCheckedChange={() => onToggle(s.hostname)}
           />
           {s.hostname}
         </label>
