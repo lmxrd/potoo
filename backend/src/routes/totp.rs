@@ -140,9 +140,11 @@ pub(crate) fn challenge_cookie(
 
 /// The user of a valid, unexpired challenge cookie for this step, or a 401.
 fn challenged_user(state: &AppState, headers: &HeaderMap, step: Step) -> Result<i64, HttpError> {
-    let expired = || HttpError {
-        status: StatusCode::UNAUTHORIZED,
-        message: "The sign-in expired, sign in again".into(),
+    let expired = || {
+        HttpError::new(
+            StatusCode::UNAUTHORIZED,
+            "The sign-in expired, sign in again",
+        )
     };
     let (name, _) = challenge_name(secure(headers));
     let value = SignedCookieJar::from_headers(headers, state.oidc.key().clone())
@@ -424,10 +426,10 @@ async fn start_setup(state: &AppState, user_id: i64, email: &str) -> Result<Totp
 }
 
 fn already_on() -> HttpError {
-    HttpError {
-        status: StatusCode::CONFLICT,
-        message: "Two-factor authentication is already on".into(),
-    }
+    HttpError::new(
+        StatusCode::CONFLICT,
+        "Two-factor authentication is already on",
+    )
 }
 
 #[utoipa::path(
@@ -523,10 +525,10 @@ async fn disable(
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
     if state.totp_required {
-        return Err(HttpError {
-            status: StatusCode::FORBIDDEN,
-            message: "Two-factor authentication is required here".into(),
-        });
+        return Err(HttpError::new(
+            StatusCode::FORBIDDEN,
+            "Two-factor authentication is required here",
+        ));
     }
     if let Some(retry_after) = state.throttle.locked_out(&throttle_key(user.id)) {
         return Ok(too_many(retry_after));
@@ -722,10 +724,7 @@ async fn reset(
         ));
     }
     if !turn_off(&state, id).await? {
-        return Err(HttpError {
-            status: StatusCode::NOT_FOUND,
-            message: "Not found".into(),
-        });
+        return Err(HttpError::new(StatusCode::NOT_FOUND, "Not found"));
     }
     tracing::info!("admin {own} turned off two-factor authentication for user {id}");
     Ok(StatusCode::NO_CONTENT.into_response())

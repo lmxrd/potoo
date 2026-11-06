@@ -64,10 +64,10 @@ impl FromRequestParts<AppState> for AuthUser {
                 .await
                 .ok_or_else(HttpError::unauthorized)?;
             if key.scope == Scope::Read && !parts.method.is_safe() {
-                return Err(HttpError {
-                    status: StatusCode::FORBIDDEN,
-                    message: "This API key can only read".into(),
-                });
+                return Err(HttpError::new(
+                    StatusCode::FORBIDDEN,
+                    "This API key can only read",
+                ));
             }
             note_key_use(state, &key).await;
             return Ok(AuthUser(user, Access::Key(key.scope)));
@@ -96,10 +96,10 @@ impl FromRequestParts<AppState> for SessionUser {
     ) -> Result<Self, Self::Rejection> {
         match AuthUser::from_request_parts(parts, state).await? {
             AuthUser(user, Access::Session) => Ok(SessionUser(user)),
-            AuthUser(_, Access::Key(_)) => Err(HttpError {
-                status: StatusCode::FORBIDDEN,
-                message: "Not with an API key: sign in".into(),
-            }),
+            AuthUser(_, Access::Key(_)) => Err(HttpError::new(
+                StatusCode::FORBIDDEN,
+                "Not with an API key: sign in",
+            )),
         }
     }
 }
@@ -393,10 +393,7 @@ async fn setup(
     .execute(state.db.writer())
     .await?;
     if inserted.rows_affected() == 0 {
-        return Err(HttpError {
-            status: StatusCode::CONFLICT,
-            message: "Already set up".into(),
-        });
+        return Err(HttpError::new(StatusCode::CONFLICT, "Already set up"));
     }
     let jar = create_session(
         state.db.writer(),
@@ -436,15 +433,13 @@ async fn login(
     }
     // A malformed body fails the same way as a wrong password.
     let Ok(ApiJson(creds)) = body else {
-        return Err(HttpError {
-            status: StatusCode::UNAUTHORIZED,
-            message: "Invalid email or password".into(),
-        });
+        return Err(HttpError::new(
+            StatusCode::UNAUTHORIZED,
+            "Invalid email or password",
+        ));
     };
-    let email = validate_email(&creds.email).map_err(|_| HttpError {
-        status: StatusCode::UNAUTHORIZED,
-        message: "Invalid email or password".into(),
-    })?;
+    let email = validate_email(&creds.email)
+        .map_err(|_| HttpError::new(StatusCode::UNAUTHORIZED, "Invalid email or password"))?;
 
     let key = format!(
         "{}|{email}",
@@ -472,10 +467,10 @@ async fn login(
     };
     if !verify_password(&creds.password, &stored) || id == 0 {
         state.throttle.record_failure(&key);
-        return Err(HttpError {
-            status: StatusCode::UNAUTHORIZED,
-            message: "Invalid email or password".into(),
-        });
+        return Err(HttpError::new(
+            StatusCode::UNAUTHORIZED,
+            "Invalid email or password",
+        ));
     }
     state.throttle.clear(&key);
     if let Some(step) = next_step(state.db.reader(), &state, id).await? {
@@ -549,10 +544,7 @@ async fn change_email(
             .fetch_optional(&mut *tx)
             .await?;
     if taken.is_some() {
-        return Err(HttpError {
-            status: StatusCode::CONFLICT,
-            message: "Email already in use".into(),
-        });
+        return Err(HttpError::new(StatusCode::CONFLICT, "Email already in use"));
     }
     sqlx::query("UPDATE users SET email = ?1 WHERE id = ?2")
         .bind(&email)
@@ -647,10 +639,7 @@ async fn change_password(
     if !state.oidc.passwords_allowed() {
         return Err(HttpError::passwords_off());
     }
-    let invalid = || HttpError {
-        status: StatusCode::UNAUTHORIZED,
-        message: "Invalid password".into(),
-    };
+    let invalid = || HttpError::new(StatusCode::UNAUTHORIZED, "Invalid password");
     let current = body.current_password.unwrap_or_default();
     if current.len() > 200 {
         return Err(HttpError::bad_request("Invalid password"));
@@ -763,10 +752,7 @@ async fn create_user(
         .fetch_optional(&mut *tx)
         .await?;
     if taken.is_some() {
-        return Err(HttpError {
-            status: StatusCode::CONFLICT,
-            message: "Email already in use".into(),
-        });
+        return Err(HttpError::new(StatusCode::CONFLICT, "Email already in use"));
     }
     sqlx::query("INSERT INTO users (email, password_hash, is_admin) VALUES (?1, ?2, ?3)")
         .bind(&email)
@@ -813,16 +799,13 @@ async fn change_role(
         .fetch_optional(&mut *tx)
         .await?;
     let Some(target) = target else {
-        return Err(HttpError {
-            status: StatusCode::NOT_FOUND,
-            message: "Not found".into(),
-        });
+        return Err(HttpError::new(StatusCode::NOT_FOUND, "Not found"));
     };
     if target == 1 && !body.is_admin && admin_count(&mut *tx).await? == 1 {
-        return Err(HttpError {
-            status: StatusCode::CONFLICT,
-            message: "Cannot demote the last admin".into(),
-        });
+        return Err(HttpError::new(
+            StatusCode::CONFLICT,
+            "Cannot demote the last admin",
+        ));
     }
     sqlx::query("UPDATE users SET is_admin = ?1 WHERE id = ?2")
         .bind(body.is_admin as i64)
@@ -864,10 +847,10 @@ async fn delete_user(
         return Ok(StatusCode::NO_CONTENT.into_response());
     };
     if target == 1 && admin_count(&mut *tx).await? == 1 {
-        return Err(HttpError {
-            status: StatusCode::CONFLICT,
-            message: "Cannot delete the last admin".into(),
-        });
+        return Err(HttpError::new(
+            StatusCode::CONFLICT,
+            "Cannot delete the last admin",
+        ));
     }
     sqlx::query("DELETE FROM users WHERE id = ?1")
         .bind(id)
@@ -916,10 +899,7 @@ async fn reset_password(
         .await?
         .rows_affected();
     if updated == 0 {
-        return Err(HttpError {
-            status: StatusCode::NOT_FOUND,
-            message: "Not found".into(),
-        });
+        return Err(HttpError::new(StatusCode::NOT_FOUND, "Not found"));
     }
     Ok(StatusCode::NO_CONTENT.into_response())
 }

@@ -81,7 +81,7 @@ struct Hit {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     // Deterministic: the same seed gives the same data.
     let mut rng = StdRng::seed_from_u64(42);
 
@@ -91,19 +91,17 @@ async fn main() {
 
     let mut sites: Vec<(i64, String)> = sqlx::query_as("SELECT id, hostname FROM sites")
         .fetch_all(pool)
-        .await
-        .unwrap();
+        .await?;
     let inserted_demo_site = sites.is_empty();
     if inserted_demo_site {
         let id = sqlx::query("INSERT INTO sites (hostname) VALUES ('blog.example.com')")
             .execute(pool)
-            .await
-            .unwrap()
+            .await?
             .last_insert_rowid();
         sites = vec![(id, "blog.example.com".to_string())];
     }
     // The demo data replaces whatever hits are in the database.
-    sqlx::query("DELETE FROM hits").execute(pool).await.unwrap();
+    sqlx::query("DELETE FROM hits").execute(pool).await?;
 
     let now = Utc::now();
     let midnight = Utc
@@ -120,7 +118,7 @@ async fn main() {
             let trend = 0.55 + 0.9 * (i as f64) / (YEAR - 1) as f64;
             let hits = day_hits(&mut rng, *site_id, start, end, base, trend);
             inserted += hits.len();
-            let mut tx = pool.begin().await.unwrap();
+            let mut tx = pool.begin().await?;
             for hit in &hits {
                 sqlx::query(
                     "INSERT INTO hits
@@ -139,10 +137,9 @@ async fn main() {
                 .bind(&hit.visitor)
                 .bind(&hit.created_at)
                 .execute(&mut *tx)
-                .await
-                .unwrap();
+                .await?;
             }
-            tx.commit().await.unwrap();
+            tx.commit().await?;
         }
     }
     db.close().await;
@@ -158,6 +155,7 @@ async fn main() {
             .collect::<Vec<_>>()
             .join(", ")
     );
+    Ok(())
 }
 
 /// One site's pageviews for one day: a few visitors, one or more each.

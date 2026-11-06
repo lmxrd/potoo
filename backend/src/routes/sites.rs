@@ -202,10 +202,7 @@ async fn create(
         .fetch_optional(&mut *tx)
         .await?;
     if taken.is_some() {
-        return Err(HttpError {
-            status: StatusCode::CONFLICT,
-            message: "Site already exists".into(),
-        });
+        return Err(HttpError::new(StatusCode::CONFLICT, "Site already exists"));
     }
     let id = sqlx::query("INSERT INTO sites (hostname, honor_dnt) VALUES (?1, ?2)")
         .bind(&hostname)
@@ -321,8 +318,6 @@ async fn get_site(
             .bind(id)
             .fetch_optional(state.db.reader())
             .await?;
-    site.map(Json).ok_or(HttpError {
-        status: StatusCode::NOT_FOUND,
-        message: "Not found".into(),
-    })
+    site.map(Json)
+        .ok_or(HttpError::new(StatusCode::NOT_FOUND, "Not found"))
 }

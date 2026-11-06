@@ -6,6 +6,8 @@ edition = "2024"
 default-run = "potoo"
 
 [dependencies]
+# The binaries' errors (main, the seed, the healthcheck), with context.
+anyhow = "1.0.104"
 argon2 = "0.6.0"
 axum = { version = "0.8.9", features = ["multipart"] }
 axum-extra = { version = "0.12.6", features = ["cookie", "cookie-signed"] }
@@ -29,6 +31,8 @@ rustls = { version = "0.23.45", default-features = false, features = ["ring", "s
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 sha2 = "0.11.0"
+# The API's typed error (src/error.rs).
+thiserror = "2.0.21"
 # Two-factor authentication (src/totp.rs). `otpauth` for the URI the apps scan.
 totp-rs = { version = "6.0.0", features = ["otpauth"] }
 time = { version = "0.3.55", default-features = false }

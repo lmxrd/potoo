@@ -1,18 +1,16 @@
+use anyhow::Context;
 use potoo::{app, db, geo, state::AppState};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     // The container healthcheck: no database, no server, only a request to
-    // the one already running (the same command as woodmouse's).
+    // the one already running (the same command as woodmouse's). Its error
+    // ends the process with status 1.
     if std::env::args().nth(1).as_deref() == Some("healthcheck") {
-        if let Err(e) = healthcheck().await {
-            eprintln!("unhealthy: {e}");
-            std::process::exit(1);
-        }
-        return;
+        return healthcheck().await.context("unhealthy");
     }
 
     tracing_subscriber::fmt().init();
@@ -53,14 +51,7 @@ async fn main() {
         // Single sign-on: the stored settings, with the OIDC_* environment
         // variables on top.
         oidc: Arc::new(potoo::oidc::Oidc::load(&db, potoo::oidc::Env::from_env()).await),
-        totp_required: std::env::var("TOTP_REQUIRED")
-            .ok()
-            .filter(|v| !v.is_empty())
-            .is_some_and(|v| {
-                potoo::oidc::flag(&v).unwrap_or_else(|| {
-                    panic!("TOTP_REQUIRED must be 1 or 0 (true/false, yes/no, on/off), not {v}")
-                })
-            }),
+        totp_required: env_flag("TOTP_REQUIRED")?,
     };
 
     // With OIDC_ONLY and no provider, nobody can sign in (but the first
@@ -105,13 +96,15 @@ async fn main() {
             .frequency(99)
             .blocklist(&["libc", "libgcc", "pthread", "vdso"])
             .build()
-            .expect("cannot start the profiler");
-        (profiler, out)
+            .context("cannot start the profiler")?;
+        anyhow::Ok((profiler, out))
     });
+    #[cfg(feature = "profiling")]
+    let flamegraph = flamegraph.transpose()?;
 
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
-        .unwrap_or_else(|e| panic!("cannot listen on {port}: {e}"));
+        .with_context(|| format!("cannot listen on {port}"))?;
     println!("potoo listening on http://0.0.0.0:{port}");
     // On SIGINT or SIGTERM the server stops accepting, finishes the requests
     // in flight, and the writer then drains the queue: no accepted hit is
@@ -122,12 +115,24 @@ async fn main() {
     )
     .with_graceful_shutdown(stop_signal())
     .await
-    .unwrap();
-    writer.await.unwrap();
+    .context("the server failed")?;
+    writer.await.context("the writer failed")?;
     db.close().await;
     #[cfg(feature = "profiling")]
     if let Some((profiler, out)) = &flamegraph {
         write_profile(profiler, out);
+    }
+    Ok(())
+}
+
+/// A yes or no environment variable: unset or empty is no, and a value
+/// that is not understood stops the start rather than quietly meaning no.
+fn env_flag(name: &str) -> anyhow::Result<bool> {
+    match std::env::var(name).ok().filter(|v| !v.is_empty()) {
+        None => Ok(false),
+        Some(v) => potoo::oidc::flag(&v).with_context(|| {
+            format!("{name} must be true or false (1/0, yes/no, on/off), not {v}")
+        }),
     }
 }
 
@@ -170,7 +175,7 @@ async fn purge(db: &db::Db, retention_days: i64) {
 /// `GET /api/health` on this machine, by hand, so that the healthcheck needs
 /// nothing from the image (no wget or curl). Succeeds on a 200, fails
 /// otherwise.
-async fn healthcheck() -> Result<(), Box<dyn std::error::Error>> {
+async fn healthcheck() -> anyhow::Result<()> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     let port: u16 = std::env::var("PORT")
@@ -183,9 +188,9 @@ async fn healthcheck() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
     let mut head = [0u8; 12];
     stream.read_exact(&mut head).await?;
-    if &head == b"HTTP/1.1 200" || &head == b"HTTP/1.0 200" {
-        Ok(())
-    } else {
-        Err("the health endpoint did not answer 200".into())
-    }
+    anyhow::ensure!(
+        &head == b"HTTP/1.1 200" || &head == b"HTTP/1.0 200",
+        "the health endpoint did not answer 200"
+    );
+    Ok(())
 }

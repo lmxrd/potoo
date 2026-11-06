@@ -66,9 +66,11 @@ impl Ingest {
         time(Phase::Enqueue, || {
             self.queue.try_send(Message::Hit(Box::new(hit)))
         })
-        .map_err(|_| HttpError {
-            status: StatusCode::SERVICE_UNAVAILABLE,
-            message: "Too many hits queued, try again".into(),
+        .map_err(|_| {
+            HttpError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Too many hits queued, try again",
+            )
         })
     }
 
@@ -242,6 +244,6 @@ mod tests {
         let ingest = Ingest { queue };
         ingest.submit(hit(1, 0)).unwrap();
         let error = ingest.submit(hit(1, 1)).unwrap_err();
-        assert_eq!(error.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(error.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 }

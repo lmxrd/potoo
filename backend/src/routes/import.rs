@@ -238,9 +238,11 @@ async fn read_csv(state: &AppState, request: Request) -> Result<Bytes, HttpError
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let unreadable = |e: &dyn std::fmt::Display| HttpError {
-        status: StatusCode::BAD_REQUEST,
-        message: format!("The upload could not be read: {e}"),
+    let unreadable = |e: &dyn std::fmt::Display| {
+        HttpError::new(
+            StatusCode::BAD_REQUEST,
+            format!("The upload could not be read: {e}"),
+        )
     };
     if content_type.starts_with("multipart/form-data") {
         let mut form = Multipart::from_request(request, state)
@@ -260,10 +262,10 @@ async fn read_csv(state: &AppState, request: Request) -> Result<Bytes, HttpError
             .await
             .map_err(|e| unreadable(&e));
     }
-    Err(HttpError {
-        status: StatusCode::UNSUPPORTED_MEDIA_TYPE,
-        message: "Send multipart/form-data, text/csv or text/plain".into(),
-    })
+    Err(HttpError::new(
+        StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        "Send multipart/form-data, text/csv or text/plain",
+    ))
 }
 
 /// A byte order mark (Excel adds one) is not part of the first header.

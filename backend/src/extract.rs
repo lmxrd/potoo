@@ -35,16 +35,13 @@ where
 
 fn rejection(rejection: JsonRejection) -> HttpError {
     match rejection {
-        JsonRejection::MissingJsonContentType(_) => HttpError {
-            status: StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            message: "Expected a JSON body (Content-Type: application/json)".into(),
-        },
+        JsonRejection::MissingJsonContentType(_) => HttpError::new(
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            "Expected a JSON body (Content-Type: application/json)",
+        ),
         JsonRejection::JsonSyntaxError(_) | JsonRejection::JsonDataError(_) => {
             HttpError::bad_request("Invalid request body")
         }
-        other => HttpError {
-            status: other.status(),
-            message: "The request body could not be read".into(),
-        },
+        other => HttpError::new(other.status(), "The request body could not be read"),
     }
 }

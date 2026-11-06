@@ -224,6 +224,12 @@ acceptable.
 
 - **Simple.** No ORM, no abstraction layers. Comment the *why*, not the
   what.
+- **Errors.** Handlers return `HttpError` (`src/error.rs`, thiserror):
+  `HttpError::new(status, message)` and its helpers for what the client
+  may read; a database error (`?` on sqlx) or `HttpError::internal(...)` is
+  logged with its causes and answered with a plain 500, never its text. The
+  binaries (main, the seed, the spec writer, `potoo healthcheck`) use
+  anyhow with `.context(...)`.
 - **Use the community's crates.** When a well-known, maintained crate (or
   npm package) solves the problem, use it rather than writing the same
   thing ourselves: sessions are axum-login and tower-sessions, errors

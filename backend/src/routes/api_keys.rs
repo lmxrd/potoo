@@ -148,10 +148,10 @@ async fn create_key(
         ));
     }
     if body.scope == Scope::Admin && !user.is_admin {
-        return Err(HttpError {
-            status: StatusCode::FORBIDDEN,
-            message: "Only admins can create admin keys".into(),
-        });
+        return Err(HttpError::new(
+            StatusCode::FORBIDDEN,
+            "Only admins can create admin keys",
+        ));
     }
     let expires_at = match body.expires_in_days {
         None => None,
@@ -173,10 +173,10 @@ async fn create_key(
         .fetch_one(&mut *tx)
         .await?;
     if count >= MAX_KEYS {
-        return Err(HttpError {
-            status: StatusCode::CONFLICT,
-            message: "Too many API keys: revoke one first".into(),
-        });
+        return Err(HttpError::new(
+            StatusCode::CONFLICT,
+            "Too many API keys: revoke one first",
+        ));
     }
     let row: ApiKeyRow = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO api_keys (user_id, name, prefix, token_hash, scope, expires_at)
@@ -229,10 +229,7 @@ async fn revoke_key(
         .await?
         .rows_affected();
     if deleted == 0 {
-        return Err(HttpError {
-            status: StatusCode::NOT_FOUND,
-            message: "Not found".into(),
-        });
+        return Err(HttpError::new(StatusCode::NOT_FOUND, "Not found"));
     }
     Ok(StatusCode::NO_CONTENT.into_response())
 }
