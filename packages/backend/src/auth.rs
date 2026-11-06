@@ -8,11 +8,6 @@ use std::time::SystemTime;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-pub use crate::session::COOKIE;
-
-/// How long a session lasts after the sign-in.
-pub const SESSION_DAYS: u64 = 30;
-
 /// The date formats a user can pick from, for displaying dates.
 pub const DATE_FORMATS: [&str; 4] = ["YYYY-MM-DD", "DD/MM/YYYY", "MM/DD/YYYY", "DD.MM.YYYY"];
 

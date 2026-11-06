@@ -1,5 +1,5 @@
 use crate::csv;
-use crate::error::{ErrorBody, HttpError};
+use crate::error::{ApiError, ErrorBody};
 use crate::filter::filter_sql;
 use crate::routes::auth::AuthUser;
 use crate::routes::sites::{StatsQuery, range_and_filter, site_ids};
@@ -37,7 +37,7 @@ async fn export(
     State(state): State<AppState>,
     _user: AuthUser,
     Query(query): Query<StatsQuery>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     let (range, filters) = range_and_filter(&query)?;
     let ids = site_ids(&state, query.sites.as_deref()).await?;
     let (since, until) = range_bounds(&range);

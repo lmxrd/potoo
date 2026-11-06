@@ -74,7 +74,7 @@ async fn main() -> anyhow::Result<()> {
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(Duration::from_secs(600)).await;
-            limits.forget_idle();
+            limits.retain_recent();
         }
     });
 
@@ -82,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
     // is refused anyway: this only keeps the table small).
     {
         use tower_sessions::ExpiredDeletion;
-        let store = potoo::session::Store::new(db.clone());
+        let store = potoo::sessions::Store::new(db.clone());
         tokio::spawn(async move {
             loop {
                 if let Err(e) = store.delete_expired().await {

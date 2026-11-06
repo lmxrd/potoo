@@ -6,12 +6,12 @@
 //! the settings say so, a new regular user without a password. Nobody signs
 //! in this way before the first admin exists.
 
-use crate::error::{ErrorBody, HttpError};
+use crate::error::{ApiError, ErrorBody};
 use crate::extract::ApiJson;
 use crate::oidc::{CALLBACK_PATH, Failure, Identity, LOGIN_COOKIE, LOGIN_TTL, Settings};
 use crate::routes::auth::{AuthUser, require_admin, validate_email};
 use crate::routes::totp::{Step, challenge_cookie, next_step};
-use crate::session::{self, AuthSession};
+use crate::sessions::{self, AuthSession};
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Query, State};
@@ -173,7 +173,7 @@ async fn sign_in(
     _headers: &HeaderMap,
     params: CallbackParams,
     login: Option<String>,
-) -> Result<Result<SignedIn, Failure>, HttpError> {
+) -> Result<Result<SignedIn, Failure>, ApiError> {
     let Some(login_state) = params.state else {
         return Ok(Err(Failure::State));
     };
@@ -210,8 +210,8 @@ async fn sign_in(
         .backend
         .get_user(&user_id)
         .await?
-        .ok_or_else(|| HttpError::internal("the signed-in user is gone"))?;
-    session::sign_in(auth, &user).await?;
+        .ok_or_else(|| ApiError::internal("the signed-in user is gone"))?;
+    sessions::sign_in(auth, &user).await?;
     Ok(Ok(SignedIn::Session))
 }
 
@@ -390,7 +390,7 @@ async fn get_settings(
     State(state): State<AppState>,
     user: AuthUser,
     headers: HeaderMap,
-) -> Result<Json<OidcSettings>, HttpError> {
+) -> Result<Json<OidcSettings>, ApiError> {
     require_admin(&user)?;
     Ok(Json(view(&state, &headers)))
 }
@@ -417,19 +417,19 @@ async fn update_settings(
     user: AuthUser,
     headers: HeaderMap,
     ApiJson(body): ApiJson<UpdateOidcSettings>,
-) -> Result<Json<OidcSettings>, HttpError> {
+) -> Result<Json<OidcSettings>, ApiError> {
     require_admin(&user)?;
     // A task of its own, which runs to the end even if this request is
     // dropped half way (the client went away): the row is never stored
     // without being put in effect.
     tokio::spawn(save(state.clone(), body))
         .await
-        .map_err(|e| HttpError::internal(format!("saving failed: {e}")))??;
+        .map_err(|e| ApiError::internal(format!("saving failed: {e}")))??;
     Ok(Json(view(&state, &headers)))
 }
 
 /// Store new settings and put them in effect, one save at a time.
-async fn save(state: AppState, body: UpdateOidcSettings) -> Result<(), HttpError> {
+async fn save(state: AppState, body: UpdateOidcSettings) -> Result<(), ApiError> {
     let _saving = state.oidc.lock_saves().await;
     let env = state.oidc.env();
     let locked = env.locked();
@@ -466,7 +466,7 @@ async fn save(state: AppState, body: UpdateOidcSettings) -> Result<(), HttpError
     // names its own, must not receive the old provider's secret.
     if env.apply(&stored).issuer != issuer_before {
         if env.client_secret.is_some() {
-            return Err(HttpError::bad_request(
+            return Err(ApiError::bad_request(
                 "The client secret is set by OIDC_CLIENT_SECRET: set the issuer with OIDC_ISSUER too",
             ));
         }
@@ -482,7 +482,7 @@ async fn save(state: AppState, body: UpdateOidcSettings) -> Result<(), HttpError
         .oidc
         .check(&settings)
         .await
-        .map_err(HttpError::bad_request)?;
+        .map_err(ApiError::bad_request)?;
     sqlx::query(
         "UPDATE oidc_settings SET issuer = ?1, client_id = ?2, client_secret = ?3, scopes = ?4,
            label = ?5, redirect_url = ?6, auto_create = ?7
@@ -501,8 +501,8 @@ async fn save(state: AppState, body: UpdateOidcSettings) -> Result<(), HttpError
     Ok(())
 }
 
-fn locked_field(field: &str) -> HttpError {
-    HttpError::bad_request(format!(
+fn locked_field(field: &str) -> ApiError {
+    ApiError::bad_request(format!(
         "{field} is set by the OIDC_{} environment variable",
         field.to_uppercase()
     ))

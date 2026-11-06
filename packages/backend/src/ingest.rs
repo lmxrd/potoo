@@ -12,7 +12,7 @@
 //! accepted so far (the dashboard, the export) call [`Ingest::flush`].
 
 use crate::db::Db;
-use crate::error::HttpError;
+use crate::error::ApiError;
 use crate::profile::{Phase, time, timed};
 use axum::http::StatusCode;
 use sqlx::{Connection, SqliteConnection};
@@ -63,12 +63,12 @@ impl Ingest {
     }
 
     /// Queue a hit without waiting for it to be written.
-    pub fn submit(&self, hit: NewHit) -> Result<(), HttpError> {
+    pub fn submit(&self, hit: NewHit) -> Result<(), ApiError> {
         time(Phase::Enqueue, || {
             self.queue.try_send(Message::Hit(Box::new(hit)))
         })
         .map_err(|_| {
-            HttpError::new(
+            ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Too many hits queued, try again",
             )

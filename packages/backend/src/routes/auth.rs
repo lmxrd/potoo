@@ -1,10 +1,11 @@
 use crate::auth::{
     DATE_FORMATS, KeyUse, Scope, User, hash_password, iso, key_user, verify_password,
 };
-use crate::error::{ErrorBody, HttpError};
+use crate::error::{ApiError, ErrorBody};
 use crate::extract::ApiJson;
+use crate::limits::UserAction;
 use crate::routes::totp::{Step, challenge_cookie, next_step};
-use crate::session::{self, AuthSession};
+use crate::sessions::{self, AuthSession};
 use crate::state::AppState;
 use crate::visitor::client_ip;
 use axum::Json;
@@ -52,7 +53,7 @@ pub enum Access {
 pub struct AuthUser(pub User, pub Access);
 
 impl FromRequestParts<AppState> for AuthUser {
-    type Rejection = HttpError;
+    type Rejection = ApiError;
 
     async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
@@ -61,9 +62,9 @@ impl FromRequestParts<AppState> for AuthUser {
         if let Some(token) = bearer(&parts.headers) {
             let (user, key) = key_user(state.db.reader(), token)
                 .await
-                .ok_or_else(HttpError::unauthorized)?;
+                .ok_or_else(ApiError::unauthorized)?;
             if key.scope == Scope::Read && !parts.method.is_safe() {
-                return Err(HttpError::new(
+                return Err(ApiError::new(
                     StatusCode::FORBIDDEN,
                     "This API key can only read",
                 ));
@@ -74,7 +75,7 @@ impl FromRequestParts<AppState> for AuthUser {
         let user = auth_session(parts, state)
             .await?
             .user
-            .ok_or_else(HttpError::unauthorized)?;
+            .ok_or_else(ApiError::unauthorized)?;
         Ok(AuthUser(user, Access::Session))
     }
 }
@@ -83,10 +84,10 @@ impl FromRequestParts<AppState> for AuthUser {
 async fn auth_session(
     parts: &mut axum::http::request::Parts,
     state: &AppState,
-) -> Result<AuthSession, HttpError> {
+) -> Result<AuthSession, ApiError> {
     AuthSession::from_request_parts(parts, state)
         .await
-        .map_err(|(_, e)| HttpError::internal(format!("no session layer: {e}")))
+        .map_err(|(_, e)| ApiError::internal(format!("no session layer: {e}")))
 }
 
 /// The signed-in user of a session cookie only: an API key is refused
@@ -94,7 +95,7 @@ async fn auth_session(
 pub struct SessionUser(pub User);
 
 impl FromRequestParts<AppState> for SessionUser {
-    type Rejection = HttpError;
+    type Rejection = ApiError;
 
     async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
@@ -102,7 +103,7 @@ impl FromRequestParts<AppState> for SessionUser {
     ) -> Result<Self, Self::Rejection> {
         match AuthUser::from_request_parts(parts, state).await? {
             AuthUser(user, Access::Session) => Ok(SessionUser(user)),
-            AuthUser(_, Access::Key(_)) => Err(HttpError::new(
+            AuthUser(_, Access::Key(_)) => Err(ApiError::new(
                 StatusCode::FORBIDDEN,
                 "Not with an API key: sign in",
             )),
@@ -141,18 +142,18 @@ async fn note_key_use(state: &AppState, key: &KeyUse) {
 }
 
 /// Admin only: an admin's session, or an admin's admin-scoped key.
-pub(crate) fn require_admin(user: &AuthUser) -> Result<(), HttpError> {
+pub(crate) fn require_admin(user: &AuthUser) -> Result<(), ApiError> {
     match user {
         AuthUser(u, Access::Session | Access::Key(Scope::Admin)) if u.is_admin => Ok(()),
-        _ => Err(HttpError::forbidden()),
+        _ => Err(ApiError::forbidden("Admin only")),
     }
 }
 
 /// A theme is one small JSON object — {"base": "light" | "dark",
 /// "accent": "#rrggbb"} — the same form the presets send. Anything else
 /// is a 400; it is cosmetic, but it is still stored.
-fn validate_theme(raw: &str) -> Result<String, HttpError> {
-    let invalid = || HttpError::bad_request("Invalid theme");
+fn validate_theme(raw: &str) -> Result<String, ApiError> {
+    let invalid = || ApiError::bad_request("Invalid theme");
     let value: serde_json::Value = serde_json::from_str(raw).map_err(|_| invalid())?;
     let base = value
         .get("base")
@@ -173,7 +174,7 @@ fn validate_theme(raw: &str) -> Result<String, HttpError> {
     Ok(format!("{{\"base\":\"{base}\",\"accent\":\"{accent}\"}}"))
 }
 
-pub(crate) fn validate_email(raw: &str) -> Result<String, HttpError> {
+pub(crate) fn validate_email(raw: &str) -> Result<String, ApiError> {
     let email = raw.trim().to_lowercase();
     let valid = email.len() <= 254
         && !email.contains(char::is_whitespace)
@@ -190,15 +191,15 @@ pub(crate) fn validate_email(raw: &str) -> Result<String, HttpError> {
     if valid {
         Ok(email)
     } else {
-        Err(HttpError::bad_request("Expected an email address"))
+        Err(ApiError::bad_request("Expected an email address"))
     }
 }
 
-fn validate_password(raw: &str) -> Result<String, HttpError> {
+fn validate_password(raw: &str) -> Result<String, ApiError> {
     if raw.len() >= 10 && raw.len() <= 200 {
         Ok(raw.to_string())
     } else {
-        Err(HttpError::bad_request(
+        Err(ApiError::bad_request(
             "Expected a password of 10 to 200 characters",
         ))
     }
@@ -293,14 +294,14 @@ pub struct UserRow {
     pub totp_enabled: bool,
 }
 
-async fn has_users(state: &AppState) -> Result<bool, HttpError> {
+async fn has_users(state: &AppState) -> Result<bool, ApiError> {
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users")
         .fetch_one(state.db.reader())
         .await?;
     Ok(count > 0)
 }
 
-async fn admin_count<'e>(db: impl SqliteExecutor<'e>) -> Result<i64, HttpError> {
+async fn admin_count<'e>(db: impl SqliteExecutor<'e>) -> Result<i64, ApiError> {
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE is_admin = 1")
         .fetch_one(db)
         .await?;
@@ -322,7 +323,7 @@ async fn admin_count<'e>(db: impl SqliteExecutor<'e>) -> Result<i64, HttpError> 
 async fn session(
     State(state): State<AppState>,
     auth: AuthSession,
-) -> Result<Json<Session>, HttpError> {
+) -> Result<Json<Session>, ApiError> {
     let needs_setup = !has_users(&state).await?;
     let user = if needs_setup { None } else { auth.user };
     let settings = state.oidc.settings();
@@ -366,7 +367,7 @@ async fn setup(
     State(state): State<AppState>,
     mut auth: AuthSession,
     ApiJson(creds): ApiJson<Credentials>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     let email = validate_email(&creds.email)?;
     let password = validate_password(&creds.password)?;
     let id = Uuid::now_v7();
@@ -380,14 +381,14 @@ async fn setup(
     .execute(state.db.writer())
     .await?;
     if inserted.rows_affected() == 0 {
-        return Err(HttpError::new(StatusCode::CONFLICT, "Already set up"));
+        return Err(ApiError::new(StatusCode::CONFLICT, "Already set up"));
     }
     let user = auth
         .backend
         .get_user(&id)
         .await?
-        .ok_or_else(|| HttpError::internal("the new admin is gone"))?;
-    session::sign_in(&mut auth, &user).await?;
+        .ok_or_else(|| ApiError::internal("the new admin is gone"))?;
+    sessions::sign_in(&mut auth, &user).await?;
     Ok(StatusCode::CREATED.into_response())
 }
 
@@ -412,36 +413,37 @@ async fn login(
     mut auth: AuthSession,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
-    body: Result<ApiJson<Credentials>, HttpError>,
-) -> Result<Response, HttpError> {
+    body: Result<ApiJson<Credentials>, ApiError>,
+) -> Result<Response, ApiError> {
     if !state.oidc.passwords_allowed() {
-        return Err(HttpError::passwords_off());
+        return Err(ApiError::passwords_off());
     }
     // A malformed body fails the same way as a wrong password.
     let Ok(ApiJson(creds)) = body else {
-        return Err(HttpError::new(
+        return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "Invalid email or password",
         ));
     };
     let email = validate_email(&creds.email)
-        .map_err(|_| HttpError::new(StatusCode::UNAUTHORIZED, "Invalid email or password"))?;
+        .map_err(|_| ApiError::new(StatusCode::UNAUTHORIZED, "Invalid email or password"))?;
 
     // Every attempt counts, per address and per email (see `limits.rs`).
     let ip = client_ip(&headers, Some(addr.ip()), state.trust_proxy);
-    state.limits.sign_in(&ip, &email)?;
+    state.limits.address(Some(&ip))?;
+    state.limits.email(&email)?;
 
     // The same work and the same answer whether or not the user exists,
-    // or has a password (see `session::Backend::authenticate`).
+    // or has a password (see `sessions::Backend::authenticate`).
     let user = auth
-        .authenticate(session::Credentials {
+        .authenticate(sessions::Credentials {
             email,
             password: creds.password,
         })
         .await
         .map_err(anyhow::Error::new)?;
     let Some(user) = user else {
-        return Err(HttpError::new(
+        return Err(ApiError::new(
             StatusCode::UNAUTHORIZED,
             "Invalid email or password",
         ));
@@ -456,7 +458,7 @@ async fn login(
         )
             .into_response());
     }
-    session::sign_in(&mut auth, &user).await?;
+    sessions::sign_in(&mut auth, &user).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -481,8 +483,8 @@ pub struct LoginStep {
         (status = 204, description = "Signed out; the session cookie is cleared"),
     ),
 )]
-async fn logout(mut auth: AuthSession) -> Result<Response, HttpError> {
-    auth.logout().await.map_err(anyhow::Error::new)?;
+async fn logout(mut auth: AuthSession) -> Result<Response, ApiError> {
+    sessions::sign_out(&mut auth).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -507,7 +509,7 @@ async fn change_email(
     State(state): State<AppState>,
     user: SessionUser,
     ApiJson(body): ApiJson<ChangeEmail>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     let email = validate_email(&body.email)?;
     let mut tx = state.db.writer().begin().await?;
     let taken: Option<i64> =
@@ -517,7 +519,7 @@ async fn change_email(
             .fetch_optional(&mut *tx)
             .await?;
     if taken.is_some() {
-        return Err(HttpError::new(StatusCode::CONFLICT, "Email already in use"));
+        return Err(ApiError::new(StatusCode::CONFLICT, "Email already in use"));
     }
     sqlx::query("UPDATE users SET email = ?1 WHERE id = ?2")
         .bind(&email)
@@ -549,14 +551,14 @@ async fn change_settings(
     State(state): State<AppState>,
     user: SessionUser,
     ApiJson(body): ApiJson<ChangeSettings>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     if body.date_format.is_none() && body.use_24.is_none() && body.theme.is_none() {
-        return Err(HttpError::bad_request("A setting to change is required"));
+        return Err(ApiError::bad_request("A setting to change is required"));
     }
     if let Some(format) = &body.date_format
         && !DATE_FORMATS.contains(&format.as_str())
     {
-        return Err(HttpError::bad_request("Invalid setting"));
+        return Err(ApiError::bad_request("Invalid setting"));
     }
     let theme = body.theme.as_deref().map(validate_theme).transpose()?;
     // Each setting that was sent changes, or none does.
@@ -609,16 +611,16 @@ async fn change_password(
     user: SessionUser,
     mut auth: AuthSession,
     ApiJson(body): ApiJson<ChangePassword>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     if !state.oidc.passwords_allowed() {
-        return Err(HttpError::passwords_off());
+        return Err(ApiError::passwords_off());
     }
     // The current password is a guess like any other (see `limits.rs`).
-    state.limits.user(user.0.id, None)?;
-    let invalid = || HttpError::new(StatusCode::UNAUTHORIZED, "Invalid password");
+    state.limits.user(UserAction::Password, user.0.id)?;
+    let invalid = || ApiError::new(StatusCode::UNAUTHORIZED, "Invalid password");
     let current = body.current_password.unwrap_or_default();
     if current.len() > 200 {
-        return Err(HttpError::bad_request("Invalid password"));
+        return Err(ApiError::bad_request("Invalid password"));
     }
     let new_password = validate_password(&body.new_password)?;
     // The hashing below takes a while: no connection is held meanwhile.
@@ -649,7 +651,7 @@ async fn change_password(
         return Err(invalid());
     }
     // The user's other sessions are signed out; this one stays.
-    session::refresh(&mut auth, user.0.id).await?;
+    sessions::refresh(&mut auth, user.0.id).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -670,7 +672,7 @@ async fn change_password(
 async fn list_users(
     State(state): State<AppState>,
     user: AuthUser,
-) -> Result<Json<Vec<UserRow>>, HttpError> {
+) -> Result<Json<Vec<UserRow>>, ApiError> {
     require_admin(&user)?;
     let rows: Vec<UserRow> = sqlx::query_as(
         "SELECT id, email, is_admin, created_at, password_hash IS NOT NULL AS has_password,
@@ -706,20 +708,20 @@ async fn create_user(
     State(state): State<AppState>,
     user: AuthUser,
     ApiJson(body): ApiJson<CreateUser>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     require_admin(&user)?;
     let email = validate_email(&body.email)?;
     // Without a password the user can only sign in through the provider.
     let password = body.password.as_deref().filter(|p| !p.is_empty());
     if password.is_some() && !state.oidc.passwords_allowed() {
-        return Err(HttpError::passwords_off());
+        return Err(ApiError::passwords_off());
     }
     let password_hash = match password {
         Some(password) => Some(hash_password(&validate_password(password)?)),
         None if !state.oidc.passwords_allowed() => None,
         None if state.oidc.settings().enabled() => None,
         None => {
-            return Err(HttpError::bad_request(
+            return Err(ApiError::bad_request(
                 "Expected a password of 10 to 200 characters",
             ));
         }
@@ -730,7 +732,7 @@ async fn create_user(
         .fetch_optional(&mut *tx)
         .await?;
     if taken.is_some() {
-        return Err(HttpError::new(StatusCode::CONFLICT, "Email already in use"));
+        return Err(ApiError::new(StatusCode::CONFLICT, "Email already in use"));
     }
     sqlx::query("INSERT INTO users (id, email, password_hash, is_admin) VALUES (?1, ?2, ?3, ?4)")
         .bind(Uuid::now_v7())
@@ -770,7 +772,7 @@ async fn change_role(
     user: AuthUser,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
     ApiJson(body): ApiJson<ChangeRole>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     require_admin(&user)?;
     let mut tx = state.db.writer().begin().await?;
     let target: Option<i64> = sqlx::query_scalar("SELECT is_admin FROM users WHERE id = ?1")
@@ -778,10 +780,10 @@ async fn change_role(
         .fetch_optional(&mut *tx)
         .await?;
     let Some(target) = target else {
-        return Err(HttpError::new(StatusCode::NOT_FOUND, "Not found"));
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "Not found"));
     };
     if target == 1 && !body.is_admin && admin_count(&mut *tx).await? == 1 {
-        return Err(HttpError::new(
+        return Err(ApiError::new(
             StatusCode::CONFLICT,
             "Cannot demote the last admin",
         ));
@@ -815,7 +817,7 @@ async fn delete_user(
     State(state): State<AppState>,
     user: AuthUser,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     require_admin(&user)?;
     let mut tx = state.db.writer().begin().await?;
     let target: Option<i64> = sqlx::query_scalar("SELECT is_admin FROM users WHERE id = ?1")
@@ -826,7 +828,7 @@ async fn delete_user(
         return Ok(StatusCode::NO_CONTENT.into_response());
     };
     if target == 1 && admin_count(&mut *tx).await? == 1 {
-        return Err(HttpError::new(
+        return Err(ApiError::new(
             StatusCode::CONFLICT,
             "Cannot delete the last admin",
         ));
@@ -865,10 +867,10 @@ async fn reset_password(
     user: AuthUser,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
     ApiJson(body): ApiJson<ResetPassword>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     require_admin(&user)?;
     if !state.oidc.passwords_allowed() {
-        return Err(HttpError::passwords_off());
+        return Err(ApiError::passwords_off());
     }
     let password = validate_password(&body.new_password)?;
     let updated = sqlx::query("UPDATE users SET password_hash = ?1 WHERE id = ?2")
@@ -878,7 +880,7 @@ async fn reset_password(
         .await?
         .rows_affected();
     if updated == 0 {
-        return Err(HttpError::new(StatusCode::NOT_FOUND, "Not found"));
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "Not found"));
     }
     Ok(StatusCode::NO_CONTENT.into_response())
 }

@@ -14,7 +14,7 @@ pub mod oidc;
 pub mod openapi;
 pub mod profile;
 pub mod routes;
-pub mod session;
+pub mod sessions;
 pub mod state;
 pub mod stats;
 pub mod totp;
@@ -38,23 +38,18 @@ pub fn api() -> utoipa_axum::router::OpenApiRouter<AppState> {
 pub fn app(state: AppState) -> Router {
     let (router, _spec) = api().split_for_parts();
     // Sessions (tower-sessions, our store) and who is signed in on them
-    // (axum-login). A session is only loaded when a handler asks for it.
-    let sessions = tower_sessions::SessionManagerLayer::new(session::Store::new(state.db.clone()))
-        .with_name(session::cookie_name(state.secure_cookies))
-        .with_path("/")
-        .with_http_only(true)
-        .with_same_site(tower_sessions::cookie::SameSite::Strict)
-        .with_secure(state.secure_cookies);
-    let auth =
-        axum_login::AuthManagerLayerBuilder::new(session::Backend::new(state.db.clone()), sessions)
-            .build();
+    // (axum-login).
     frontend::mount(router)
-        .layer(auth)
+        .layer(sessions::layer(&state))
+        .layer(axum::middleware::map_response_with_state(
+            state.secure_cookies,
+            sessions::secure_removals,
+        ))
         // Outside the sessions: a forged request is refused before any
         // session is loaded or saved.
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
-            csrf::check,
+            csrf::protect,
         ))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state)

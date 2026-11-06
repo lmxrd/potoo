@@ -3,7 +3,7 @@
 //! cannot list, make or revoke keys); the token is shown once, on creation.
 
 use crate::auth::{API_KEY_PREFIX, Scope, iso};
-use crate::error::{ErrorBody, HttpError};
+use crate::error::{ApiError, ErrorBody};
 use crate::extract::ApiJson;
 use crate::routes::auth::SessionUser;
 use crate::state::AppState;
@@ -109,7 +109,7 @@ const COLUMNS: &str = "id, name, prefix, scope, created_at, last_used_at, expire
 async fn list_keys(
     State(state): State<AppState>,
     SessionUser(user): SessionUser,
-) -> Result<Json<Vec<ApiKey>>, HttpError> {
+) -> Result<Json<Vec<ApiKey>>, ApiError> {
     let rows: Vec<ApiKeyRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT {COLUMNS} FROM api_keys WHERE user_id = ?1 ORDER BY id DESC"
     )))
@@ -141,15 +141,15 @@ async fn create_key(
     State(state): State<AppState>,
     SessionUser(user): SessionUser,
     ApiJson(body): ApiJson<CreateApiKey>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     let name = body.name.trim();
     if name.is_empty() || name.chars().count() > 100 {
-        return Err(HttpError::bad_request(
+        return Err(ApiError::bad_request(
             "Expected a name of 1 to 100 characters",
         ));
     }
     if body.scope == Scope::Admin && !user.is_admin {
-        return Err(HttpError::new(
+        return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "Only admins can create admin keys",
         ));
@@ -160,7 +160,7 @@ async fn create_key(
             SystemTime::now() + Duration::from_secs(days as u64 * 86_400)
         )),
         Some(_) => {
-            return Err(HttpError::bad_request(
+            return Err(ApiError::bad_request(
                 "Expected an expiry of 1 to 3650 days",
             ));
         }
@@ -174,7 +174,7 @@ async fn create_key(
         .fetch_one(&mut *tx)
         .await?;
     if count >= MAX_KEYS {
-        return Err(HttpError::new(
+        return Err(ApiError::new(
             StatusCode::CONFLICT,
             "Too many API keys: revoke one first",
         ));
@@ -223,7 +223,7 @@ async fn revoke_key(
     State(state): State<AppState>,
     SessionUser(user): SessionUser,
     Path(id): Path<Uuid>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     let deleted = sqlx::query("DELETE FROM api_keys WHERE id = ?1 AND user_id = ?2")
         .bind(id)
         .bind(user.id)
@@ -231,7 +231,7 @@ async fn revoke_key(
         .await?
         .rows_affected();
     if deleted == 0 {
-        return Err(HttpError::new(StatusCode::NOT_FOUND, "Not found"));
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "Not found"));
     }
     Ok(StatusCode::NO_CONTENT.into_response())
 }

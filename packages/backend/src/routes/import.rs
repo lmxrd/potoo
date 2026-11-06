@@ -1,4 +1,4 @@
-use crate::error::{ErrorBody, HttpError};
+use crate::error::{ApiError, ErrorBody};
 use crate::routes::auth::AuthUser;
 use crate::routes::collect::{clean_path, clean_referrer};
 use crate::routes::sites::validate_hostname;
@@ -86,12 +86,12 @@ pub struct ImportRejected {
 /// A failed import: an ordinary error, or the list of what is wrong with
 /// the file.
 enum Failure {
-    Http(HttpError),
+    Http(ApiError),
     Rejected(Vec<ImportProblem>, usize),
 }
 
-impl From<HttpError> for Failure {
-    fn from(e: HttpError) -> Self {
+impl From<ApiError> for Failure {
+    fn from(e: ApiError) -> Self {
         Failure::Http(e)
     }
 }
@@ -159,7 +159,7 @@ async fn import(
     request: Request,
 ) -> Result<Json<ImportResult>, Failure> {
     if !user.0.is_admin {
-        return Err(HttpError::forbidden().into());
+        return Err(ApiError::forbidden("Admin only").into());
     }
     let csv = read_csv(&state, request).await?;
 
@@ -177,7 +177,7 @@ async fn import(
         let (csv, sites) = (csv.clone(), sites.clone());
         tokio::task::spawn_blocking(move || check(&csv, &sites, query.create_sites))
             .await
-            .map_err(|e| HttpError::internal(e.to_string()))?
+            .map_err(|e| ApiError::internal(e.to_string()))?
     };
     if problems.total > 0 {
         return Err(Failure::Rejected(problems.listed, problems.total));
@@ -199,7 +199,7 @@ async fn import(
     let width = reader.headers().map_or(REQUIRED, |h| h.len());
     let mut imported = 0;
     for record in reader.records() {
-        let record = record.map_err(|e| HttpError::internal(e.to_string()))?;
+        let record = record.map_err(|e| ApiError::internal(e.to_string()))?;
         let row = parse_row(&record, &sites, width, false).expect("the check passed");
         sqlx::query(
             "INSERT INTO hits
@@ -232,7 +232,7 @@ async fn import(
 }
 
 /// The CSV of the request: the `file` part of a form, or the body.
-async fn read_csv(state: &AppState, request: Request) -> Result<Bytes, HttpError> {
+async fn read_csv(state: &AppState, request: Request) -> Result<Bytes, ApiError> {
     let content_type = request
         .headers()
         .get(header::CONTENT_TYPE)
@@ -240,7 +240,7 @@ async fn read_csv(state: &AppState, request: Request) -> Result<Bytes, HttpError
         .unwrap_or("")
         .to_ascii_lowercase();
     let unreadable = |e: &dyn std::fmt::Display| {
-        HttpError::new(
+        ApiError::new(
             StatusCode::BAD_REQUEST,
             format!("The upload could not be read: {e}"),
         )
@@ -254,7 +254,7 @@ async fn read_csv(state: &AppState, request: Request) -> Result<Bytes, HttpError
                 return field.bytes().await.map_err(|e| unreadable(&e));
             }
         }
-        return Err(HttpError::bad_request(
+        return Err(ApiError::bad_request(
             "The form has no `file` part with the CSV",
         ));
     }
@@ -263,7 +263,7 @@ async fn read_csv(state: &AppState, request: Request) -> Result<Bytes, HttpError
             .await
             .map_err(|e| unreadable(&e));
     }
-    Err(HttpError::new(
+    Err(ApiError::new(
         StatusCode::UNSUPPORTED_MEDIA_TYPE,
         "Send multipart/form-data, text/csv or text/plain",
     ))

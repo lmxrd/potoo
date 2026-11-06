@@ -1,91 +1,104 @@
-//! How often someone may try to sign in, or enter a code: governor's
-//! keyed rate limiters, in memory (a restart forgets them, which keeps the
-//! no-storage promise). Every attempt counts, right or wrong, and going over
-//! is a 429 with `Retry-After`, never a lockout: nobody can lock someone
-//! else out, only slow down guessing. The quotas are woodmouse's too.
+//! Limits on guessing: keyed rate limiters (governor, GCRA) on every attempt, not only failed ones, in
+//! memory only (the address is never stored). The quotas are potoo's:
 //!
-//! - per email: 5 at once, then 1 a minute;
-//! - per client IP (the forwarded one with `TRUST_PROXY`): 30 at once, then
-//!   1 every 6 seconds;
-//! - per user, for codes from the authenticator app and the password: 5 at
-//!   once, then 1 a minute.
+//! - per email (lowercase) of a password sign-in: a burst of 5, then 1 a minute;
+//! - per client address (`TRUST_PROXY`-aware, see `routes::auth::client_ip`) of a password sign-in, the
+//!   two-factor code step and two-factor setup at sign-in: a burst of 30, then 1 every 6 seconds;
+//! - per user, for two-factor codes (the code step, setup, and every settings action that checks a code)
+//!   and, separately, for password changes: a burst of 5, then 1 a minute.
+//!
+//! Over a limit the answer is 429 with `Retry-After` (seconds). `main` calls [`Limits::retain_recent`]
+//! now and then, so keys that have refilled are forgotten and memory stays bounded.
 
-use crate::error::HttpError;
-use governor::clock::{Clock, DefaultClock};
-use governor::{DefaultKeyedRateLimiter, Quota};
-use std::hash::Hash;
 use std::num::NonZeroU32;
 use std::time::Duration;
-use uuid::Uuid;
 
-pub struct Limits {
-    email: DefaultKeyedRateLimiter<String>,
-    ip: DefaultKeyedRateLimiter<String>,
-    user: DefaultKeyedRateLimiter<Uuid>,
+use governor::clock::{Clock, DefaultClock};
+use governor::{DefaultKeyedRateLimiter, Quota, RateLimiter};
+
+use crate::error::ApiError;
+
+/// What a user-keyed limit is for: each has its own budget.
+#[derive(Clone, Copy, Debug)]
+pub enum UserAction {
+    /// A two-factor code or recovery code.
+    Code,
+    /// Changing the password.
+    Password,
 }
 
-fn quota(burst: u32, refill: Duration) -> Quota {
-    Quota::with_period(refill)
+pub struct Limits {
+    by_email: DefaultKeyedRateLimiter<String>,
+    by_address: DefaultKeyedRateLimiter<String>,
+    by_user: DefaultKeyedRateLimiter<String>,
+}
+
+fn quota(burst: u32, refill_every: Duration) -> Quota {
+    Quota::with_period(refill_every)
         .expect("a period above zero")
         .allow_burst(NonZeroU32::new(burst).expect("a burst above zero"))
 }
 
 impl Default for Limits {
+    /// The quotas in force (see the module docs).
     fn default() -> Self {
-        Self::with_bursts(5, 30, 5)
+        Self::with_quotas(
+            quota(5, Duration::from_secs(60)),
+            quota(30, Duration::from_secs(6)),
+            quota(5, Duration::from_secs(60)),
+        )
     }
 }
 
 impl Limits {
-    /// The quotas above, with other bursts: the tests of everything but
-    /// the limits themselves use large ones.
-    pub fn with_bursts(email: u32, ip: u32, user: u32) -> Self {
+    /// Other quotas: per email, per address, per user.
+    pub fn with_quotas(email: Quota, address: Quota, user: Quota) -> Self {
         Self {
-            email: DefaultKeyedRateLimiter::keyed(quota(email, Duration::from_secs(60))),
-            ip: DefaultKeyedRateLimiter::keyed(quota(ip, Duration::from_secs(6))),
-            user: DefaultKeyedRateLimiter::keyed(quota(user, Duration::from_secs(60))),
+            by_email: RateLimiter::keyed(email),
+            by_address: RateLimiter::keyed(address),
+            by_user: RateLimiter::keyed(user),
         }
     }
-}
 
-/// One attempt for a key, or a 429 saying how long to wait.
-fn attempt<K: Hash + Eq + Clone>(
-    limiter: &DefaultKeyedRateLimiter<K>,
-    key: &K,
-) -> Result<(), HttpError> {
-    limiter.check_key(key).map_err(|not_until| {
-        let wait = not_until.wait_time_from(DefaultClock::default().now());
-        HttpError::TooManyRequests {
-            retry_after: wait.as_secs_f64().ceil().max(1.0) as u64,
-        }
-    })
-}
-
-impl Limits {
-    /// A password sign-in: from this address, for this email.
-    pub fn sign_in(&self, ip: &str, email: &str) -> Result<(), HttpError> {
-        attempt(&self.ip, &ip.to_string())?;
-        attempt(&self.email, &email.to_lowercase())
+    /// So generous that nothing a test does reaches them (tests that check a limit use the default).
+    pub fn generous() -> Self {
+        let wide = quota(10_000, Duration::from_millis(1));
+        Self::with_quotas(wide, wide, wide)
     }
 
-    /// A code (or the password) of a signed-in user, or of one in the
-    /// middle of signing in (then from an address too).
-    pub fn user(&self, user_id: Uuid, ip: Option<&str>) -> Result<(), HttpError> {
-        if let Some(ip) = ip {
-            attempt(&self.ip, &ip.to_string())?;
-        }
-        attempt(&self.user, &user_id)
+    fn check(limiter: &DefaultKeyedRateLimiter<String>, key: String) -> Result<(), ApiError> {
+        limiter.check_key(&key).map_err(|not_until| {
+            let wait = not_until.wait_time_from(DefaultClock::default().now());
+            // Whole seconds, rounded up: `Retry-After: 0` would invite an immediate retry.
+            ApiError::TooManyRequests {
+                retry_after: wait.as_secs() + u64::from(wait.subsec_nanos() > 0),
+            }
+        })
     }
 
-    /// Forget the keys that are back to their full quota, so memory stays
-    /// bounded however many addresses and emails were tried.
-    pub fn forget_idle(&self) {
-        for limiter in [&self.email, &self.ip] {
-            limiter.retain_recent();
-            limiter.shrink_to_fit();
+    /// A password sign-in for `email`.
+    pub fn email(&self, email: &str) -> Result<(), ApiError> {
+        Self::check(&self.by_email, email.trim().to_lowercase())
+    }
+
+    /// An attempt from `address`; nothing to count when it is unknown.
+    pub fn address(&self, address: Option<&str>) -> Result<(), ApiError> {
+        match address {
+            Some(address) => Self::check(&self.by_address, address.to_string()),
+            None => Ok(()),
         }
-        self.user.retain_recent();
-        self.user.shrink_to_fit();
+    }
+
+    /// An attempt by `user_id` at `action`.
+    pub fn user(&self, action: UserAction, user_id: uuid::Uuid) -> Result<(), ApiError> {
+        Self::check(&self.by_user, format!("{action:?}:{user_id}"))
+    }
+
+    /// Forget the keys that have refilled completely.
+    pub fn retain_recent(&self) {
+        self.by_email.retain_recent();
+        self.by_address.retain_recent();
+        self.by_user.retain_recent();
     }
 }
 
@@ -94,41 +107,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn five_attempts_per_email_then_wait() {
+    fn the_quotas_are_woodmouses() {
         let limits = Limits::default();
         for _ in 0..5 {
-            limits.sign_in("192.0.2.1", "a@example.com").unwrap();
+            limits.email("A@b.c").unwrap();
         }
-        let Err(HttpError::TooManyRequests { retry_after }) =
-            limits.sign_in("192.0.2.1", "A@example.com")
-        else {
-            panic!("the sixth attempt is refused, whatever the case of the email");
-        };
-        assert!((1..=60).contains(&retry_after));
-        // Another email is not affected.
-        limits.sign_in("192.0.2.1", "b@example.com").unwrap();
-    }
-
-    #[test]
-    fn thirty_attempts_per_address() {
-        let limits = Limits::default();
-        for i in 0..30 {
-            limits
-                .sign_in("192.0.2.1", &format!("{i}@example.com"))
-                .unwrap();
+        // The same email in another case counts too, and the answer says when to retry.
+        match limits.email("a@B.c") {
+            Err(ApiError::TooManyRequests { retry_after }) => {
+                assert!((1..=60).contains(&retry_after), "{retry_after}")
+            }
+            other => panic!("{other:?}"),
         }
-        assert!(limits.sign_in("192.0.2.1", "x@example.com").is_err());
-        limits.sign_in("192.0.2.2", "x@example.com").unwrap();
-    }
+        limits.email("other@b.c").unwrap();
 
-    #[test]
-    fn five_codes_per_user() {
-        let limits = Limits::default();
-        let (one, other) = (Uuid::from_u128(7), Uuid::from_u128(8));
+        for _ in 0..30 {
+            limits.address(Some("1.2.3.4")).unwrap();
+        }
+        assert!(limits.address(Some("1.2.3.4")).is_err());
+        assert!(limits.address(None).is_ok());
+
+        let user = uuid::Uuid::now_v7();
         for _ in 0..5 {
-            limits.user(one, None).unwrap();
+            limits.user(UserAction::Code, user).unwrap();
         }
-        assert!(limits.user(one, None).is_err());
-        limits.user(other, None).unwrap();
+        assert!(limits.user(UserAction::Code, user).is_err());
+        // A separate budget for password changes.
+        limits.user(UserAction::Password, user).unwrap();
+        limits.retain_recent();
     }
 }

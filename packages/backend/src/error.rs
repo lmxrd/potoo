@@ -1,117 +1,173 @@
-use axum::Json;
-use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
+//! The API's error type. Every handler returns `Result<_, ApiError>`; the error becomes a status and a
+//! `{"error": "..."}` body ([`ErrorBody`]), in sentence case ("Not found"). Client errors carry their own
+//! message; every 500 (a database error, [`ApiError::internal`], anything from `anyhow`) is logged with its
+//! cause and answered with a bare "Internal server error", so nothing about the server leaks. A row that is
+//! not there is a 404.
+
+use axum::{
+    Json,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+};
 use serde::Serialize;
 use utoipa::ToSchema;
 
-/// The body of every error response: `{"error": "..."}`.
+/// Why a request failed.
+#[derive(Debug, thiserror::Error)]
+pub enum ApiError {
+    /// Invalid request payload (validation failures).
+    #[error("{0}")]
+    BadRequest(String),
+    /// Missing or invalid session.
+    #[error("Authentication required")]
+    Unauthorized,
+    /// Signed in, but not allowed to do this.
+    #[error("{0}")]
+    Forbidden(String),
+    /// Does not exist *or* is outside the caller's access: the same status for both, so existence is not
+    /// leaked.
+    #[error("Not found")]
+    NotFound,
+    #[error("{0}")]
+    Conflict(String),
+    /// The request body exceeds the configured limit.
+    #[error("{0}")]
+    PayloadTooLarge(String),
+    /// Too many attempts (`crate::limits`): answered with `Retry-After`.
+    #[error("Too many attempts, try again later")]
+    TooManyRequests { retry_after: u64 },
+    /// Something on our side failed: the message is for the log, the client gets "Internal server error".
+    #[error("{0}")]
+    Internal(String),
+    /// Any other status (an extractor's rejection, a full ingest queue).
+    #[error("{message}")]
+    Status { status: StatusCode, message: String },
+    #[error("database error")]
+    Sqlx(#[source] sqlx::Error),
+    /// Anything else that went wrong.
+    #[error(transparent)]
+    Other(#[from] anyhow::Error),
+}
+
+/// What every 500 says.
+const INTERNAL: &str = "Internal server error";
+
+/// The body of every error response.
 #[derive(Serialize, ToSchema)]
 pub struct ErrorBody {
-    /// What went wrong, fit to show to a person.
+    /// What went wrong, for people.
     pub error: String,
 }
 
-/// An error answered as an [`ErrorBody`] with its status, the shape every
-/// frontend call understands. What the client may know is a `Status` with
-/// its message; a failure on our side (the database, or anything else) is
-/// logged with its causes and answered with a plain 500, so no internal
-/// detail reaches the client.
-#[derive(Debug, thiserror::Error)]
-pub enum HttpError {
-    /// An answer for the client: the status, and a message fit to show.
-    #[error("{status}: {message}")]
-    Status { status: StatusCode, message: String },
-    /// Too many attempts (see `limits.rs`): try again in this many seconds.
-    #[error("too many attempts, retry after {retry_after} s")]
-    TooManyRequests { retry_after: u64 },
-    /// The database failed.
-    #[error("database error")]
-    Database(#[from] sqlx::Error),
-    /// Something else failed on our side.
-    #[error(transparent)]
-    Internal(#[from] anyhow::Error),
-}
-
-impl HttpError {
+impl ApiError {
+    /// An error with any status. A known status becomes its own variant.
     pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
-        Self::Status {
-            status,
-            message: message.into(),
+        let message = sentence(message.into());
+        match status {
+            StatusCode::BAD_REQUEST => Self::BadRequest(message),
+            StatusCode::FORBIDDEN => Self::Forbidden(message),
+            StatusCode::CONFLICT => Self::Conflict(message),
+            StatusCode::PAYLOAD_TOO_LARGE => Self::PayloadTooLarge(message),
+            StatusCode::INTERNAL_SERVER_ERROR => Self::Internal(message),
+            status => Self::Status { status, message },
         }
     }
 
     pub fn bad_request(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::BAD_REQUEST, message)
+        Self::BadRequest(sentence(message.into()))
     }
 
     pub fn unauthorized() -> Self {
-        Self::from_status(StatusCode::UNAUTHORIZED)
+        Self::Unauthorized
     }
 
-    pub fn forbidden() -> Self {
-        Self::from_status(StatusCode::FORBIDDEN)
+    pub fn forbidden(message: impl Into<String>) -> Self {
+        Self::Forbidden(sentence(message.into()))
     }
 
     /// Password sign-in is turned off (`OIDC_ONLY`).
     pub fn passwords_off() -> Self {
-        Self::new(
-            StatusCode::FORBIDDEN,
-            "Password sign-in is turned off: use single sign-on",
-        )
+        Self::forbidden("Password sign-in is turned off: use single sign-on")
     }
 
     pub fn not_found() -> Self {
-        Self::new(StatusCode::NOT_FOUND, "Not found")
+        Self::NotFound
     }
 
     pub fn conflict(message: impl Into<String>) -> Self {
-        Self::new(StatusCode::CONFLICT, message)
+        Self::Conflict(sentence(message.into()))
     }
 
-    /// An error that needs no more words than its status: the message is
-    /// the status's canonical reason.
-    fn from_status(status: StatusCode) -> Self {
-        Self::new(status, status.canonical_reason().unwrap_or("Error"))
+    pub fn payload_too_large(message: impl Into<String>) -> Self {
+        Self::PayloadTooLarge(sentence(message.into()))
     }
 
-    /// A failure on our side, with what failed for the log; the client
-    /// gets a plain 500.
-    pub fn internal(message: impl std::fmt::Display + Send + Sync + 'static) -> Self {
-        Self::Internal(anyhow::anyhow!("{message}"))
+    pub fn internal(message: impl Into<String>) -> Self {
+        Self::Internal(message.into())
     }
 
-    /// The status this error is answered with.
     pub fn status(&self) -> StatusCode {
         match self {
-            Self::Status { status, .. } => *status,
+            Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::Unauthorized => StatusCode::UNAUTHORIZED,
+            Self::Forbidden(_) => StatusCode::FORBIDDEN,
+            Self::NotFound => StatusCode::NOT_FOUND,
+            Self::Conflict(_) => StatusCode::CONFLICT,
+            Self::PayloadTooLarge(_) => StatusCode::PAYLOAD_TOO_LARGE,
             Self::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
-            Self::Database(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Status { status, .. } => *status,
+            Self::Internal(_) | Self::Sqlx(_) | Self::Other(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }
 
-impl IntoResponse for HttpError {
+/// The message with its first letter capitalized: every client message is in sentence case.
+fn sentence(message: String) -> String {
+    let mut chars = message.chars();
+    match chars.next() {
+        Some(first) if first.is_lowercase() => first.to_uppercase().chain(chars).collect(),
+        _ => message,
+    }
+}
+
+impl From<sqlx::Error> for ApiError {
+    fn from(err: sqlx::Error) -> Self {
+        match err {
+            sqlx::Error::RowNotFound => Self::NotFound,
+            err => Self::Sqlx(err),
+        }
+    }
+}
+
+impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = self.status();
-        let error = match self {
-            Self::Status { message, .. } => message,
-            Self::TooManyRequests { retry_after } => {
-                let body = Json(ErrorBody {
-                    error: "Too many attempts, try again later".into(),
-                });
-                return (status, [("retry-after", retry_after.to_string())], body).into_response();
+        let error = match &self {
+            Self::Sqlx(_) | Self::Other(_) => {
+                // `{:#}` on anyhow prints the whole chain; the database variant names its source.
+                let cause = match &self {
+                    Self::Other(e) => format!("{e:#}"),
+                    Self::Sqlx(e) => e.to_string(),
+                    _ => unreachable!(),
+                };
+                tracing::error!(error = %self, cause, "request failed");
+                INTERNAL.to_string()
             }
-            // `{:#}` is the error with its causes, on one line.
-            Self::Database(e) => {
-                tracing::error!("database error: {e:#}");
-                "Internal server error".to_string()
+            Self::Internal(message) => {
+                tracing::error!(error = %message, "request failed");
+                INTERNAL.to_string()
             }
-            Self::Internal(e) => {
-                tracing::error!("internal error: {e:#}");
-                "Internal server error".to_string()
-            }
+            other => other.to_string(),
         };
-        (status, Json(ErrorBody { error })).into_response()
+        match self {
+            Self::TooManyRequests { retry_after } => (
+                status,
+                [(axum::http::header::RETRY_AFTER, retry_after.to_string())],
+                Json(ErrorBody { error }),
+            )
+                .into_response(),
+            _ => (status, Json(ErrorBody { error })).into_response(),
+        }
     }
 }
 
@@ -119,7 +175,7 @@ impl IntoResponse for HttpError {
 mod tests {
     use super::*;
 
-    async fn body(error: HttpError) -> (StatusCode, String) {
+    async fn body(error: ApiError) -> (StatusCode, String) {
         let response = error.into_response();
         let status = response.status();
         let bytes = axum::body::to_bytes(response.into_body(), 1024)
@@ -130,9 +186,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_failure_on_our_side_says_nothing_of_it() {
-        let database = HttpError::from(sqlx::Error::Protocol("secret detail".into()));
-        let internal = HttpError::internal("saving failed: secret detail");
-        for error in [database, internal] {
+        let database = ApiError::from(sqlx::Error::Protocol("secret detail".into()));
+        let internal = ApiError::internal("saving failed: secret detail");
+        let other = ApiError::from(anyhow::anyhow!("disk full").context("writing the export"));
+        for error in [database, internal, other] {
             let (status, body) = body(error).await;
             assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
             assert_eq!(body, r#"{"error":"Internal server error"}"#);
@@ -141,8 +198,24 @@ mod tests {
 
     #[tokio::test]
     async fn a_client_error_keeps_its_status_and_message() {
-        let (status, body) = body(HttpError::conflict("Email already in use")).await;
+        let (status, body) = body(ApiError::conflict("email already in use")).await;
         assert_eq!(status, StatusCode::CONFLICT);
         assert_eq!(body, r#"{"error":"Email already in use"}"#);
+    }
+
+    #[test]
+    fn missing_rows_are_404_and_new_picks_the_variant() {
+        assert_eq!(
+            ApiError::from(sqlx::Error::RowNotFound).status(),
+            StatusCode::NOT_FOUND
+        );
+        assert!(matches!(
+            ApiError::new(StatusCode::FORBIDDEN, "No"),
+            ApiError::Forbidden(_)
+        ));
+        assert_eq!(
+            ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, "X").status(),
+            StatusCode::UNPROCESSABLE_ENTITY
+        );
     }
 }

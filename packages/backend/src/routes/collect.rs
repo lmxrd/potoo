@@ -1,4 +1,4 @@
-use crate::error::{ErrorBody, HttpError};
+use crate::error::{ApiError, ErrorBody};
 use crate::ingest::NewHit;
 use crate::profile::{Phase, timed};
 use crate::state::AppState;
@@ -89,7 +89,7 @@ async fn record(
     headers: &HeaderMap,
     addr: Option<std::net::IpAddr>,
     hit: Hit,
-) -> Result<(), HttpError> {
+) -> Result<(), ApiError> {
     let host = hit
         .host
         .clone()
@@ -181,7 +181,7 @@ async fn collect_post(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: String,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     if let Ok(hit) = serde_json::from_str::<CollectBody>(&body) {
         let kind = match hit.kind.as_str() {
             "pageview" => Kind::Pageview,
@@ -228,7 +228,7 @@ async fn collect_pixel(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     let referer = headers
         .get("referer")
         .and_then(|v| v.to_str().ok())

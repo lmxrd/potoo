@@ -10,10 +10,11 @@
 //! the latter starts the session.
 
 use crate::auth::User;
-use crate::error::{ErrorBody, HttpError};
+use crate::error::{ApiError, ErrorBody};
 use crate::extract::ApiJson;
+use crate::limits::UserAction;
 use crate::routes::auth::{AuthUser, SessionUser, require_admin};
-use crate::session::{self, AuthSession};
+use crate::sessions::{self, AuthSession};
 use crate::state::AppState;
 use crate::totp;
 use crate::visitor::client_ip;
@@ -138,9 +139,9 @@ pub(crate) fn challenge_cookie(state: &AppState, user_id: Uuid, step: Step) -> S
 }
 
 /// The user of a valid, unexpired challenge cookie for this step, or a 401.
-fn challenged_user(state: &AppState, headers: &HeaderMap, step: Step) -> Result<Uuid, HttpError> {
+fn challenged_user(state: &AppState, headers: &HeaderMap, step: Step) -> Result<Uuid, ApiError> {
     let expired = || {
-        HttpError::new(
+        ApiError::new(
             StatusCode::UNAUTHORIZED,
             "The sign-in expired, sign in again",
         )
@@ -170,26 +171,26 @@ async fn finish_sign_in(
     state: &AppState,
     auth: &mut AuthSession,
     user_id: Uuid,
-) -> Result<CookieJar, HttpError> {
+) -> Result<CookieJar, ApiError> {
     let user = auth
         .backend
         .get_user(&user_id)
         .await?
-        .ok_or_else(HttpError::unauthorized)?;
-    session::sign_in(auth, &user).await?;
+        .ok_or_else(ApiError::unauthorized)?;
+    sessions::sign_in(auth, &user).await?;
     let mut removal = challenge(String::new(), state.secure_cookies);
     removal.make_removal();
     Ok(CookieJar::new().add(removal))
 }
 
-fn invalid_code() -> HttpError {
-    HttpError::bad_request("Invalid code")
+fn invalid_code() -> ApiError {
+    ApiError::bad_request("Invalid code")
 }
 
 /// Whether `code` is a valid code of the user's authenticator app or one of
 /// their recovery codes; either is used up. False when two-factor
 /// authentication is off. The caller counted the attempt (`state.limits`).
-async fn use_code(state: &AppState, user_id: Uuid, code: &str) -> Result<bool, HttpError> {
+async fn use_code(state: &AppState, user_id: Uuid, code: &str) -> Result<bool, ApiError> {
     if code.len() > 64 {
         return Ok(false);
     }
@@ -240,7 +241,7 @@ async fn use_code(state: &AppState, user_id: Uuid, code: &str) -> Result<bool, H
 async fn new_recovery_codes(
     tx: &mut sqlx::SqliteConnection,
     user_id: Uuid,
-) -> Result<Vec<String>, HttpError> {
+) -> Result<Vec<String>, ApiError> {
     sqlx::query("DELETE FROM recovery_codes WHERE user_id = ?1")
         .bind(user_id)
         .execute(&mut *tx)
@@ -299,12 +300,14 @@ async fn login_totp(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     ApiJson(body): ApiJson<TotpCode>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     let user_id = challenged_user(&state, &headers, Step::Code)?;
-    state.limits.user(
-        user_id,
-        Some(&client_ip(&headers, Some(addr.ip()), state.trust_proxy)),
-    )?;
+    state.limits.address(Some(&client_ip(
+        &headers,
+        Some(addr.ip()),
+        state.trust_proxy,
+    )))?;
+    state.limits.user(UserAction::Code, user_id)?;
     if !use_code(&state, user_id, &body.code).await? {
         return Err(invalid_code());
     }
@@ -328,13 +331,13 @@ async fn login_totp(
 async fn login_setup(
     State(state): State<AppState>,
     headers: HeaderMap,
-) -> Result<Json<TotpSetup>, HttpError> {
+) -> Result<Json<TotpSetup>, ApiError> {
     let user_id = challenged_user(&state, &headers, Step::Enroll)?;
     let email: String = sqlx::query_scalar("SELECT email FROM users WHERE id = ?1")
         .bind(user_id)
         .fetch_optional(state.db.reader())
         .await?
-        .ok_or_else(HttpError::unauthorized)?;
+        .ok_or_else(ApiError::unauthorized)?;
     Ok(Json(start_setup(&state, user_id, &email).await?))
 }
 
@@ -361,12 +364,14 @@ async fn login_enable(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     ApiJson(body): ApiJson<TotpCode>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     let user_id = challenged_user(&state, &headers, Step::Enroll)?;
-    state.limits.user(
-        user_id,
-        Some(&client_ip(&headers, Some(addr.ip()), state.trust_proxy)),
-    )?;
+    state.limits.address(Some(&client_ip(
+        &headers,
+        Some(addr.ip()),
+        state.trust_proxy,
+    )))?;
+    state.limits.user(UserAction::Code, user_id)?;
     let codes = confirm_setup(&state, user_id, &body.code).await?;
     let jar = finish_sign_in(&state, &mut auth, user_id).await?;
     Ok((jar, Json(RecoveryCodes { codes })).into_response())
@@ -389,12 +394,12 @@ async fn login_enable(
 async fn setup(
     State(state): State<AppState>,
     SessionUser(user): SessionUser,
-) -> Result<Json<TotpSetup>, HttpError> {
+) -> Result<Json<TotpSetup>, ApiError> {
     Ok(Json(start_setup(&state, user.id, &user.email).await?))
 }
 
 /// A new pending secret for a user who has two-factor authentication off.
-async fn start_setup(state: &AppState, user_id: Uuid, email: &str) -> Result<TotpSetup, HttpError> {
+async fn start_setup(state: &AppState, user_id: Uuid, email: &str) -> Result<TotpSetup, ApiError> {
     let secret = totp::new_secret();
     let updated =
         sqlx::query("UPDATE users SET totp_pending = ?1 WHERE id = ?2 AND totp_secret IS NULL")
@@ -407,12 +412,12 @@ async fn start_setup(state: &AppState, user_id: Uuid, email: &str) -> Result<Tot
         return Err(already_on());
     }
     let uri = totp::uri(&secret, email)
-        .ok_or_else(|| HttpError::internal("Cannot make the authenticator URI"))?;
+        .ok_or_else(|| ApiError::internal("Cannot make the authenticator URI"))?;
     Ok(TotpSetup { uri, secret })
 }
 
-fn already_on() -> HttpError {
-    HttpError::new(
+fn already_on() -> ApiError {
+    ApiError::new(
         StatusCode::CONFLICT,
         "Two-factor authentication is already on",
     )
@@ -441,12 +446,12 @@ async fn enable(
     SessionUser(user): SessionUser,
     mut auth: AuthSession,
     ApiJson(body): ApiJson<TotpCode>,
-) -> Result<Response, HttpError> {
-    state.limits.user(user.id, None)?;
+) -> Result<Response, ApiError> {
+    state.limits.user(UserAction::Code, user.id)?;
     let codes = confirm_setup(&state, user.id, &body.code).await?;
     // The secret is part of what sessions are checked against: the user's
     // other sessions are signed out, this one stays.
-    session::refresh(&mut auth, user.id).await?;
+    sessions::refresh(&mut auth, user.id).await?;
     Ok(Json(RecoveryCodes { codes }).into_response())
 }
 
@@ -457,7 +462,7 @@ async fn confirm_setup(
     state: &AppState,
     user_id: Uuid,
     code: &str,
-) -> Result<Vec<String>, HttpError> {
+) -> Result<Vec<String>, ApiError> {
     let mut tx = state.db.writer().begin().await?;
     let (secret, pending): (Option<String>, Option<String>) =
         sqlx::query_as("SELECT totp_secret, totp_pending FROM users WHERE id = ?1")
@@ -468,7 +473,7 @@ async fn confirm_setup(
         return Err(already_on());
     }
     let Some(pending) = pending else {
-        return Err(HttpError::bad_request("Start the setup first"));
+        return Err(ApiError::bad_request("Start the setup first"));
     };
     let Some(step) = totp::verify(&pending, code, totp::current_step(), 0) else {
         return Err(invalid_code());
@@ -509,25 +514,25 @@ async fn disable(
     SessionUser(user): SessionUser,
     mut auth: AuthSession,
     ApiJson(body): ApiJson<TotpCode>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     if state.totp_required {
-        return Err(HttpError::new(
+        return Err(ApiError::new(
             StatusCode::FORBIDDEN,
             "Two-factor authentication is required here",
         ));
     }
-    state.limits.user(user.id, None)?;
+    state.limits.user(UserAction::Code, user.id)?;
     if !use_code(&state, user.id, &body.code).await? {
         return Err(invalid_code());
     }
     turn_off(&state, user.id).await?;
-    session::refresh(&mut auth, user.id).await?;
+    sessions::refresh(&mut auth, user.id).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 /// Two-factor authentication off for a user: no secret, no recovery codes.
 /// False when there is no such user.
-async fn turn_off(state: &AppState, user_id: Uuid) -> Result<bool, HttpError> {
+async fn turn_off(state: &AppState, user_id: Uuid) -> Result<bool, ApiError> {
     let mut tx = state.db.writer().begin().await?;
     let updated = sqlx::query(
         "UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_last_step = 0
@@ -567,8 +572,8 @@ async fn replace(
     State(state): State<AppState>,
     SessionUser(user): SessionUser,
     ApiJson(body): ApiJson<TotpCode>,
-) -> Result<Response, HttpError> {
-    state.limits.user(user.id, None)?;
+) -> Result<Response, ApiError> {
+    state.limits.user(UserAction::Code, user.id)?;
     if !use_code(&state, user.id, &body.code).await? {
         return Err(invalid_code());
     }
@@ -581,10 +586,10 @@ async fn replace(
             .await?
             .rows_affected();
     if updated == 0 {
-        return Err(HttpError::bad_request("Two-factor authentication is off"));
+        return Err(ApiError::bad_request("Two-factor authentication is off"));
     }
     let uri = totp::uri(&secret, &user.email)
-        .ok_or_else(|| HttpError::internal("Cannot make the authenticator URI"))?;
+        .ok_or_else(|| ApiError::internal("Cannot make the authenticator URI"))?;
     Ok(Json(TotpSetup { uri, secret }).into_response())
 }
 
@@ -611,8 +616,8 @@ async fn confirm_replace(
     SessionUser(user): SessionUser,
     mut auth: AuthSession,
     ApiJson(body): ApiJson<TotpCode>,
-) -> Result<Response, HttpError> {
-    state.limits.user(user.id, None)?;
+) -> Result<Response, ApiError> {
+    state.limits.user(UserAction::Code, user.id)?;
     let mut tx = state.db.writer().begin().await?;
     let (secret, pending): (Option<String>, Option<String>) =
         sqlx::query_as("SELECT totp_secret, totp_pending FROM users WHERE id = ?1")
@@ -620,7 +625,7 @@ async fn confirm_replace(
             .fetch_one(&mut *tx)
             .await?;
     let (Some(_), Some(pending)) = (secret, pending) else {
-        return Err(HttpError::bad_request("Start the replacement first"));
+        return Err(ApiError::bad_request("Start the replacement first"));
     };
     let Some(step) = totp::verify(&pending, &body.code, totp::current_step(), 0) else {
         return Err(invalid_code());
@@ -634,7 +639,7 @@ async fn confirm_replace(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
-    session::refresh(&mut auth, user.id).await?;
+    sessions::refresh(&mut auth, user.id).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -659,8 +664,8 @@ async fn regenerate_recovery_codes(
     State(state): State<AppState>,
     SessionUser(user): SessionUser,
     ApiJson(body): ApiJson<TotpCode>,
-) -> Result<Response, HttpError> {
-    state.limits.user(user.id, None)?;
+) -> Result<Response, ApiError> {
+    state.limits.user(UserAction::Code, user.id)?;
     if !use_code(&state, user.id, &body.code).await? {
         return Err(invalid_code());
     }
@@ -693,16 +698,16 @@ async fn reset(
     State(state): State<AppState>,
     user: AuthUser,
     Path(id): Path<Uuid>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     require_admin(&user)?;
     let User { id: own, .. } = user.0;
     if id == own {
-        return Err(HttpError::bad_request(
+        return Err(ApiError::bad_request(
             "Turn off your own two-factor authentication in your settings",
         ));
     }
     if !turn_off(&state, id).await? {
-        return Err(HttpError::new(StatusCode::NOT_FOUND, "Not found"));
+        return Err(ApiError::new(StatusCode::NOT_FOUND, "Not found"));
     }
     tracing::info!("admin {own} turned off two-factor authentication for user {id}");
     Ok(StatusCode::NO_CONTENT.into_response())

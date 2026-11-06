@@ -18,25 +18,32 @@
 //! cannot be forged by a page either. No crate does this (`axum_csrf` needs
 //! tokens in the frontend), hence our own.
 
-use crate::error::HttpError;
+use crate::error::ApiError;
 use crate::state::AppState;
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::http::{HeaderMap, Method, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
-pub async fn check(State(state): State<AppState>, request: Request, next: Next) -> Response {
-    if allowed(&request, state.public_url.as_deref()) {
+/// The middleware on every route.
+pub async fn protect(State(state): State<AppState>, request: Request, next: Next) -> Response {
+    let path = request.uri().path();
+    if allowed(
+        request.method(),
+        path,
+        request.headers(),
+        state.public_url.as_deref(),
+    ) {
         next.run(request).await
     } else {
-        HttpError::new(StatusCode::FORBIDDEN, "Cross-origin request refused").into_response()
+        ApiError::forbidden("Cross-site request refused").into_response()
     }
 }
 
-fn allowed(request: &Request, public_url: Option<&str>) -> bool {
-    let headers = request.headers();
-    if request.method().is_safe()
-        || request.uri().path() == "/api/collect"
+/// Whether a request may go on (see the module docs).
+pub fn allowed(method: &Method, path: &str, headers: &HeaderMap, public_url: Option<&str>) -> bool {
+    if method.is_safe()
+        || path == "/api/collect"
         || headers
             .get(header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
@@ -73,17 +80,24 @@ fn own_origin(origin: &str, headers: &HeaderMap, public_url: Option<&str>) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::Body;
 
-    fn request(method: &str, path: &str, headers: &[(&str, &str)]) -> Request {
-        let mut builder = Request::builder()
-            .method(method)
-            .uri(path)
-            .header("host", "potoo.example.com");
+    /// A request to Potoo's host, as the arguments of [`allowed`].
+    struct Request(Method, &'static str, HeaderMap);
+
+    fn request(method: &str, path: &'static str, headers: &[(&str, &str)]) -> Request {
+        let mut map = HeaderMap::new();
+        map.insert("host", "potoo.example.com".parse().unwrap());
         for (name, value) in headers {
-            builder = builder.header(*name, *value);
+            map.insert(
+                axum::http::HeaderName::from_bytes(name.as_bytes()).unwrap(),
+                value.parse().unwrap(),
+            );
         }
-        builder.body(Body::empty()).unwrap()
+        Request(method.parse().unwrap(), path, map)
+    }
+
+    fn allowed(request: &Request, public_url: Option<&str>) -> bool {
+        super::allowed(&request.0, request.1, &request.2, public_url)
     }
 
     #[test]

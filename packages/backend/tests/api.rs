@@ -4,7 +4,7 @@
 
 use axum::http::Method;
 use axum_test::{TestResponse as Response, TestServer};
-use potoo::{app, auth, db, geo, oidc, state::AppState};
+use potoo::{app, db, geo, oidc, sessions, state::AppState};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -51,7 +51,7 @@ impl Default for Options {
             oidc: oidc::Env::default(),
             totp_required: false,
             public_url: None,
-            limits: potoo::limits::Limits::with_bursts(1_000, 1_000, 1_000),
+            limits: potoo::limits::Limits::generous(),
         }
     }
 }
@@ -2253,7 +2253,7 @@ async fn two_factor_authentication() {
     // The password alone does not sign in any more.
     let response = password_login(&app, "admin@example.com").await;
     assert_eq!(response.status_code(), 200);
-    assert_eq!(set_cookie(&response, auth::COOKIE), None);
+    assert_eq!(set_cookie(&response, sessions::SESSION_COOKIE), None);
     let challenge = set_cookie(&response, "potoo_2fa").expect("the challenge cookie");
     assert_eq!(
         json(response).await,
@@ -2288,7 +2288,7 @@ async fn two_factor_authentication() {
     let next = totp_code(&secret, 1);
     let response = second_step(&app, Some(&challenge), &next).await;
     assert_eq!(response.status_code(), 204);
-    let session = set_cookie(&response, auth::COOKIE).expect("the session cookie");
+    let session = set_cookie(&response, sessions::SESSION_COOKIE).expect("the session cookie");
     assert_eq!(
         session_of(&app, Some(&session)).await["user"]["email"],
         json!("admin@example.com")
@@ -2497,7 +2497,7 @@ async fn single_sign_on_only_refuses_passwords() {
     // No password signs in, not even the right one.
     let response = password_login(&app, "admin@example.com").await;
     assert_eq!(response.status_code(), 403);
-    assert_eq!(set_cookie(&response, auth::COOKIE), None);
+    assert_eq!(set_cookie(&response, sessions::SESSION_COOKIE), None);
     // The code step is for single sign-on too: without its cookie, a 401.
     assert_eq!(second_step(&app, None, "123456").await.status_code(), 401);
 
@@ -2757,7 +2757,7 @@ async fn sso_step(app: &TestApp, provider: &provider::Provider, email: &str) -> 
     )
     .await;
     assert_eq!(response.status_code(), 303);
-    assert_eq!(set_cookie(&response, auth::COOKIE), None);
+    assert_eq!(set_cookie(&response, sessions::SESSION_COOKIE), None);
     let challenge = set_cookie(&response, "potoo_2fa").expect("the challenge cookie");
     (location(&response), challenge)
 }
@@ -2784,7 +2784,7 @@ async fn single_sign_on_asks_for_the_code_too() {
     assert_eq!(response.status_code(), 401);
     let response = second_step(&app, Some(&challenge), &totp_code(&secret, 1)).await;
     assert_eq!(response.status_code(), 204);
-    let session = set_cookie(&response, auth::COOKIE).expect("the session cookie");
+    let session = set_cookie(&response, sessions::SESSION_COOKIE).expect("the session cookie");
     assert_eq!(
         session_of(&app, Some(&session)).await["user"]["email"],
         json!("admin@example.com")
@@ -2810,7 +2810,7 @@ async fn totp_required_makes_everyone_set_it_up() {
     // The password leads to setting the app up, not to a session.
     let response = password_login(&app, "admin@example.com").await;
     assert_eq!(response.status_code(), 200);
-    assert_eq!(set_cookie(&response, auth::COOKIE), None);
+    assert_eq!(set_cookie(&response, sessions::SESSION_COOKIE), None);
     let challenge = set_cookie(&response, "potoo_2fa").unwrap();
     assert_eq!(
         json(response).await,
@@ -2837,7 +2837,7 @@ async fn totp_required_makes_everyone_set_it_up() {
     let body = json!({ "code": totp_code(&secret, 0) });
     let response = enroll("/api/auth/login/totp/enable", Some(body)).await;
     assert_eq!(response.status_code(), 200);
-    let session = set_cookie(&response, auth::COOKIE).expect("the session cookie");
+    let session = set_cookie(&response, sessions::SESSION_COOKIE).expect("the session cookie");
     assert_eq!(json(response).await["codes"].as_array().unwrap().len(), 10);
     assert_eq!(
         session_of(&app, Some(&session)).await["user"]["totp_enabled"],

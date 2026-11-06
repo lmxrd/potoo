@@ -10,37 +10,97 @@
 //! axum-login loads the signed-in user on every request ([`Backend`]), so a
 //! deleted user is signed out everywhere at once. Each session also holds a
 //! hash of the user's credentials (`session_auth_hash`): changing the
-//! password or the two-factor secret signs the user's other sessions out.
+//! password or the two-factor secret signs the user's other sessions out
+//! (the one that made the change signs in again: [`refresh`]).
 
-use crate::auth::{SESSION_DAYS, User, verify_password};
+use crate::auth::{User, verify_password};
 use crate::db::Db;
-use crate::error::HttpError;
+use crate::error::ApiError;
+use crate::state::AppState;
 use async_trait::async_trait;
 use axum_login::AuthnBackend as _;
 use sha2::{Digest, Sha256};
 use std::fmt;
-use time::{Duration, OffsetDateTime};
+use time::OffsetDateTime;
+use tower_sessions::cookie::SameSite;
 use tower_sessions::session::{Id, Record};
 use tower_sessions::session_store::{self, ExpiredDeletion, SessionStore};
-use tower_sessions::{Expiry, Session};
+use tower_sessions::{Expiry, SessionManagerLayer};
 use uuid::Uuid;
 
-/// The session cookie's name; `__Host-potoo_session` when `PUBLIC_URL` is
-/// https (see [`cookie_name`]).
-pub const COOKIE: &str = "potoo_session";
+/// How long a sign-in lasts, however active the session is.
+pub const SESSION_TTL_SECS: i64 = 30 * 24 * 60 * 60;
+/// Where a session keeps when it ends (Unix seconds), so signing in again
+/// after a password change keeps it: tower-sessions does not remember a
+/// session's expiry between requests.
+const EXPIRES_KEY: &str = "potoo.expires";
 
-/// The session cookie's name: with the `__Host-` prefix when cookies are
-/// Secure, so that a sibling subdomain can neither set nor read one.
+/// The session cookie's name over plain http (development); see [`cookie_name`].
+pub const SESSION_COOKIE: &str = "potoo_session";
+/// Its name over https: browsers accept a `__Host-` cookie only with
+/// `Secure`, `Path=/` and no `Domain`, so a sibling subdomain can neither
+/// set nor read one (login CSRF, cookie tossing).
+pub const SECURE_SESSION_COOKIE: &str = "__Host-potoo_session";
+
+/// The session cookie's name: prefixed when the site is https (`PUBLIC_URL`
+/// starting with `https://`).
 pub fn cookie_name(secure: bool) -> &'static str {
     if secure {
-        "__Host-potoo_session"
+        SECURE_SESSION_COOKIE
     } else {
-        COOKIE
+        SESSION_COOKIE
     }
 }
 
-/// The extractor of the signed-in session.
+/// The signed-in session, as handlers take it.
 pub type AuthSession = axum_login::AuthSession<Backend>;
+
+/// The layer that gives every request its session and, through it, its
+/// user. Its cookie: the name above, `HttpOnly`, `SameSite=Strict`,
+/// `Path=/`, `Secure` over https; its lifetime is set at sign-in. A session
+/// is only loaded when a handler asks for it.
+pub fn layer(state: &AppState) -> axum_login::AuthManagerLayer<Backend, Store> {
+    let sessions = SessionManagerLayer::new(Store::new(state.db.clone()))
+        .with_name(cookie_name(state.secure_cookies))
+        .with_http_only(true)
+        .with_same_site(SameSite::Strict)
+        .with_secure(state.secure_cookies)
+        .with_path("/");
+    axum_login::AuthManagerLayerBuilder::new(Backend::new(state.db.clone()), sessions).build()
+}
+
+/// tower-sessions removes the cookie (sign-out, or a session that has
+/// ended) with a cookie built from the request's, which has no attributes;
+/// a browser ignores a `__Host-` removal without `Secure`. Over https, this
+/// adds it (wrapped around [`layer`] in `app`).
+pub async fn secure_removals(
+    axum::extract::State(secure): axum::extract::State<bool>,
+    mut response: axum::response::Response,
+) -> axum::response::Response {
+    if !secure {
+        return response;
+    }
+    let prefix = format!("{SECURE_SESSION_COOKIE}=");
+    let headers = response.headers_mut();
+    let fixed: Vec<_> = headers
+        .get_all(axum::http::header::SET_COOKIE)
+        .iter()
+        .map(|value| match value.to_str() {
+            Ok(text) if text.starts_with(&prefix) && !text.contains("; Secure") => {
+                axum::http::HeaderValue::from_str(&format!(
+                    "{text}; Secure; HttpOnly; SameSite=Strict"
+                ))
+                .unwrap_or_else(|_| value.clone())
+            }
+            _ => value.clone(),
+        })
+        .collect();
+    headers.remove(axum::http::header::SET_COOKIE);
+    for value in fixed {
+        headers.append(axum::http::header::SET_COOKIE, value);
+    }
+    response
+}
 
 /// The sessions table as a tower-sessions store.
 #[derive(Clone)]
@@ -255,38 +315,64 @@ impl axum_login::AuthnBackend for Backend {
     }
 }
 
-/// Sign the user in on this session (a new session id), for
-/// [`SESSION_DAYS`] from now.
-pub async fn sign_in(auth: &mut AuthSession, user: &User) -> Result<(), HttpError> {
-    auth.login(user).await.map_err(anyhow::Error::new)?;
-    set_expiry(&auth.session);
+fn login_error(e: axum_login::Error<Backend>) -> ApiError {
+    match e {
+        axum_login::Error::Backend(e) => e.into(),
+        axum_login::Error::Session(e) => anyhow::Error::new(e).context("session").into(),
+    }
+}
+
+/// Sign the user in on this session (a new session id), lasting
+/// [`SESSION_TTL_SECS`].
+pub async fn sign_in(auth: &mut AuthSession, user: &User) -> Result<(), ApiError> {
+    auth.login(user).await.map_err(login_error)?;
+    keep_until(auth, jiff::Timestamp::now().as_second() + SESSION_TTL_SECS).await
+}
+
+async fn keep_until(auth: &AuthSession, unix_seconds: i64) -> Result<(), ApiError> {
+    let at = OffsetDateTime::from_unix_timestamp(unix_seconds)
+        .map_err(|e| anyhow::Error::new(e).context("session expiry"))?;
+    auth.session.set_expiry(Some(Expiry::AtDateTime(at)));
+    auth.session
+        .insert(EXPIRES_KEY, unix_seconds)
+        .await
+        .map_err(|e| anyhow::Error::new(e).context("session"))?;
     Ok(())
 }
 
 /// After the user changed their own password or two-factor secret: their
-/// other sessions are signed out (the hash changed), this one stays signed
-/// in with the new hash.
-pub async fn refresh(auth: &mut AuthSession, user_id: Uuid) -> Result<(), HttpError> {
+/// other sessions are signed out (the hash changed), this one is signed in
+/// again with the new hash, keeping when it expires.
+pub async fn refresh(auth: &mut AuthSession, user_id: Uuid) -> Result<(), ApiError> {
+    if auth.user.is_none() {
+        return Ok(());
+    }
     let user = auth
         .backend
         .get_user(&user_id)
         .await?
-        .ok_or_else(HttpError::unauthorized)?;
-    auth.login(&user).await.map_err(anyhow::Error::new)?;
-    Ok(())
+        .ok_or_else(ApiError::unauthorized)?;
+    let expires = auth
+        .session
+        .get::<i64>(EXPIRES_KEY)
+        .await
+        .map_err(|e| anyhow::Error::new(e).context("session"))?
+        .unwrap_or_else(|| jiff::Timestamp::now().as_second() + SESSION_TTL_SECS);
+    auth.login(&user).await.map_err(login_error)?;
+    keep_until(auth, expires).await
 }
 
-/// The session ends this many days after the sign-in, however active it
-/// is: as before, and it saves a write per request.
-fn set_expiry(session: &Session) {
-    let at = OffsetDateTime::now_utc() + Duration::days(SESSION_DAYS as i64);
-    session.set_expiry(Some(Expiry::AtDateTime(at)));
+/// End this session (sign out).
+pub async fn sign_out(auth: &mut AuthSession) -> Result<(), ApiError> {
+    auth.logout().await.map_err(login_error)?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use time::Duration;
 
     /// A record expiring at the given time, to the second (as stored).
     fn record(expiry_date: OffsetDateTime) -> Record {

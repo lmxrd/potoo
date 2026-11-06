@@ -1,6 +1,6 @@
 //! Request extractors that answer in the API's own error shape.
 
-use crate::error::HttpError;
+use crate::error::ApiError;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{FromRequest, Json, Request};
 use axum::http::StatusCode;
@@ -23,7 +23,7 @@ where
     S: Send + Sync,
     T: DeserializeOwned,
 {
-    type Rejection = HttpError;
+    type Rejection = ApiError;
 
     async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
         Json::<T>::from_request(request, state)
@@ -33,15 +33,15 @@ where
     }
 }
 
-fn rejection(rejection: JsonRejection) -> HttpError {
+fn rejection(rejection: JsonRejection) -> ApiError {
     match rejection {
-        JsonRejection::MissingJsonContentType(_) => HttpError::new(
+        JsonRejection::MissingJsonContentType(_) => ApiError::new(
             StatusCode::UNSUPPORTED_MEDIA_TYPE,
             "Expected a JSON body (Content-Type: application/json)",
         ),
         JsonRejection::JsonSyntaxError(_) | JsonRejection::JsonDataError(_) => {
-            HttpError::bad_request("Invalid request body")
+            ApiError::bad_request("Invalid request body")
         }
-        other => HttpError::new(other.status(), "The request body could not be read"),
+        other => ApiError::new(other.status(), "The request body could not be read"),
     }
 }

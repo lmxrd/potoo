@@ -1,4 +1,4 @@
-use crate::error::{ErrorBody, HttpError};
+use crate::error::{ApiError, ErrorBody};
 use crate::routes::auth::AuthUser;
 use crate::routes::sites::{StatsQuery, range_and_filter, site_ids};
 use crate::state::AppState;
@@ -32,7 +32,7 @@ async fn stats(
     State(state): State<AppState>,
     _user: AuthUser,
     Query(query): Query<StatsQuery>,
-) -> Result<Json<SiteStats>, HttpError> {
+) -> Result<Json<SiteStats>, ApiError> {
     let (range, filters) = range_and_filter(&query)?;
     let ids = site_ids(&state, query.sites.as_deref()).await?;
     state.ingest.flush().await;

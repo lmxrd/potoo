@@ -6,7 +6,7 @@
 //! routed. This file holds the rest: the title, the tags and the cookie
 //! the dashboard endpoints are secured with.
 
-use crate::auth::COOKIE;
+use crate::sessions::SESSION_COOKIE;
 use utoipa::openapi::security::{ApiKey, ApiKeyValue, HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi};
 
@@ -42,7 +42,7 @@ impl Modify for SessionCookie {
             .get_or_insert_with(Default::default)
             .add_security_scheme(
                 "session",
-                SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::new(COOKIE))),
+                SecurityScheme::ApiKey(ApiKey::Cookie(ApiKeyValue::new(SESSION_COOKIE))),
             );
         // API keys (`potoo_...`), made in the settings: on the endpoints that
         // list it, capped by the key's scope.

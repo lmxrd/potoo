@@ -1,4 +1,4 @@
-use crate::error::{ErrorBody, HttpError};
+use crate::error::{ApiError, ErrorBody};
 use crate::extract::ApiJson;
 use crate::filter;
 use crate::routes::auth::AuthUser;
@@ -47,7 +47,7 @@ pub struct StatsQuery {
 /// The ids of the sites a stats or export request selects: the comma
 /// separated hostnames it names (case does not matter; an unknown one is a
 /// 400 that says which), or every site's when there are none.
-pub async fn site_ids(state: &AppState, sites: Option<&str>) -> Result<Vec<Uuid>, HttpError> {
+pub async fn site_ids(state: &AppState, sites: Option<&str>) -> Result<Vec<Uuid>, ApiError> {
     let hostnames: BTreeSet<String> = sites
         .unwrap_or_default()
         .split(',')
@@ -59,7 +59,7 @@ pub async fn site_ids(state: &AppState, sites: Option<&str>) -> Result<Vec<Uuid>
         for host in hostnames {
             match state.db.site(&host).await? {
                 Some(site) => ids.push(site.id),
-                None => return Err(HttpError::bad_request(format!("Unknown site: {host}"))),
+                None => return Err(ApiError::bad_request(format!("Unknown site: {host}"))),
             }
         }
         return Ok(ids);
@@ -75,10 +75,10 @@ pub async fn site_ids(state: &AppState, sites: Option<&str>) -> Result<Vec<Uuid>
 /// params, so they all go through here.
 pub fn range_and_filter(
     query: &StatsQuery,
-) -> Result<(crate::stats::StatsRange, filter::FacetFilters), HttpError> {
+) -> Result<(crate::stats::StatsRange, filter::FacetFilters), ApiError> {
     let range =
-        parse_range(query.from.as_deref(), query.to.as_deref()).map_err(HttpError::bad_request)?;
-    let filters = filter::parse_filter_param(query.q.as_deref()).map_err(HttpError::bad_request)?;
+        parse_range(query.from.as_deref(), query.to.as_deref()).map_err(ApiError::bad_request)?;
+    let filters = filter::parse_filter_param(query.q.as_deref()).map_err(ApiError::bad_request)?;
     Ok((range, filters))
 }
 
@@ -116,7 +116,7 @@ pub struct CreatedSite {
 async fn list(
     State(state): State<AppState>,
     _user: AuthUser,
-) -> Result<Json<Vec<SiteRow>>, HttpError> {
+) -> Result<Json<Vec<SiteRow>>, ApiError> {
     let rows: Vec<SiteRow> =
         sqlx::query_as("SELECT id, hostname, honor_dnt, created_at FROM sites ORDER BY hostname")
             .fetch_all(state.db.reader())
@@ -125,10 +125,10 @@ async fn list(
 }
 
 /// Expected a hostname such as example.com or blog.example.com.
-pub(crate) fn validate_hostname(raw: &str) -> Result<String, HttpError> {
+pub(crate) fn validate_hostname(raw: &str) -> Result<String, ApiError> {
     let host = raw.trim().to_lowercase();
     let invalid =
-        || HttpError::bad_request("Expected a hostname such as example.com or blog.example.com");
+        || ApiError::bad_request("Expected a hostname such as example.com or blog.example.com");
     if host.len() > 253 {
         return Err(invalid());
     }
@@ -192,9 +192,9 @@ async fn create(
     State(state): State<AppState>,
     user: AuthUser,
     ApiJson(input): ApiJson<SiteInput>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     if !user.0.is_admin {
-        return Err(HttpError::forbidden());
+        return Err(ApiError::forbidden("Admin only"));
     }
     let hostname = validate_hostname(&input.hostname)?;
     let mut tx = state.db.writer().begin().await?;
@@ -203,7 +203,7 @@ async fn create(
         .fetch_optional(&mut *tx)
         .await?;
     if taken.is_some() {
-        return Err(HttpError::new(StatusCode::CONFLICT, "Site already exists"));
+        return Err(ApiError::new(StatusCode::CONFLICT, "Site already exists"));
     }
     let id = Uuid::now_v7();
     sqlx::query("INSERT INTO sites (id, hostname, honor_dnt) VALUES (?1, ?2, ?3)")
@@ -252,9 +252,9 @@ async fn update(
     user: AuthUser,
     Path(id): Path<Uuid>,
     ApiJson(input): ApiJson<DntInput>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     if !user.0.is_admin {
-        return Err(HttpError::forbidden());
+        return Err(ApiError::forbidden("Admin only"));
     }
     sqlx::query("UPDATE sites SET honor_dnt = ?1 WHERE id = ?2")
         .bind(input.honor_dnt as i64)
@@ -284,9 +284,9 @@ async fn delete(
     State(state): State<AppState>,
     user: AuthUser,
     Path(id): Path<Uuid>,
-) -> Result<Response, HttpError> {
+) -> Result<Response, ApiError> {
     if !user.0.is_admin {
-        return Err(HttpError::forbidden());
+        return Err(ApiError::forbidden("Admin only"));
     }
     sqlx::query("DELETE FROM sites WHERE id = ?1")
         .bind(id)
@@ -314,12 +314,12 @@ async fn get_site(
     State(state): State<AppState>,
     _user: AuthUser,
     Path(id): Path<Uuid>,
-) -> Result<Json<SiteRow>, HttpError> {
+) -> Result<Json<SiteRow>, ApiError> {
     let site: Option<SiteRow> =
         sqlx::query_as("SELECT id, hostname, honor_dnt, created_at FROM sites WHERE id = ?1")
             .bind(id)
             .fetch_optional(state.db.reader())
             .await?;
     site.map(Json)
-        .ok_or(HttpError::new(StatusCode::NOT_FOUND, "Not found"))
+        .ok_or(ApiError::new(StatusCode::NOT_FOUND, "Not found"))
 }
