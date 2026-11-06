@@ -16,6 +16,7 @@
     "check": "oxfmt --check && oxlint && tsc --noEmit"
   },
   "dependencies": {
+    "@base-ui/react": "^1.9.0",
     "@rsql/ast": "^1.6.0",
     "@rsql/builder": "^1.6.0",
     "@rsql/emitter": "^1.6.0",
@@ -34,7 +35,6 @@
     "lucide-react": "^1.69.0",
     "potoo-sdk": "workspace:*",
     "qrcode.react": "^4.2.0",
-    "radix-ui": "^1.8.1",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tailwind-merge": "^3.7.0",

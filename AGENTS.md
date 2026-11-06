@@ -100,7 +100,8 @@ acceptable.
   Router), `pnpm-lock.yaml` and `packages/backend/Cargo.lock` (use the
   package managers), and `packages/sdk/src` (`mise run gen:sdk`).
 - **Frontend:** React 19, TanStack Router (file-based), Tailwind 4,
-  shadcn/ui on Radix (`packages/frontend/src/components/ui`, lucide icons),
+  shadcn/ui on Base UI (`base-vega` style, `packages/frontend/src/components/ui`,
+  lucide icons),
   visx for the chart (SVG, styled only with the theme classes such as
   `fill-primary`, never hard-coded colors, so a theme or accent change shows
   at once), oxlint and oxfmt, TypeScript, Vitest for the pure logic in

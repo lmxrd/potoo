@@ -114,10 +114,14 @@ export function DateRangeBar({
           </Button>
         </div>
         <div className="flex items-center gap-2">
-          <Button asChild size="icon-sm">
-            <a href={exportUrl} download aria-label="Export as CSV" title="Export as CSV">
-              <DownloadIcon aria-hidden />
-            </a>
+          <Button
+            size="icon-sm"
+            nativeButton={false}
+            render={
+              <a href={exportUrl} download aria-label="Export as CSV" title="Export as CSV" />
+            }
+          >
+            <DownloadIcon aria-hidden />
           </Button>
         </div>
       </div>
