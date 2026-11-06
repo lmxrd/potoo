@@ -72,29 +72,25 @@ function UserMenu({ user }: { user: User }) {
   const logout = useMutation(logoutMutation());
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="ml-auto font-normal text-soft-foreground">
-          {user.email}
-          <ChevronDownIcon aria-hidden />
-        </Button>
+      <DropdownMenuTrigger
+        render={
+          <Button variant="ghost" size="sm" className="ml-auto font-normal text-soft-foreground" />
+        }
+      >
+        {user.email}
+        <ChevronDownIcon aria-hidden />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
-        <DropdownMenuItem asChild>
-          <Link to="/settings">Settings</Link>
-        </DropdownMenuItem>
+        <DropdownMenuItem render={<Link to="/settings" />}>Settings</DropdownMenuItem>
         {user.is_admin && (
           <>
-            <DropdownMenuItem asChild>
-              <Link to="/users">Admin settings</Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link to="/import">Import hits</Link>
-            </DropdownMenuItem>
+            <DropdownMenuItem render={<Link to="/users" />}>Admin settings</DropdownMenuItem>
+            <DropdownMenuItem render={<Link to="/import" />}>Import hits</DropdownMenuItem>
           </>
         )}
         <DropdownMenuSeparator />
         <DropdownMenuItem
-          onSelect={async () => {
+          onClick={async () => {
             await logout.mutateAsync({});
             await navigate({ to: "/login", reloadDocument: true });
           }}
