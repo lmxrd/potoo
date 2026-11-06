@@ -1,24 +1,24 @@
-use crate::util::{random_hex, sha256_hex};
+use crate::util::sha256_hex;
 use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier, generate_salt};
-use axum_extra::extract::CookieJar;
-use axum_extra::extract::cookie::{Cookie, SameSite};
 use serde::{Deserialize, Serialize};
 use sqlx::SqliteExecutor;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use utoipa::ToSchema;
 
-pub const COOKIE: &str = "potoo_session";
-const SESSION_DAYS: u64 = 30;
+pub use crate::session::COOKIE;
+
+/// How long a session lasts after the sign-in.
+pub const SESSION_DAYS: u64 = 30;
 
 /// The date formats a user can pick from, for displaying dates.
 pub const DATE_FORMATS: [&str; 4] = ["YYYY-MM-DD", "DD/MM/YYYY", "MM/DD/YYYY", "DD.MM.YYYY"];
 
 /// The signed-in user, as the session endpoint returns them.
-#[derive(Serialize, sqlx::FromRow, ToSchema)]
+#[derive(Clone, Serialize, sqlx::FromRow, ToSchema)]
 pub struct User {
     pub id: i64,
     pub email: String,
@@ -34,6 +34,21 @@ pub struct User {
     pub has_password: bool,
     /// Whether a code from an authenticator app is asked for at sign-in.
     pub totp_enabled: bool,
+    /// The hash of the credentials the user's sessions are checked against
+    /// (see `session.rs`); never sent.
+    #[serde(skip)]
+    #[sqlx(default)]
+    pub auth_hash: Vec<u8>,
+}
+
+// Not derived: the auth hash stays out of logs.
+impl std::fmt::Debug for User {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("User")
+            .field("id", &self.id)
+            .field("email", &self.email)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Hash a password with argon2id; the PHC string is what gets stored.
@@ -53,24 +68,6 @@ pub fn verify_password(password: &str, stored: &str) -> bool {
                 .ok()
         })
         .is_some()
-}
-
-/// The user of a valid session cookie, if any.
-pub async fn current_user<'e>(db: impl SqliteExecutor<'e>, token: Option<&str>) -> Option<User> {
-    let token = token?;
-    sqlx::query_as::<_, User>(
-        "SELECT u.id, u.email, u.is_admin, u.date_format, u.use_24, u.theme,
-                u.password_hash IS NOT NULL AS has_password,
-                u.totp_secret IS NOT NULL AS totp_enabled
-         FROM sessions s JOIN users u ON u.id = s.user_id
-         WHERE s.token_hash = ?1 AND s.expires_at > ?2",
-    )
-    .bind(sha256_hex(token))
-    .bind(now_iso())
-    .fetch_optional(db)
-    .await
-    .ok()
-    .flatten()
 }
 
 /// What an API key may do. Never more than its user may: an admin key of a
@@ -152,45 +149,6 @@ pub async fn key_user<'e>(db: impl SqliteExecutor<'e>, token: &str) -> Option<(U
             last_used_at: row.last_used_at,
         },
     ))
-}
-
-/// Create a session and set its cookie, returning the updated jar.
-pub async fn create_session<'e>(
-    db: impl SqliteExecutor<'e>,
-    jar: CookieJar,
-    user_id: i64,
-    secure: bool,
-) -> sqlx::Result<CookieJar> {
-    let token = random_hex(32);
-    let expires = SystemTime::now() + Duration::from_secs(SESSION_DAYS * 86_400);
-    sqlx::query("INSERT INTO sessions (token_hash, user_id, expires_at) VALUES (?1, ?2, ?3)")
-        .bind(sha256_hex(&token))
-        .bind(user_id)
-        .bind(iso(expires))
-        .execute(db)
-        .await?;
-    Ok(jar.add(
-        Cookie::build((COOKIE.to_string(), token))
-            .path("/")
-            .http_only(true)
-            .same_site(SameSite::Strict)
-            .secure(secure)
-            .expires(time::OffsetDateTime::from(expires)),
-    ))
-}
-
-/// Delete the session of the request's cookie, and clear the cookie.
-pub async fn destroy_session<'e>(
-    db: impl SqliteExecutor<'e>,
-    jar: CookieJar,
-) -> sqlx::Result<CookieJar> {
-    if let Some(cookie) = jar.get(COOKIE) {
-        sqlx::query("DELETE FROM sessions WHERE token_hash = ?1")
-            .bind(sha256_hex(cookie.value()))
-            .execute(db)
-            .await?;
-    }
-    Ok(jar.remove(Cookie::from(COOKIE)))
 }
 
 /// In-memory throttle for failed logins: after MAX_FAILURES within the

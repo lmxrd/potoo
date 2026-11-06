@@ -102,7 +102,9 @@ architecture of your machine. The binary is cross-compiled with zig, so a
 Mac builds it too; `ARCH=amd64` or `arm64` builds the other architecture.
 
 Behind a reverse proxy, set `TRUST_PROXY=1` so the client IP is read from
-`X-Forwarded-For`, and terminate TLS there.
+`X-Forwarded-For`, and terminate TLS there. Served over https, set
+`SECURE_COOKIES=true` too, so the session cookie is only ever sent over
+https.
 
 ### Staying up to date
 
@@ -253,10 +255,15 @@ are not checked for duplicates.
 | `OIDC_AUTO_CREATE`   | `false`             | Single sign-on: `true` creates a regular user for a verified email that has no account; `false` does not |
 | `OIDC_ONLY`          | `false`             | Single sign-on: `true` makes single sign-on the only way in: no password signs in and none can be set. The first admin is still created with a password on `/setup`, then signs in through the provider (matched by their verified email) |
 | `TOTP_REQUIRED`      | `false`             | `true` makes two-factor authentication required: a user without it sets up an authenticator app at their next sign-in (password or single sign-on), and nobody can turn it off. Sessions made before are kept |
+| `SECURE_COOKIES`     | `false`             | `true` when Potoo is served over https: the session cookie gets `Secure`. Leave it off over plain http, or nobody can sign in |
 
-`OIDC_AUTO_CREATE`, `OIDC_ONLY` and `TOTP_REQUIRED` take `true` or `false`
+`OIDC_AUTO_CREATE`, `OIDC_ONLY`, `TOTP_REQUIRED` and `SECURE_COOKIES` take `true` or `false`
 (`1`/`0`, `yes`/`no` and `on`/`off` work too); any other value stops Potoo at
 start.
+
+A session lasts 30 days from the sign-in. Changing the password or the
+two-factor setup signs the user's other sessions out, and deleting a user
+signs them out everywhere at once.
 
 This site or product includes IP data from db-ip.com, licensed under CC BY 4.0.
 

@@ -6,12 +6,12 @@
 //! the settings say so, a new regular user without a password. Nobody signs
 //! in this way before the first admin exists.
 
-use crate::auth::create_session;
 use crate::error::{ErrorBody, HttpError};
 use crate::extract::ApiJson;
 use crate::oidc::{CALLBACK_PATH, Failure, Identity, LOGIN_COOKIE, LOGIN_TTL, Settings};
 use crate::routes::auth::{AuthUser, require_admin, secure, validate_email};
 use crate::routes::totp::{Step, challenge_cookie, next_step};
+use crate::session::{self, AuthSession};
 use crate::state::AppState;
 use axum::Json;
 use axum::extract::{Query, State};
@@ -19,6 +19,7 @@ use axum::http::HeaderMap;
 use axum::response::{IntoResponse, Redirect, Response};
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use axum_extra::extract::{CookieJar, SignedCookieJar};
+use axum_login::AuthnBackend as _;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
@@ -131,6 +132,7 @@ pub struct CallbackParams {
 async fn callback(
     State(state): State<AppState>,
     jar: CookieJar,
+    mut auth: AuthSession,
     headers: HeaderMap,
     Query(params): Query<CallbackParams>,
 ) -> Response {
@@ -151,8 +153,8 @@ async fn callback(
     } else {
         CookieJar::new()
     };
-    match sign_in(&state, jar, &headers, params, login).await {
-        Ok(Ok(SignedIn::Session(jar))) => (logins, jar, Redirect::to("/")).into_response(),
+    match sign_in(&state, &mut auth, &headers, params, login).await {
+        Ok(Ok(SignedIn::Session)) => (logins, Redirect::to("/")).into_response(),
         Ok(Ok(SignedIn::Step(challenge, step))) => {
             (logins, challenge, Redirect::to(step.page())).into_response()
         }
@@ -165,7 +167,7 @@ async fn callback(
 /// nobody is.
 async fn sign_in(
     state: &AppState,
-    jar: CookieJar,
+    auth: &mut AuthSession,
     headers: &HeaderMap,
     params: CallbackParams,
     login: Option<String>,
@@ -199,14 +201,22 @@ async fn sign_in(
             step,
         )));
     }
-    let jar = create_session(&mut *tx, jar, user_id, secure(headers)).await?;
     tx.commit().await?;
-    Ok(Ok(SignedIn::Session(jar)))
+    // Linked or created and committed: the session is the store's write, after
+    // the transaction (one writer connection).
+    let user = auth
+        .backend
+        .get_user(&user_id)
+        .await?
+        .ok_or_else(|| HttpError::internal("the signed-in user is gone"))?;
+    session::sign_in(auth, &user).await?;
+    Ok(Ok(SignedIn::Session))
 }
 
 /// What a callback that proved who the user is leads to.
 enum SignedIn {
-    Session(CookieJar),
+    /// Signed in: the session cookie is set.
+    Session,
     /// Two-factor authentication first, on the login page.
     Step(SignedCookieJar, Step),
 }

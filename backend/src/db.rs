@@ -234,6 +234,30 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// The database migrated up to 0002 only (0005 replaces the sessions
+    /// table that this test follows), as `open` would: foreign keys on.
+    async fn through_0002(path: &std::path::Path) -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(path)
+                    .journal_mode(SqliteJournalMode::Wal)
+                    .foreign_keys(true),
+            )
+            .await
+            .unwrap();
+        let all = sqlx::migrate!("./migrations");
+        sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(all.migrations[..2].to_vec()),
+            ..sqlx::migrate!("./migrations")
+        }
+        .run(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
     /// 0002 rebuilds the users table (a nullable password) with foreign keys
     /// off: on a real file, with sessions in it, nothing may be lost.
     #[tokio::test]
@@ -282,10 +306,10 @@ mod tests {
         .unwrap();
         pool.close().await;
 
-        let db = open(path.to_str().unwrap()).await;
+        let db = through_0002(&path).await;
         let users: Vec<(i64, String, Option<String>, bool)> =
             sqlx::query_as("SELECT id, email, password_hash, is_admin FROM users ORDER BY id")
-                .fetch_all(db.reader())
+                .fetch_all(&db)
                 .await
                 .unwrap();
         assert_eq!(
@@ -296,17 +320,17 @@ mod tests {
             ]
         );
         let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions WHERE user_id = 2")
-            .fetch_one(db.reader())
+            .fetch_one(&db)
             .await
             .unwrap();
         assert_eq!(sessions, 1, "the sessions survive the rebuild");
         let foreign_keys: i64 = sqlx::query_scalar("PRAGMA foreign_keys")
-            .fetch_one(db.writer())
+            .fetch_one(&db)
             .await
             .unwrap();
         assert_eq!(foreign_keys, 1, "foreign keys are on again");
         let broken: Vec<(String, i64)> = sqlx::query_as("PRAGMA foreign_key_check")
-            .fetch_all(db.writer())
+            .fetch_all(&db)
             .await
             .unwrap()
             .into_iter()
@@ -318,18 +342,18 @@ mod tests {
         // given out again.
         let id =
             sqlx::query("INSERT INTO users (email, password_hash) VALUES ('d@example.com', NULL)")
-                .execute(db.writer())
+                .execute(&db)
                 .await
                 .unwrap()
                 .last_insert_rowid();
         assert_eq!(id, 4);
         // And a deleted user still takes their sessions along.
         sqlx::query("DELETE FROM users WHERE id = 2")
-            .execute(db.writer())
+            .execute(&db)
             .await
             .unwrap();
         let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
-            .fetch_one(db.reader())
+            .fetch_one(&db)
             .await
             .unwrap();
         assert_eq!(sessions, 0);
@@ -347,15 +371,15 @@ mod tests {
             .await
             .unwrap();
         pool.close().await;
-        let db = open(path.to_str().unwrap()).await;
+        let db = through_0002(&path).await;
         let emails: Vec<String> = sqlx::query_scalar("SELECT email FROM users ORDER BY id")
-            .fetch_all(db.reader())
+            .fetch_all(&db)
             .await
             .unwrap();
         assert_eq!(emails, ["a@example.com", "d@example.com"]);
         let password: Option<String> =
             sqlx::query_scalar("SELECT password_hash FROM users WHERE id = 4")
-                .fetch_one(db.reader())
+                .fetch_one(&db)
                 .await
                 .unwrap();
         assert_eq!(password, None);

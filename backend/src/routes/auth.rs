@@ -1,22 +1,21 @@
 use crate::auth::{
-    COOKIE, DATE_FORMATS, KeyUse, Scope, User, create_session, current_user, destroy_session,
-    hash_password, iso, key_user, verify_password,
+    DATE_FORMATS, KeyUse, Scope, User, hash_password, iso, key_user, verify_password,
 };
 use crate::error::{ErrorBody, HttpError};
 use crate::extract::ApiJson;
 use crate::routes::totp::{Step, challenge_cookie, next_step};
+use crate::session::{self, AuthSession};
 use crate::state::AppState;
 use crate::visitor::client_ip;
 use axum::Json;
 use axum::extract::{ConnectInfo, FromRequestParts, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum_extra::extract::CookieJar;
+use axum_login::AuthnBackend as _;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::SqliteExecutor;
 use std::net::SocketAddr;
-use std::sync::OnceLock;
 use std::time::{Duration, SystemTime};
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
@@ -72,15 +71,22 @@ impl FromRequestParts<AppState> for AuthUser {
             note_key_use(state, &key).await;
             return Ok(AuthUser(user, Access::Key(key.scope)));
         }
-        let jar = CookieJar::from_request_parts(parts, state)
-            .await
-            .map_err(|_| HttpError::unauthorized())?;
-        let token = jar.get(COOKIE).map(|c| c.value());
-        let user = current_user(state.db.reader(), token)
-            .await
+        let user = auth_session(parts, state)
+            .await?
+            .user
             .ok_or_else(HttpError::unauthorized)?;
         Ok(AuthUser(user, Access::Session))
     }
+}
+
+/// The request's session (axum-login loads the signed-in user, if any).
+async fn auth_session(
+    parts: &mut axum::http::request::Parts,
+    state: &AppState,
+) -> Result<AuthSession, HttpError> {
+    AuthSession::from_request_parts(parts, state)
+        .await
+        .map_err(|(_, e)| HttpError::internal(format!("no session layer: {e}")))
 }
 
 /// The signed-in user of a session cookie only: an API key is refused
@@ -165,13 +171,6 @@ fn validate_theme(raw: &str) -> Result<String, HttpError> {
         return Err(invalid());
     }
     Ok(format!("{{\"base\":\"{base}\",\"accent\":\"{accent}\"}}"))
-}
-
-/// A valid hash to verify against when the user does not exist, so the
-/// response takes the same time either way.
-fn dummy_hash() -> &'static str {
-    static DUMMY: OnceLock<String> = OnceLock::new();
-    DUMMY.get_or_init(|| hash_password("potoo-dummy"))
 }
 
 /// The cookie is secure behind an https proxy that says so.
@@ -331,14 +330,10 @@ async fn admin_count<'e>(db: impl SqliteExecutor<'e>) -> Result<i64, HttpError> 
 )]
 async fn session(
     State(state): State<AppState>,
-    jar: CookieJar,
+    auth: AuthSession,
 ) -> Result<Json<Session>, HttpError> {
     let needs_setup = !has_users(&state).await?;
-    let user = if needs_setup {
-        None
-    } else {
-        current_user(state.db.reader(), jar.get(COOKIE).map(|c| c.value())).await
-    };
+    let user = if needs_setup { None } else { auth.user };
     let settings = state.oidc.settings();
     let oidc = settings.enabled().then(|| OidcLogin {
         label: settings.label().to_string(),
@@ -378,8 +373,7 @@ pub struct Credentials {
 )]
 async fn setup(
     State(state): State<AppState>,
-    jar: CookieJar,
-    headers: HeaderMap,
+    mut auth: AuthSession,
     ApiJson(creds): ApiJson<Credentials>,
 ) -> Result<Response, HttpError> {
     let email = validate_email(&creds.email)?;
@@ -395,14 +389,13 @@ async fn setup(
     if inserted.rows_affected() == 0 {
         return Err(HttpError::new(StatusCode::CONFLICT, "Already set up"));
     }
-    let jar = create_session(
-        state.db.writer(),
-        jar,
-        inserted.last_insert_rowid(),
-        secure(&headers),
-    )
-    .await?;
-    Ok((StatusCode::CREATED, jar).into_response())
+    let user = auth
+        .backend
+        .get_user(&inserted.last_insert_rowid())
+        .await?
+        .ok_or_else(|| HttpError::internal("the new admin is gone"))?;
+    session::sign_in(&mut auth, &user).await?;
+    Ok(StatusCode::CREATED.into_response())
 }
 
 #[utoipa::path(
@@ -423,7 +416,7 @@ async fn setup(
 )]
 async fn login(
     State(state): State<AppState>,
-    jar: CookieJar,
+    mut auth: AuthSession,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
     body: Result<ApiJson<Credentials>, HttpError>,
@@ -454,28 +447,26 @@ async fn login(
             .into_response());
     }
 
-    let stored: Option<(i64, Option<String>)> =
-        sqlx::query_as("SELECT id, password_hash FROM users WHERE email = ?1")
-            .bind(&email)
-            .fetch_optional(state.db.reader())
-            .await?;
-    // Same work and same response whether or not the user exists, or has
-    // a password.
-    let (id, stored) = match stored {
-        Some((id, Some(hash))) => (id, hash),
-        _ => (0, dummy_hash().to_string()),
-    };
-    if !verify_password(&creds.password, &stored) || id == 0 {
+    // The same work and the same answer whether or not the user exists,
+    // or has a password (see `session::Backend::authenticate`).
+    let user = auth
+        .authenticate(session::Credentials {
+            email,
+            password: creds.password,
+        })
+        .await
+        .map_err(anyhow::Error::new)?;
+    let Some(user) = user else {
         state.throttle.record_failure(&key);
         return Err(HttpError::new(
             StatusCode::UNAUTHORIZED,
             "Invalid email or password",
         ));
-    }
+    };
     state.throttle.clear(&key);
-    if let Some(step) = next_step(state.db.reader(), &state, id).await? {
+    if let Some(step) = next_step(state.db.reader(), &state, user.id).await? {
         return Ok((
-            challenge_cookie(&state, id, step, secure(&headers)),
+            challenge_cookie(&state, user.id, step, secure(&headers)),
             Json(LoginStep {
                 totp_required: step == Step::Code,
                 totp_setup_required: step == Step::Enroll,
@@ -483,8 +474,8 @@ async fn login(
         )
             .into_response());
     }
-    let jar = create_session(state.db.writer(), jar, id, secure(&headers)).await?;
-    Ok((StatusCode::NO_CONTENT, jar).into_response())
+    session::sign_in(&mut auth, &user).await?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 /// The password was right, and two-factor authentication is the next step.
@@ -508,9 +499,9 @@ pub struct LoginStep {
         (status = 204, description = "Signed out; the session cookie is cleared"),
     ),
 )]
-async fn logout(State(state): State<AppState>, jar: CookieJar) -> Result<Response, HttpError> {
-    let jar = destroy_session(state.db.writer(), jar).await?;
-    Ok((StatusCode::NO_CONTENT, jar).into_response())
+async fn logout(mut auth: AuthSession) -> Result<Response, HttpError> {
+    auth.logout().await.map_err(anyhow::Error::new)?;
+    Ok(StatusCode::NO_CONTENT.into_response())
 }
 
 // Change the signed-in user's own email.
@@ -620,7 +611,7 @@ async fn change_settings(
     tag = "Account",
     operation_id = "changePassword",
     summary = "Change your own password",
-    description = "The current password is required, except for a user who has none (single sign-on): they set a first one. Refused while password sign-in is turned off (`OIDC_ONLY`).",
+    description = "The current password is required, except for a user who has none (single sign-on): they set a first one. The user's other sessions are signed out. Refused while password sign-in is turned off (`OIDC_ONLY`).",
     request_body(content = ChangePassword, content_type = "application/json"),
     responses(
         (status = 204, description = "Changed"),
@@ -634,6 +625,7 @@ async fn change_settings(
 async fn change_password(
     State(state): State<AppState>,
     user: SessionUser,
+    mut auth: AuthSession,
     ApiJson(body): ApiJson<ChangePassword>,
 ) -> Result<Response, HttpError> {
     if !state.oidc.passwords_allowed() {
@@ -672,6 +664,8 @@ async fn change_password(
     if updated == 0 {
         return Err(invalid());
     }
+    // The user's other sessions are signed out; this one stays.
+    session::refresh(&mut auth, user.0.id).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 

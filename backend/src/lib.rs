@@ -11,6 +11,7 @@ pub mod oidc;
 pub mod openapi;
 pub mod profile;
 pub mod routes;
+pub mod session;
 pub mod state;
 pub mod stats;
 pub mod totp;
@@ -33,7 +34,19 @@ pub fn api() -> utoipa_axum::router::OpenApiRouter<AppState> {
 /// The whole app: the API routes, then the embedded frontend.
 pub fn app(state: AppState) -> Router {
     let (router, _spec) = api().split_for_parts();
+    // Sessions (tower-sessions, our store) and who is signed in on them
+    // (axum-login). A session is only loaded when a handler asks for it.
+    let sessions = tower_sessions::SessionManagerLayer::new(session::Store::new(state.db.clone()))
+        .with_name(session::COOKIE)
+        .with_path("/")
+        .with_http_only(true)
+        .with_same_site(tower_sessions::cookie::SameSite::Strict)
+        .with_secure(state.secure_cookies);
+    let auth =
+        axum_login::AuthManagerLayerBuilder::new(session::Backend::new(state.db.clone()), sessions)
+            .build();
     frontend::mount(router)
+        .layer(auth)
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state)
 }

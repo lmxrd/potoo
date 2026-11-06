@@ -52,7 +52,23 @@ async fn main() -> anyhow::Result<()> {
         // variables on top.
         oidc: Arc::new(potoo::oidc::Oidc::load(&db, potoo::oidc::Env::from_env()).await),
         totp_required: env_flag("TOTP_REQUIRED")?,
+        secure_cookies: env_flag("SECURE_COOKIES")?,
     };
+
+    // Expired sessions are deleted every hour (a session past its expiry
+    // is refused anyway: this only keeps the table small).
+    {
+        use tower_sessions::ExpiredDeletion;
+        let store = potoo::session::Store::new(db.clone());
+        tokio::spawn(async move {
+            loop {
+                if let Err(e) = store.delete_expired().await {
+                    tracing::warn!("cannot delete the expired sessions: {e}");
+                }
+                tokio::time::sleep(Duration::from_secs(3_600)).await;
+            }
+        });
+    }
 
     // With OIDC_ONLY and no provider, nobody can sign in (but the first
     // admin on /setup, who can then set the provider up): say so.

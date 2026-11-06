@@ -122,6 +122,21 @@ to `/login?step=totp`; `/login/totp` finishes it. With `TOTP_REQUIRED`
 `/totp/disable` is refused. `next_step` decides, for both paths. Wrong codes count in `state.throttle` per user
 (`totp|<id>`), not per address.
 
+**Sessions** (`session.rs`): tower-sessions keeps them and axum-login
+signs users in and out (`AuthSession`). The store is ours (the community's
+sqlx store needs sqlx 0.8): the `sessions` table, keyed by the SHA-256 of
+the session id, never the id; it writes only when a session changes
+(sign-in, sign-out), and expired rows are deleted hourly by `main`. Every
+sign-in ends in `session::sign_in` (a new session id, 30 days); never
+create a session another way. axum-login loads the user on each request
+(`Backend::get_user`, so a deleted user is signed out at once) and checks
+the session against the user's `auth_hash` (the password hash and the TOTP
+secret): changing either signs the other sessions out, so after the user
+changes their own, call `session::refresh` to keep the current one. The
+cookie is `potoo_session`, `SameSite=Strict`, `Secure` with
+`SECURE_COOKIES`. The 2FA challenge and the single sign-on login cookies
+are separate signed cookies, not sessions.
+
 **API keys** (`routes/api_keys.rs`, `key_user` in `auth.rs`): `api_keys`
 holds the SHA-256 of `potoo_<64 hex>` and its scope (`read`/`write`/
 `admin`). `AuthUser(user, Access)` takes the session cookie or

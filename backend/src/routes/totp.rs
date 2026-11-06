@@ -9,10 +9,11 @@
 //! instead: `/login/totp/setup` and `/login/totp/enable` set the app up, and
 //! the latter starts the session.
 
-use crate::auth::{User, create_session};
+use crate::auth::User;
 use crate::error::{ErrorBody, HttpError};
 use crate::extract::ApiJson;
 use crate::routes::auth::{AuthUser, SessionUser, require_admin, secure};
+use crate::session::{self, AuthSession};
 use crate::state::AppState;
 use crate::totp;
 use axum::Json;
@@ -21,6 +22,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use axum_extra::extract::{CookieJar, SignedCookieJar};
+use axum_login::AuthnBackend as _;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::SqliteExecutor;
@@ -165,19 +167,22 @@ fn challenged_user(state: &AppState, headers: &HeaderMap, step: Step) -> Result<
     user.parse().map_err(|_| expired())
 }
 
-/// The session of a sign-in that took its last step, with the challenge
-/// cookie used up.
+/// Sign in the user of a sign-in that took its last step: the session,
+/// and the challenge cookie used up (the jar to answer with).
 async fn finish_sign_in(
-    state: &AppState,
-    jar: CookieJar,
+    auth: &mut AuthSession,
     headers: &HeaderMap,
     user_id: i64,
 ) -> Result<CookieJar, HttpError> {
-    let secure = secure(headers);
-    let jar = create_session(state.db.writer(), jar, user_id, secure).await?;
-    let mut removal = challenge(String::new(), secure);
+    let user = auth
+        .backend
+        .get_user(&user_id)
+        .await?
+        .ok_or_else(HttpError::unauthorized)?;
+    session::sign_in(auth, &user).await?;
+    let mut removal = challenge(String::new(), secure(headers));
     removal.make_removal();
-    Ok(jar.add(removal))
+    Ok(CookieJar::new().add(removal))
 }
 
 /// The throttle key of a user's codes. Per user, not per address: whoever
@@ -313,7 +318,7 @@ pub struct RecoveryCodes {
 )]
 async fn login_totp(
     State(state): State<AppState>,
-    jar: CookieJar,
+    mut auth: AuthSession,
     headers: HeaderMap,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
@@ -324,7 +329,7 @@ async fn login_totp(
     if !use_code(&state, user_id, &body.code).await? {
         return Err(invalid_code());
     }
-    let jar = finish_sign_in(&state, jar, &headers, user_id).await?;
+    let jar = finish_sign_in(&mut auth, &headers, user_id).await?;
     Ok((StatusCode::NO_CONTENT, jar).into_response())
 }
 
@@ -373,7 +378,7 @@ async fn login_setup(
 )]
 async fn login_enable(
     State(state): State<AppState>,
-    jar: CookieJar,
+    mut auth: AuthSession,
     headers: HeaderMap,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
@@ -382,7 +387,7 @@ async fn login_enable(
         return Ok(too_many(retry_after));
     }
     let codes = confirm_setup(&state, user_id, &body.code).await?;
-    let jar = finish_sign_in(&state, jar, &headers, user_id).await?;
+    let jar = finish_sign_in(&mut auth, &headers, user_id).await?;
     Ok((jar, Json(RecoveryCodes { codes })).into_response())
 }
 
@@ -453,12 +458,16 @@ fn already_on() -> HttpError {
 async fn enable(
     State(state): State<AppState>,
     SessionUser(user): SessionUser,
+    mut auth: AuthSession,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
     if let Some(retry_after) = state.throttle.locked_out(&throttle_key(user.id)) {
         return Ok(too_many(retry_after));
     }
     let codes = confirm_setup(&state, user.id, &body.code).await?;
+    // The secret is part of what sessions are checked against: the user's
+    // other sessions are signed out, this one stays.
+    session::refresh(&mut auth, user.id).await?;
     Ok(Json(RecoveryCodes { codes }).into_response())
 }
 
@@ -522,6 +531,7 @@ async fn confirm_setup(
 async fn disable(
     State(state): State<AppState>,
     SessionUser(user): SessionUser,
+    mut auth: AuthSession,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
     if state.totp_required {
@@ -537,6 +547,7 @@ async fn disable(
         return Err(invalid_code());
     }
     turn_off(&state, user.id).await?;
+    session::refresh(&mut auth, user.id).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
@@ -626,6 +637,7 @@ async fn replace(
 async fn confirm_replace(
     State(state): State<AppState>,
     SessionUser(user): SessionUser,
+    mut auth: AuthSession,
     ApiJson(body): ApiJson<TotpCode>,
 ) -> Result<Response, HttpError> {
     let key = throttle_key(user.id);
@@ -655,6 +667,7 @@ async fn confirm_replace(
     .await?;
     tx.commit().await?;
     state.throttle.clear(&key);
+    session::refresh(&mut auth, user.id).await?;
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
