@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { totp } from "./totp";
+import { Authenticator } from "./totp";
 
 // One flow through the real app, in order: the database starts empty.
 test.describe.configure({ mode: "serial" });
@@ -46,14 +46,15 @@ test("signing out and in", async ({ page }) => {
   await expect(page).toHaveURL(/\/login$/);
 });
 
-let secret = "";
+/** The authenticator app set up in the two-factor test, used again by the later ones. */
+let app: Authenticator | undefined;
 
 test("two-factor authentication: set up, then sign in with a code", async ({ page }) => {
   await signIn(page);
   await page.goto("/settings");
   await page.getByRole("button", { name: "Set up" }).click();
-  secret = (await page.locator("code").first().textContent())!.trim();
-  await page.getByPlaceholder("Code from the app").fill(totp(secret));
+  app = new Authenticator((await page.locator("code").first().textContent())!.trim());
+  await page.getByPlaceholder("Code from the app").fill(await app.code());
   await page.getByRole("button", { name: "Turn on" }).click();
   // The recovery codes, shown once.
   const codes = page.locator("li").filter({ hasText: /^[a-z0-9]{5}-[a-z0-9]{5}$/ });
@@ -72,10 +73,10 @@ test("two-factor authentication: set up, then sign in with a code", async ({ pag
 });
 
 test("a site, a page view, and the dashboard shows it", async ({ page }) => {
-  // The second step with the app's code: the next step's, which the server
-  // accepts (this step's was used up when two-factor was turned on).
+  // The second step with the app's code (the authenticator waits for a fresh
+  // one: each step's code is accepted once).
   await signIn(page, "code");
-  await page.getByPlaceholder("123456").fill(totp(secret, Date.now() + 30_000));
+  await page.getByPlaceholder("123456").fill(await app!.code());
   await page.getByRole("button", { name: "Verify" }).click();
   await expect(page.getByRole("button", { name: email })).toBeVisible();
 
