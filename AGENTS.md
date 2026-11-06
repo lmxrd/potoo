@@ -110,7 +110,7 @@ acceptable.
   single sign-on, two-factor, limits, CSRF, API keys, the OpenAPI spec) and
   its conventions are in `packages/backend/AGENTS.md`.
 - **Tests:** unit tests next to the code, integration tests of the API on
-  axum-test (`packages/backend/tests/api.rs`), Vitest for the frontend's
+  axum-test (`packages/backend/tests/it/`, one file per area), Vitest for the frontend's
   logic, and a few end-to-end smoke tests (`packages/e2e`) that a real
   browser runs against the built image.
 

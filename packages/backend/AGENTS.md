@@ -93,8 +93,8 @@ callback never redirects anywhere but `/`, `/login?step=<step>` and
 `/login?error=<code>`, and
 always clears the login cookie (even one it did not sign), with the
 attributes it was set with: a browser ignores a `__Host-` removal without
-`Secure`. The tests in `tests/api.rs` run a stand-in provider
-that signs real ID tokens with the keys in `tests/fixtures/` (test only).
+`Secure`. The tests in `tests/it/oidc.rs` run a stand-in provider (`tests/it/common/`)
+that signs real ID tokens with the keys in `tests/it/fixtures/` (test only).
 
 **Two-factor authentication** (`totp.rs` on top of `totp-rs`,
 `routes/totp.rs`): `users.totp_secret` (base32, NULL = off),
@@ -170,7 +170,7 @@ it** (nothing is committed or served):
   is registered with `.routes(routes!(handler))` on the `OpenApiRouter` of
   its module's `router()` (utoipa-axum): the router is the one and only
   list, so a routed endpoint is documented and a documented one is routed
-  (a test in `tests/api.rs` checks it). The path in the annotation is the
+  (a test in `tests/it/api.rs` checks it). The path in the annotation is the
   route, relative to where the router is nested (`/api`, so `/sites`, not
   `/api/sites`; handlers with the same path go in one `routes!(a, b)`).
   Request and response bodies are named structs with `ToSchema` (never

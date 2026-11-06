@@ -14,5 +14,5 @@ frontend embedded in the one binary. The user documentation is the
 | `mise run seed` | A year of demo data in `data/potoo.db` |
 
 `src/` holds the server (`routes/` the API), `migrations/` the schema (a
-new numbered file per change), `tests/api.rs` the integration tests, and
+new numbered file per change), `tests/it/` the integration tests (one file per area), and
 `examples/loadtest.rs` the load generator (`mise run loadtest`).

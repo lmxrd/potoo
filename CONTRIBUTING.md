@@ -48,7 +48,7 @@ types (tsc) for both projects. The tests come in three layers:
 
 - **Unit tests** next to the code (Rust `#[cfg(test)]`, and Vitest for the
   frontend's `src/lib`).
-- **Integration tests** of the API (`packages/backend/tests/api.rs`, on
+- **Integration tests** of the API (`packages/backend/tests/it/`, one file per area, on
   axum-test, against an in-memory database): setup, login and its limits,
   two-factor, sessions, single sign-on with a stand-in provider, API keys,
   CSRF, users and the last-admin rules, sites, collection (bots and
@@ -104,7 +104,7 @@ packages/backend/src/random.rs      random bytes for secrets (`random::hex`)
 packages/backend/src/routes/        auth, users, oidc (login, callback, admin settings), sites, stats, export, import, collect
 packages/backend/src/bin/seed.rs    a year of demo data, for development
 packages/backend/examples/          the load generator behind `mise run loadtest`
-packages/backend/tests/api.rs       the integration tests (axum-test; a stand-in OpenID provider, its test keys in tests/fixtures/)
+packages/backend/tests/it/          the integration tests, one file per area (axum-test; common/ holds the shared helpers and a stand-in OpenID provider, its test keys in fixtures/)
 scripts/                            the Linux build, the end-to-end run (e2e.sh), the load test and its generator image
 packages/e2e/                       the end-to-end smoke tests (Playwright)
 packages/frontend/src/routes/       dashboard, sites table, site page, admin settings (users.tsx), settings
