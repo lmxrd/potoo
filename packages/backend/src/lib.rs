@@ -9,6 +9,7 @@ pub mod filter;
 pub mod frontend;
 pub mod geo;
 pub mod ingest;
+pub mod jobs;
 pub mod limits;
 pub mod oidc;
 pub mod openapi;

@@ -2,7 +2,6 @@ use anyhow::Context;
 use potoo::{app, db, geo, state::AppState};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -50,10 +49,10 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         db: db.clone(),
         ingest,
-        geo: geo.clone(),
+        geo,
         trust_proxy: env_flag("TRUST_PROXY")?,
         swagger_ui: env_flag("SWAGGER_UI")?,
-        limits: limits.clone(),
+        limits,
         secure_cookies: public_url
             .as_deref()
             .is_some_and(|u| u.starts_with("https://")),
@@ -71,29 +70,6 @@ async fn main() -> anyhow::Result<()> {
         totp_required: env_flag("TOTP_REQUIRED")?,
     };
 
-    // The login limits forget the keys that are back to their full quota.
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(600)).await;
-            limits.retain_recent();
-        }
-    });
-
-    // Expired sessions are deleted every hour (a session past its expiry
-    // is refused anyway: this only keeps the table small).
-    {
-        use tower_sessions::ExpiredDeletion;
-        let store = potoo::sessions::Store::new(db.clone());
-        tokio::spawn(async move {
-            loop {
-                if let Err(e) = store.delete_expired().await {
-                    tracing::warn!("cannot delete the expired sessions: {e}");
-                }
-                tokio::time::sleep(Duration::from_secs(3_600)).await;
-            }
-        });
-    }
-
     // With OIDC_ONLY and no provider, nobody can sign in (but the first
     // admin on /setup, who can then set the provider up): say so.
     if !state.oidc.passwords_allowed() && !state.oidc.settings().enabled() {
@@ -108,24 +84,7 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|days| days.parse::<i64>().ok())
         .filter(|&days| days > 0);
-    if let Some(retention) = retention {
-        let db = db.clone();
-        purge(&db, retention).await;
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_secs(6 * 3_600)).await;
-                purge(&db, retention).await;
-            }
-        });
-    }
-
-    // While running, refresh the GeoIP database once a week.
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(geo::REFRESH_PERIOD).await;
-            geo.refresh().await;
-        }
-    });
+    potoo::jobs::spawn(&state, retention);
 
     #[cfg(feature = "profiling")]
     potoo::profile::spawn_reporter();
@@ -161,6 +120,7 @@ async fn main() -> anyhow::Result<()> {
     .await
     .context("the server failed")?;
     writer.await.context("the writer failed")?;
+    potoo::jobs::checkpoint(&db).await;
     db.close().await;
     #[cfg(feature = "profiling")]
     if let Some((profiler, out)) = &flamegraph {
@@ -198,17 +158,6 @@ fn write_profile(profiler: &pprof::ProfilerGuard<'_>, out: &str) {
             Err(e) => tracing::error!("cannot create {out}: {e}"),
         },
         Err(e) => tracing::error!("cannot build the profile: {e}"),
-    }
-}
-
-async fn purge(db: &db::Db, retention_days: i64) {
-    let cutoff = potoo::time::days_from_now_iso(-retention_days);
-    if let Err(e) = sqlx::query("DELETE FROM hits WHERE created_at < ?1")
-        .bind(cutoff)
-        .execute(db.writer())
-        .await
-    {
-        tracing::error!("retention purge failed: {e}");
     }
 }
 
