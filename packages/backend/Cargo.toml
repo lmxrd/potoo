@@ -40,12 +40,13 @@ tower-http = { version = "0.7.1", features = ["cors", "trace"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 # The OpenAPI spec (see src/openapi.rs): derives on the request and response
-# types and a path annotation on every handler; the spec is written to a file
-# by the `openapi` binary, never served.
-utoipa = { version = "6.0.0", features = ["uuid"] }
+# types and a path annotation on every handler; the spec is written to files
+# by the `specs` binary, and served at /swagger-ui only with SWAGGER_UI.
+utoipa = { version = "6.0.0", features = ["uuid", "yaml"] }
 # Profiling only, never in a production build (see the profiling feature).
 pprof = { version = "0.15.0", optional = true, features = ["flamegraph"] }
 utoipa-axum = "0.3.0"
+utoipa-swagger-ui = { version = "10.0.2", features = ["axum"] }
 axum-login = "0.18.0"
 tower-sessions = { version = "0.14.0", default-features = false, features = ["axum-core"] }
 async-trait = "0.1.92"
@@ -60,7 +61,7 @@ axum-test = "21.1.0"
 chrono = "0.4.45"
 
 [features]
-# Builds without packages/frontend/dist, for the `openapi` binary only (never ship it):
+# Builds without packages/frontend/dist, for the `specs` binary only (never ship it):
 # the frontend client is generated from the spec, so the spec comes first.
 spec = []
 # A CPU profile of the running server: sampled while it runs, written as a
@@ -70,8 +71,8 @@ spec = []
 profiling = ["dep:pprof"]
 
 [[bin]]
-name = "openapi"
-path = "src/bin/openapi.rs"
+name = "specs"
+path = "src/bin/specs.rs"
 required-features = ["spec"]
 
 # Smaller, faster release binaries; the release workflow and the image

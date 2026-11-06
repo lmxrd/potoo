@@ -20,7 +20,7 @@ it provides Rust, Node, pnpm and the other tools at their pinned versions).
 | `mise run dev` | Backend on :8000 plus the Vite dev server |
 | `mise run seed` | A year of demo data (wipes every hit) into `data/potoo.db` |
 | `mise run audit` / `audit:image` | Known vulnerabilities in the lockfiles (osv-scanner) / in an image's Alpine packages (Trivy; `IMAGE=`, by default the published one) |
-| `mise run gen:spec` | Writes the OpenAPI spec to `packages/backend/target/specs/openapi.json` |
+| `mise run gen:spec` | Writes the OpenAPI spec to `packages/backend/target/specs/` (JSON and YAML) |
 | `mise run gen:sdk` | Generates the frontend API client (`packages/sdk/src`) from the spec |
 | `mise run build` / `build:linux` / `build:docker` | Release binary (`dist/potoo`) / static Linux binary (`dist/potoo-linux-<arch>`, zig cross-compiles) / image (podman) that copies it |
 

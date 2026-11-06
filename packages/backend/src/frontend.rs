@@ -12,7 +12,7 @@ use rust_embed::RustEmbed;
 /// debug builds, so a dev server needs no rebuild).
 #[derive(RustEmbed)]
 #[folder = "../frontend/dist"]
-// The spec build (the `openapi` binary) happens before the frontend is
+// The spec build (the `specs` binary) happens before the frontend is
 // built, because the frontend is generated from the spec: it must compile
 // without `frontend/dist`. No other build may, or it would embed nothing.
 #[cfg_attr(feature = "spec", allow_missing = true)]

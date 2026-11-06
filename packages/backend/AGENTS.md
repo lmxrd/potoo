@@ -204,7 +204,7 @@ it** (nothing is committed or served):
   renames what was stored under the old name.
 - Flags are booleans in both requests and responses (`is_admin`,
   `honor_dnt`), never 0/1.
-- The spec is written by the `openapi` binary, built with `--features spec`,
+- The spec is written by the `specs` binary, built with `--features spec`,
   which is the only build allowed to compile without `packages/frontend/dist`
   (`allow_missing`). Never ship a `spec` build.
 - The SDK, `packages/sdk` (the `potoo-sdk` workspace package), is generated

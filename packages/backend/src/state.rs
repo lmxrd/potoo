@@ -24,4 +24,6 @@ pub struct AppState {
     pub totp_required: bool,
     /// `PUBLIC_URL` is https: every cookie is `Secure` and `__Host-`.
     pub secure_cookies: bool,
+    /// `SWAGGER_UI`: the API's description is served at `/swagger-ui`.
+    pub swagger_ui: bool,
 }

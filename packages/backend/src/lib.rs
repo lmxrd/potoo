@@ -28,7 +28,7 @@ use state::AppState;
 
 /// Every route of the API with its OpenAPI document: the tracker script at
 /// the root, and everything else under /api. The app serves the routes; the
-/// `openapi` binary writes the document (`openapi::spec`).
+/// `specs` binary writes the document (`openapi::spec`).
 pub fn api() -> utoipa_axum::router::OpenApiRouter<AppState> {
     utoipa_axum::router::OpenApiRouter::with_openapi(openapi::base())
         .merge(routes::collect::tracker_router())
@@ -37,7 +37,13 @@ pub fn api() -> utoipa_axum::router::OpenApiRouter<AppState> {
 
 /// The whole app: the API routes, then the embedded frontend.
 pub fn app(state: AppState) -> Router {
-    let (router, _spec) = api().split_for_parts();
+    let (mut router, spec) = api().split_for_parts();
+    // The API's description (swagger-ui) is served only when asked for (`SWAGGER_UI`).
+    if state.swagger_ui {
+        router = router.merge(
+            utoipa_swagger_ui::SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", spec),
+        );
+    }
     // Sessions (tower-sessions, our store) and who is signed in on them
     // (axum-login).
     frontend::mount(router)
@@ -52,6 +58,8 @@ pub fn app(state: AppState) -> Router {
             state.clone(),
             csrf::protect,
         ))
+        // Every error answer in the API's own shape, whatever produced it.
+        .layer(axum::middleware::map_response(extract::error_bodies))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         .with_state(state)
 }

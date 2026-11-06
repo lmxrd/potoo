@@ -1,9 +1,9 @@
-//! The OpenAPI description of the API, written to a file by the `openapi`
-//! binary (`mise run gen:spec`) and never served: the frontend's client is
-//! generated from it. The paths come from the router itself: every handler
-//! is registered with `routes!` next to its `#[utoipa::path]` (see
-//! `routes/`), so a routed endpoint is documented and a documented one is
-//! routed. This file holds the rest: the title, the tags and the cookie
+//! The OpenAPI description of the API, written to files by the `specs`
+//! binary (`mise run gen:spec`; the frontend's client is generated from
+//! it) and served at `/swagger-ui` only with `SWAGGER_UI` set. The paths
+//! come from the router itself: every handler is registered with `routes!`
+//! next to its `#[utoipa::path]` (see `routes/`), so a routed endpoint is
+//! documented and a documented one is routed. This file holds the rest: the title, the tags and the cookie
 //! the dashboard endpoints are secured with.
 
 use crate::sessions::SESSION_COOKIE;

@@ -73,6 +73,7 @@ async fn spawn(options: Options) -> TestApp {
         public_url: options.public_url,
         challenge_key: axum_extra::extract::cookie::Key::generate(),
         totp_required: options.totp_required,
+        swagger_ui: false,
     };
     let server = TestServer::builder()
         .http_transport()

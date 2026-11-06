@@ -23,7 +23,7 @@ backend).
 | -------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `mise run dev`             | Runs the backend and the frontend (Vite) together                                                              |
 | `mise run start`           | Builds, then runs the server (never a stale binary)                                                            |
-| `mise run gen:spec`        | Writes the OpenAPI spec to `packages/backend/target/specs/openapi.json`                                                 |
+| `mise run gen:spec`        | Writes the OpenAPI spec to `packages/backend/target/specs/` (JSON and YAML)                                             |
 | `mise run gen:sdk`      | Generates the frontend API client from the spec (`packages/sdk/src`, not committed)                         |
 | `mise run build`           | Builds the frontend and the release binary for this machine, copied to `dist/potoo`                            |
 | `mise run build:linux`     | The static Linux binary the image copies, `dist/potoo-linux-<arch>` (zig cross-compiles; `ARCH=amd64`/`arm64`) |
@@ -90,7 +90,7 @@ packages/backend/src/db.rs          the SQLite pools (one writer, read-only read
 packages/backend/src/ingest.rs      the hit queue and the batched writer
 packages/backend/src/profile.rs     per-phase timers, compiled in only with the profiling feature
 packages/backend/src/openapi.rs     the OpenAPI document: title, tags, the cookie scheme (paths come from the routers)
-packages/backend/src/bin/openapi.rs writes the spec to a file (`mise run gen:spec`)
+packages/backend/src/bin/specs.rs   writes the spec to files (`mise run gen:spec`)
 packages/backend/migrations/        the schema, one numbered SQL file per change (sqlx migrations)
 packages/backend/src/auth.rs        password hashing, API keys
 packages/backend/src/oidc.rs        single sign-on: the settings (env over stored), the OIDC flow, the signed login cookie

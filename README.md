@@ -261,9 +261,10 @@ are not checked for duplicates.
 | `OIDC_REDIRECT_URL`  | unset               | Single sign-on: the callback URL, when the one Potoo works out from the request is not right (`https://…/api/auth/oidc/callback`)           |
 | `OIDC_AUTO_CREATE`   | `false`             | Single sign-on: `true` creates a regular user for a verified email that has no account; `false` does not |
 | `OIDC_ONLY`          | `false`             | Single sign-on: `true` makes single sign-on the only way in: no password signs in and none can be set. The first admin is still created with a password on `/setup`, then signs in through the provider (matched by their verified email) |
+| `SWAGGER_UI`         | unset               | `true` to browse the API at `/swagger-ui`                                                                                                   |
 | `TOTP_REQUIRED`      | `false`             | `true` makes two-factor authentication required: a user without it sets up an authenticator app at their next sign-in (password or single sign-on), and nobody can turn it off. Sessions made before are kept |
 
-`TRUST_PROXY`, `OIDC_AUTO_CREATE`, `OIDC_ONLY` and `TOTP_REQUIRED` take `true` or `false`
+`TRUST_PROXY`, `SWAGGER_UI`, `OIDC_AUTO_CREATE`, `OIDC_ONLY` and `TOTP_REQUIRED` take `true` or `false`
 (`1`/`0`, `yes`/`no` and `on`/`off` work too); any other value stops Potoo at
 start.
 
@@ -404,10 +405,11 @@ does:
 
 ## The API
 
-Every endpoint is described in an OpenAPI 3.1 document, generated from the code
-rather than hosted: `mise run gen:spec` writes it to
-`packages/backend/target/specs/openapi.json`. The dashboard's API client is generated from
-it, and you can load it into any OpenAPI viewer or client generator.
+Every endpoint is described in an OpenAPI 3.1 document, generated from the code:
+`mise run gen:spec` writes it to `packages/backend/target/specs/openapi.json` and
+`openapi.yaml`, and every release has both attached. Run with `SWAGGER_UI=true` to
+browse it at `/swagger-ui`. The dashboard's API client is generated from it, and you
+can load it into any OpenAPI viewer or client generator.
 
 ## Notes
 

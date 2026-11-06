@@ -52,6 +52,7 @@ async fn main() -> anyhow::Result<()> {
         ingest,
         geo: geo.clone(),
         trust_proxy: env_flag("TRUST_PROXY")?,
+        swagger_ui: env_flag("SWAGGER_UI")?,
         limits: limits.clone(),
         secure_cookies: public_url
             .as_deref()
@@ -144,7 +145,11 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
         .with_context(|| format!("cannot listen on {port}"))?;
-    tracing::info!("listening on http://0.0.0.0:{port}");
+    if state.swagger_ui {
+        tracing::info!("listening on http://0.0.0.0:{port} (swagger-ui at /swagger-ui)");
+    } else {
+        tracing::info!("listening on http://0.0.0.0:{port}");
+    }
     // On SIGINT or SIGTERM the server stops accepting, finishes the requests
     // in flight, and the writer then drains the queue: no accepted hit is
     // lost to a clean stop (`docker stop`, a deploy).

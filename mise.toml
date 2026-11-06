@@ -63,9 +63,9 @@ dir = "{{ config_root }}"
 # The OpenAPI spec, written by the backend without the frontend embedded
 # (--features spec): the SDK is generated from it, so the spec comes first.
 [tasks."gen:spec"]
-run = "cargo run --features spec --bin openapi"
+run = "cargo run --features spec --bin specs"
 sources = ["src/**/*", "migrations/**/*", "Cargo.toml", "Cargo.lock", "build.rs"]
-outputs = ["target/specs/openapi.json"]
+outputs = ["target/specs/openapi.json", "target/specs/openapi.yaml"]
 dir = "{{ config_root }}/packages/backend"
 
 # The SDK the frontend calls the API with (packages/sdk/src), generated from
