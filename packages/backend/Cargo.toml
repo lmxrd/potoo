@@ -60,6 +60,10 @@ axum-test = "21.1.0"
 # claims take chrono times. The app itself uses jiff.
 chrono = "0.4.45"
 
+# No unsafe code anywhere in the crate; `forbid` cannot be allowed again further in.
+[lints.rust]
+unsafe_code = "forbid"
+
 [features]
 # Builds without packages/frontend/dist, for the `specs` binary only (never ship it):
 # the frontend client is generated from the spec, so the spec comes first.

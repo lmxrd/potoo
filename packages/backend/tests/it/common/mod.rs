@@ -235,7 +235,10 @@ pub mod provider {
     pub async fn spawn() -> Provider {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let issuer = format!("http://{}", listener.local_addr().unwrap());
-        let key = Arc::new(signing_key(include_str!("../fixtures/oidc-key.pem"), "first"));
+        let key = Arc::new(signing_key(
+            include_str!("../fixtures/oidc-key.pem"),
+            "first",
+        ));
         let other_key = Arc::new(signing_key(
             include_str!("../fixtures/oidc-other-key.pem"),
             "second",
