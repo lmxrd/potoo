@@ -144,7 +144,7 @@ async fn main() -> anyhow::Result<()> {
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
         .with_context(|| format!("cannot listen on {port}"))?;
-    println!("potoo listening on http://0.0.0.0:{port}");
+    tracing::info!("listening on http://0.0.0.0:{port}");
     // On SIGINT or SIGTERM the server stops accepting, finishes the requests
     // in flight, and the writer then drains the queue: no accepted hit is
     // lost to a clean stop (`docker stop`, a deploy).
@@ -187,25 +187,23 @@ fn write_profile(profiler: &pprof::ProfilerGuard<'_>, out: &str) {
     match profiler.report().build() {
         Ok(report) => match std::fs::File::create(out) {
             Ok(file) => match report.flamegraph(file) {
-                Ok(()) => println!("flamegraph written to {out}"),
-                Err(e) => eprintln!("cannot write the flamegraph: {e}"),
+                Ok(()) => tracing::info!("flamegraph written to {out}"),
+                Err(e) => tracing::error!("cannot write the flamegraph: {e}"),
             },
-            Err(e) => eprintln!("cannot create {out}: {e}"),
+            Err(e) => tracing::error!("cannot create {out}: {e}"),
         },
-        Err(e) => eprintln!("cannot build the profile: {e}"),
+        Err(e) => tracing::error!("cannot build the profile: {e}"),
     }
 }
 
 async fn purge(db: &db::Db, retention_days: i64) {
-    let cutoff = potoo::auth::iso(
-        std::time::SystemTime::now() - Duration::from_secs(retention_days as u64 * 86_400),
-    );
+    let cutoff = potoo::time::days_from_now_iso(-retention_days);
     if let Err(e) = sqlx::query("DELETE FROM hits WHERE created_at < ?1")
         .bind(cutoff)
         .execute(db.writer())
         .await
     {
-        eprintln!("retention purge failed: {e}");
+        tracing::error!("retention purge failed: {e}");
     }
 }
 

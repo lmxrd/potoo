@@ -68,7 +68,7 @@ impl Geo {
         if !loaded || geo.is_stale() {
             let fresh = geo.refresh().await;
             if !fresh && !loaded {
-                eprintln!(
+                tracing::warn!(
                     "GeoIP database not found at {}; country will be empty",
                     geo.path.display()
                 );
@@ -139,7 +139,7 @@ impl Geo {
             }
         }
         if let Some(error) = last_error {
-            eprintln!("GeoIP database download failed: {error}");
+            tracing::warn!("GeoIP database download failed: {error}");
         }
         false
     }

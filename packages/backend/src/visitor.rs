@@ -236,7 +236,7 @@ pub fn client_ip(headers: &HeaderMap, addr: Option<IpAddr>, trust_proxy: bool) -
 /// The salt of today; each day gets a fresh one, and older days are
 /// deleted, so hashes cannot be linked across days.
 async fn daily_salt(db: &Db) -> String {
-    let day = crate::auth::now_iso()[..10].to_string();
+    let day = crate::time::now_iso()[..10].to_string();
     if let Some(salt) = db.cached_salt(&day) {
         return salt;
     }

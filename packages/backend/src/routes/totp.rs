@@ -16,6 +16,7 @@ use crate::extract::ApiJson;
 use crate::limits::UserAction;
 use crate::sessions::{self, AuthSession};
 use crate::state::AppState;
+use crate::time::unix_now;
 use crate::totp;
 use crate::visitor::client_ip;
 use axum::Json;
@@ -28,7 +29,7 @@ use axum_login::AuthnBackend as _;
 use serde::{Deserialize, Serialize};
 use sqlx::SqliteExecutor;
 use std::net::SocketAddr;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -74,13 +75,6 @@ fn challenge(value: String, secure: bool) -> Cookie<'static> {
         .secure(secure)
         .max_age(time::Duration::seconds(CHALLENGE_TTL.as_secs() as i64))
         .build()
-}
-
-fn unix_now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
 }
 
 /// What a sign-in still needs before its session.

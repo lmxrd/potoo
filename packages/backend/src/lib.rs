@@ -17,6 +17,7 @@ pub mod routes;
 pub mod sessions;
 pub mod state;
 pub mod stats;
+pub mod time;
 pub mod totp;
 pub mod tracker;
 pub mod util;

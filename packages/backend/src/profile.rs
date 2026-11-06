@@ -112,7 +112,7 @@ mod imp {
                 let hits = COUNT[0].load(Relaxed) - last_count[0];
                 if hits > 0 {
                     let secs = (now - last_time).as_secs_f64();
-                    println!(
+                    tracing::info!(
                         "[profile] {:.0} hits/s, {:.2} cores, {:.0} us cpu per hit",
                         hits as f64 / secs,
                         (cpu - last_cpu) / secs,
@@ -121,7 +121,7 @@ mod imp {
                     let batches = COUNT[Phase::Batch as usize].load(Relaxed)
                         - last_count[Phase::Batch as usize];
                     if batches > 0 {
-                        println!(
+                        tracing::info!(
                             "[profile]   {:.0} batches/s, {:.1} hits per batch",
                             batches as f64 / secs,
                             hits as f64 / batches as f64
@@ -132,7 +132,7 @@ mod imp {
                         let ns = NANOS[i].load(Relaxed);
                         let (dn, dns) = (n - last_count[i], ns - last_nanos[i]);
                         if dn > 0 {
-                            println!(
+                            tracing::info!(
                                 "[profile]   {name:<24} {:>8.0} us per hit",
                                 dns as f64 / hits as f64 / 1000.0
                             );

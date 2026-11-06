@@ -3,7 +3,7 @@
 //! cannot list, make or revoke keys); the token is shown once, on creation.
 
 use crate::auth::SessionUser;
-use crate::auth::{API_KEY_PREFIX, Scope, iso};
+use crate::auth::{API_KEY_PREFIX, Scope};
 use crate::error::{ApiError, ErrorBody};
 use crate::extract::ApiJson;
 use crate::state::AppState;
@@ -13,7 +13,6 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::{Deserialize, Serialize};
-use std::time::{Duration, SystemTime};
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -156,9 +155,7 @@ async fn create_key(
     }
     let expires_at = match body.expires_in_days {
         None => None,
-        Some(days @ 1..=3650) => Some(iso(
-            SystemTime::now() + Duration::from_secs(days as u64 * 86_400)
-        )),
+        Some(days @ 1..=3650) => Some(crate::time::days_from_now_iso(days as i64)),
         Some(_) => {
             return Err(ApiError::bad_request(
                 "Expected an expiry of 1 to 3650 days",

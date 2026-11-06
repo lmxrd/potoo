@@ -5,7 +5,6 @@
 
 use crate::util::sha256_hex;
 use rand::{Rng, RngExt};
-use std::time::{SystemTime, UNIX_EPOCH};
 use totp_rs::{Algorithm, Builder, Secret, Totp};
 
 const STEP_SECONDS: u64 = 30;
@@ -43,16 +42,9 @@ pub fn uri(secret: &str, email: &str) -> Option<String> {
     totp(secret, email)?.to_url().ok()
 }
 
-fn unix_now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
 /// The current time step.
 pub fn current_step() -> u64 {
-    unix_now() / STEP_SECONDS
+    crate::time::unix_now() / STEP_SECONDS
 }
 
 /// The step `code` belongs to, if it is the code of the secret for a step

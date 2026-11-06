@@ -135,7 +135,7 @@ async fn write(db: &Db, hits: &mut Vec<NewHit>) {
     let mut conn = match timed(Phase::WriterLockWait, db.writer().acquire()).await {
         Ok(conn) => conn,
         Err(e) => {
-            eprintln!("cannot write {} hits: {e}", hits.len());
+            tracing::error!("cannot write {} hits: {e}", hits.len());
             hits.clear();
             return;
         }
@@ -158,7 +158,7 @@ async fn write(db: &Db, hits: &mut Vec<NewHit>) {
             }
         }
         if lost > 0 {
-            eprintln!(
+            tracing::warn!(
                 "dropped {lost} of {} hits that could not be stored",
                 hits.len()
             );
@@ -176,7 +176,7 @@ mod tests {
 
     fn hit(site_id: uuid::Uuid, n: usize) -> NewHit {
         NewHit {
-            created_at: crate::auth::now_iso(),
+            created_at: crate::time::now_iso(),
             site_id,
             kind: "pageview",
             path: format!("/page/{n}"),

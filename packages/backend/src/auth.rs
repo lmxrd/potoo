@@ -10,7 +10,6 @@ use axum::http::request::Parts;
 use axum::http::{HeaderMap, header};
 use serde::{Deserialize, Serialize};
 use sqlx::SqliteExecutor;
-use std::time::SystemTime;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
@@ -135,7 +134,7 @@ pub async fn key_user<'e>(db: impl SqliteExecutor<'e>, token: &str) -> Option<(U
          WHERE k.token_hash = ?1 AND (k.expires_at IS NULL OR k.expires_at > ?2)",
     )
     .bind(sha256_hex(token))
-    .bind(now_iso())
+    .bind(crate::time::now_iso())
     .fetch_optional(db)
     .await
     .ok()
@@ -149,16 +148,6 @@ pub async fn key_user<'e>(db: impl SqliteExecutor<'e>, token: &str) -> Option<(U
             last_used_at: row.last_used_at,
         },
     ))
-}
-
-pub fn now_iso() -> String {
-    iso(SystemTime::now())
-}
-
-/// `YYYY-MM-DDTHH:MM:SS.mmmZ`, the form times are stored in.
-pub fn iso(t: SystemTime) -> String {
-    let t = jiff::Timestamp::try_from(t).expect("a time within jiff's range");
-    format!("{t:.3}")
 }
 
 /// The signed-in user, as a request extractor: a valid session cookie, or
@@ -251,8 +240,8 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
 /// script does not take the one writer for every request. A failure is
 /// only logged: the request goes on.
 async fn note_key_use(state: &AppState, key: &KeyUse) {
-    let now = SystemTime::now();
-    let stale = iso(now - std::time::Duration::from_secs(60));
+    let now = crate::time::now_iso();
+    let stale = crate::time::seconds_from_now_iso(-60);
     if key
         .last_used_at
         .as_deref()
@@ -261,7 +250,7 @@ async fn note_key_use(state: &AppState, key: &KeyUse) {
         return;
     }
     if let Err(e) = sqlx::query("UPDATE api_keys SET last_used_at = ?1 WHERE id = ?2")
-        .bind(iso(now))
+        .bind(&now)
         .bind(key.id)
         .execute(state.db.writer())
         .await

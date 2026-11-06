@@ -131,7 +131,7 @@ async fn record(
     let visitor = visitor_hash(&state.db, site.id, &ip, ua).await;
 
     state.ingest.submit(NewHit {
-        created_at: crate::auth::now_iso(),
+        created_at: crate::time::now_iso(),
         site_id: site.id,
         kind: hit.kind.as_str(),
         path: clean_path(hit.path.as_deref()),
