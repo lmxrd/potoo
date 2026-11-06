@@ -34,7 +34,8 @@ backend).
 | `mise run audit`           | Known vulnerabilities in `Cargo.lock` and `pnpm-lock.yaml` (osv-scanner; also daily in CI)                     |
 | `mise run audit:image`     | Known vulnerabilities in the image's Alpine packages (Trivy); `IMAGE=` picks one, by default the published one |
 | `mise run fix`             | Applies the format and lint fixes                                                                              |
-| `mise run test`            | The backend tests: end-to-end over HTTP, and unit tests                                                        |
+| `mise run test`            | Unit and integration tests: the backend's (cargo, axum-test) and the frontend's (Vitest)                       |
+| `mise run test:e2e`        | The end-to-end smoke tests: builds the image, then a real browser goes through it (Playwright)                 |
 | `mise run seed`            | A year of demo data (wipes every hit; deterministic)                                                           |
 | `mise run clean`           | Removes the local data: the database and the GeoIP database                                                    |
 
@@ -43,10 +44,17 @@ Tasks that build something are cached by their `sources` and `outputs` in
 
 `mise run check` and `mise run test` must pass before a change can land.
 The checks cover formatting (rustfmt, oxfmt), linting (clippy, oxlint) and
-types (tsc) for both projects; the tests are end-to-end over real HTTP,
-against an in-memory database: setup, login and its limits, users and
-the last-admin rules, sites, collection (bots and Do-Not-Track
-included), the stats with a filter, and the export.
+types (tsc) for both projects. The tests come in three layers:
+
+- **Unit tests** next to the code (Rust `#[cfg(test)]`, and Vitest for the
+  frontend's `src/lib`).
+- **Integration tests** of the API (`packages/backend/tests/api.rs`, on
+  axum-test, against an in-memory database): setup, login and its limits,
+  two-factor, sessions, single sign-on with a stand-in provider, API keys,
+  CSRF, users and the last-admin rules, sites, collection (bots and
+  Do-Not-Track included), the stats with a filter, the export and import.
+- **End-to-end smoke tests** (`packages/e2e`, Playwright): a few flows a
+  real browser runs against the built image. CI runs all three.
 
 ## The API and its spec
 
@@ -96,8 +104,9 @@ packages/backend/src/util.rs        sha256 and random hex helpers
 packages/backend/src/routes/        auth, users, oidc (login, callback, admin settings), sites, stats, export, import, collect
 packages/backend/src/bin/seed.rs    a year of demo data, for development
 packages/backend/examples/          the load generator behind `mise run loadtest`
-packages/backend/tests/api.rs       the end-to-end tests (with a stand-in OpenID provider; its test keys in tests/fixtures/)
-scripts/                   the load test script and its generator image
+packages/backend/tests/api.rs       the integration tests (axum-test; a stand-in OpenID provider, its test keys in tests/fixtures/)
+scripts/                            the Linux build, the end-to-end run (e2e.sh), the load test and its generator image
+packages/e2e/                       the end-to-end smoke tests (Playwright)
 packages/frontend/src/routes/       dashboard, sites table, site page, admin settings (users.tsx), settings
 packages/frontend/src/components/   the shared UI pieces
 packages/sdk/src/       the generated API client (hey-api; gitignored, never edited)
