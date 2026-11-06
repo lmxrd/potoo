@@ -16,11 +16,12 @@ use governor::{DefaultKeyedRateLimiter, Quota};
 use std::hash::Hash;
 use std::num::NonZeroU32;
 use std::time::Duration;
+use uuid::Uuid;
 
 pub struct Limits {
     email: DefaultKeyedRateLimiter<String>,
     ip: DefaultKeyedRateLimiter<String>,
-    user: DefaultKeyedRateLimiter<i64>,
+    user: DefaultKeyedRateLimiter<Uuid>,
 }
 
 fn quota(burst: u32, refill: Duration) -> Quota {
@@ -69,7 +70,7 @@ impl Limits {
 
     /// A code (or the password) of a signed-in user, or of one in the
     /// middle of signing in (then from an address too).
-    pub fn user(&self, user_id: i64, ip: Option<&str>) -> Result<(), HttpError> {
+    pub fn user(&self, user_id: Uuid, ip: Option<&str>) -> Result<(), HttpError> {
         if let Some(ip) = ip {
             attempt(&self.ip, &ip.to_string())?;
         }
@@ -123,10 +124,11 @@ mod tests {
     #[test]
     fn five_codes_per_user() {
         let limits = Limits::default();
+        let (one, other) = (Uuid::from_u128(7), Uuid::from_u128(8));
         for _ in 0..5 {
-            limits.user(7, None).unwrap();
+            limits.user(one, None).unwrap();
         }
-        assert!(limits.user(7, None).is_err());
-        limits.user(8, None).unwrap();
+        assert!(limits.user(one, None).is_err());
+        limits.user(other, None).unwrap();
     }
 }

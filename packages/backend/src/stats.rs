@@ -304,7 +304,7 @@ where
 /// on two of the sites counts as two visitors here.
 pub async fn stats_for(
     db: &Db,
-    site_ids: &[i64],
+    site_ids: &[uuid::Uuid],
     range: &StatsRange,
     filters: &FacetFilters,
 ) -> sqlx::Result<SiteStats> {
@@ -336,7 +336,11 @@ pub async fn stats_for(
 
     let in_sites = format!(
         "site_id IN ({})",
-        site_ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ")
+        site_ids
+            .iter()
+            .map(|_| "unhex(?)")
+            .collect::<Vec<_>>()
+            .join(", ")
     );
     // The filters apply to every aggregation, so a filtered view is
     // fully recomputed: the same facets, restricted to the selected values.
@@ -347,7 +351,8 @@ pub async fn stats_for(
         format!("created_at >= ? AND created_at < ? AND {filter_clause}")
     };
     let mut params: Vec<String> = Vec::new();
-    params.extend(site_ids.iter().map(|id| id.to_string()));
+    // The ids are 16-byte blobs: bound as hex, like every value here a string.
+    params.extend(site_ids.iter().map(|id| id.simple().to_string()));
     params.push(since.clone());
     params.push(until.clone());
     params.extend(filter_params);

@@ -17,6 +17,7 @@ use std::time::{Duration, SystemTime};
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
+use uuid::Uuid;
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
@@ -30,7 +31,7 @@ const MAX_KEYS: i64 = 50;
 /// An API key, without its token.
 #[derive(Serialize, ToSchema)]
 pub struct ApiKey {
-    pub id: i64,
+    pub id: Uuid,
     pub name: String,
     /// The start of the token, to tell keys apart, e.g. `potoo_3f9a1c`.
     pub prefix: String,
@@ -46,7 +47,7 @@ pub struct ApiKey {
 
 #[derive(sqlx::FromRow)]
 struct ApiKeyRow {
-    id: i64,
+    id: Uuid,
     name: String,
     prefix: String,
     scope: String,
@@ -179,9 +180,10 @@ async fn create_key(
         ));
     }
     let row: ApiKeyRow = sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "INSERT INTO api_keys (user_id, name, prefix, token_hash, scope, expires_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6) RETURNING {COLUMNS}"
+        "INSERT INTO api_keys (id, user_id, name, prefix, token_hash, scope, expires_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) RETURNING {COLUMNS}"
     )))
+    .bind(Uuid::now_v7())
     .bind(user.id)
     .bind(name)
     .bind(&prefix)
@@ -208,7 +210,7 @@ async fn create_key(
     operation_id = "revokeApiKey",
     summary = "Revoke an API key",
     description = "It stops working at once. Not with an API key.",
-    params(("id" = i64, Path, description = "The key id")),
+    params(("id" = Uuid, Path, description = "The key id")),
     responses(
         (status = 204, description = "Revoked"),
         (status = 401, description = "Not signed in", body = ErrorBody),
@@ -220,7 +222,7 @@ async fn create_key(
 async fn revoke_key(
     State(state): State<AppState>,
     SessionUser(user): SessionUser,
-    Path(id): Path<i64>,
+    Path(id): Path<Uuid>,
 ) -> Result<Response, HttpError> {
     let deleted = sqlx::query("DELETE FROM api_keys WHERE id = ?1 AND user_id = ?2")
         .bind(id)

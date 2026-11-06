@@ -19,6 +19,7 @@ use std::time::{Duration, SystemTime};
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
+use uuid::Uuid;
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
@@ -281,7 +282,7 @@ pub struct ResetPassword {
 /// One user in the list of users.
 #[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct UserRow {
-    pub id: i64,
+    pub id: Uuid,
     pub email: String,
     pub is_admin: bool,
     pub created_at: String,
@@ -368,12 +369,14 @@ async fn setup(
 ) -> Result<Response, HttpError> {
     let email = validate_email(&creds.email)?;
     let password = validate_password(&creds.password)?;
+    let id = Uuid::now_v7();
     let inserted = sqlx::query(
-        "INSERT INTO users (email, password_hash, is_admin)
-         SELECT ?1, ?2, 1 WHERE NOT EXISTS (SELECT 1 FROM users)",
+        "INSERT INTO users (id, email, password_hash, is_admin)
+         SELECT ?3, ?1, ?2, 1 WHERE NOT EXISTS (SELECT 1 FROM users)",
     )
     .bind(email)
     .bind(hash_password(&password))
+    .bind(id)
     .execute(state.db.writer())
     .await?;
     if inserted.rows_affected() == 0 {
@@ -381,7 +384,7 @@ async fn setup(
     }
     let user = auth
         .backend
-        .get_user(&inserted.last_insert_rowid())
+        .get_user(&id)
         .await?
         .ok_or_else(|| HttpError::internal("the new admin is gone"))?;
     session::sign_in(&mut auth, &user).await?;
@@ -729,7 +732,8 @@ async fn create_user(
     if taken.is_some() {
         return Err(HttpError::new(StatusCode::CONFLICT, "Email already in use"));
     }
-    sqlx::query("INSERT INTO users (email, password_hash, is_admin) VALUES (?1, ?2, ?3)")
+    sqlx::query("INSERT INTO users (id, email, password_hash, is_admin) VALUES (?1, ?2, ?3, ?4)")
+        .bind(Uuid::now_v7())
         .bind(&email)
         .bind(password_hash)
         .bind(body.is_admin as i64)
@@ -748,7 +752,7 @@ async fn create_user(
     operation_id = "changeUserRole",
     summary = "Change the role of a user",
     description = "The last admin cannot be demoted.",
-    params(("id" = i64, Path, description = "The user id")),
+    params(("id" = Uuid, Path, description = "The user id")),
     request_body(content = ChangeRole, content_type = "application/json"),
     responses(
         (status = 204, description = "Changed"),
@@ -764,7 +768,7 @@ async fn create_user(
 async fn change_role(
     State(state): State<AppState>,
     user: AuthUser,
-    axum::extract::Path(id): axum::extract::Path<i64>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
     ApiJson(body): ApiJson<ChangeRole>,
 ) -> Result<Response, HttpError> {
     require_admin(&user)?;
@@ -798,7 +802,7 @@ async fn change_role(
     operation_id = "deleteUser",
     summary = "Delete a user",
     description = "The last admin cannot be deleted. Deleting a user that does not exist is not an error.",
-    params(("id" = i64, Path, description = "The user id")),
+    params(("id" = Uuid, Path, description = "The user id")),
     responses(
         (status = 204, description = "Deleted"),
         (status = 401, description = "Not signed in", body = ErrorBody),
@@ -810,7 +814,7 @@ async fn change_role(
 async fn delete_user(
     State(state): State<AppState>,
     user: AuthUser,
-    axum::extract::Path(id): axum::extract::Path<i64>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
 ) -> Result<Response, HttpError> {
     require_admin(&user)?;
     let mut tx = state.db.writer().begin().await?;
@@ -844,7 +848,7 @@ async fn delete_user(
     operation_id = "resetUserPassword",
     summary = "Set a new password for a user",
     description = "Refused while password sign-in is turned off (`OIDC_ONLY`).",
-    params(("id" = i64, Path, description = "The user id")),
+    params(("id" = Uuid, Path, description = "The user id")),
     request_body(content = ResetPassword, content_type = "application/json"),
     responses(
         (status = 204, description = "Changed"),
@@ -859,7 +863,7 @@ async fn delete_user(
 async fn reset_password(
     State(state): State<AppState>,
     user: AuthUser,
-    axum::extract::Path(id): axum::extract::Path<i64>,
+    axum::extract::Path(id): axum::extract::Path<Uuid>,
     ApiJson(body): ApiJson<ResetPassword>,
 ) -> Result<Response, HttpError> {
     require_admin(&user)?;

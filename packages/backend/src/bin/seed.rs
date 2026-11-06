@@ -10,6 +10,7 @@ use jiff::{Timestamp, tz::TimeZone};
 use potoo::db;
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
+use uuid::Uuid;
 
 const DAY_MS: i64 = 86_400_000;
 const YEAR: i64 = 365;
@@ -67,7 +68,7 @@ fn pick<'a>(rng: &mut StdRng, options: &[(&'a str, u32)]) -> &'a str {
 
 /// One row of the hits table.
 struct Hit {
-    site_id: i64,
+    site_id: Uuid,
     kind: &'static str,
     path: &'static str,
     name: Option<&'static str>,
@@ -89,15 +90,16 @@ async fn main() -> anyhow::Result<()> {
     let db = db::open(&path).await;
     let pool = db.writer();
 
-    let mut sites: Vec<(i64, String)> = sqlx::query_as("SELECT id, hostname FROM sites")
+    let mut sites: Vec<(Uuid, String)> = sqlx::query_as("SELECT id, hostname FROM sites")
         .fetch_all(pool)
         .await?;
     let inserted_demo_site = sites.is_empty();
     if inserted_demo_site {
-        let id = sqlx::query("INSERT INTO sites (hostname) VALUES ('blog.example.com')")
+        let id = Uuid::now_v7();
+        sqlx::query("INSERT INTO sites (id, hostname) VALUES (?1, 'blog.example.com')")
+            .bind(id)
             .execute(pool)
-            .await?
-            .last_insert_rowid();
+            .await?;
         sites = vec![(id, "blog.example.com".to_string())];
     }
     // The demo data replaces whatever hits are in the database.
@@ -160,7 +162,7 @@ async fn main() -> anyhow::Result<()> {
 /// One site's pageviews for one day: a few visitors, one or more each.
 fn day_hits(
     rng: &mut StdRng,
-    site_id: i64,
+    site_id: Uuid,
     start: i64,
     end: i64,
     base: i64,

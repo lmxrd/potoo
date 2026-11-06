@@ -23,6 +23,7 @@ use time::{Duration, OffsetDateTime};
 use tower_sessions::session::{Id, Record};
 use tower_sessions::session_store::{self, ExpiredDeletion, SessionStore};
 use tower_sessions::{Expiry, Session};
+use uuid::Uuid;
 
 /// The session cookie's name; `__Host-potoo_session` when `PUBLIC_URL` is
 /// https (see [`cookie_name`]).
@@ -173,9 +174,9 @@ pub struct Credentials {
 }
 
 impl axum_login::AuthUser for User {
-    type Id = i64;
+    type Id = Uuid;
 
-    fn id(&self) -> i64 {
+    fn id(&self) -> Uuid {
         self.id
     }
 
@@ -243,7 +244,7 @@ impl axum_login::AuthnBackend for Backend {
             .map(UserRow::into_user))
     }
 
-    async fn get_user(&self, id: &i64) -> Result<Option<User>, sqlx::Error> {
+    async fn get_user(&self, id: &Uuid) -> Result<Option<User>, sqlx::Error> {
         let row: Option<UserRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {USER_COLUMNS} FROM users WHERE id = ?1"
         )))
@@ -265,7 +266,7 @@ pub async fn sign_in(auth: &mut AuthSession, user: &User) -> Result<(), HttpErro
 /// After the user changed their own password or two-factor secret: their
 /// other sessions are signed out (the hash changed), this one stays signed
 /// in with the new hash.
-pub async fn refresh(auth: &mut AuthSession, user_id: i64) -> Result<(), HttpError> {
+pub async fn refresh(auth: &mut AuthSession, user_id: Uuid) -> Result<(), HttpError> {
     let user = auth
         .backend
         .get_user(&user_id)

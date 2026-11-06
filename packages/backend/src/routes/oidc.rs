@@ -24,6 +24,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
+use uuid::Uuid;
 
 /// The login and the callback, nested under /auth.
 pub fn router() -> OpenApiRouter<AppState> {
@@ -227,7 +228,7 @@ async fn user_for(
     tx: &mut sqlx::SqliteConnection,
     identity: &Identity,
     auto_create: bool,
-) -> sqlx::Result<Result<i64, Failure>> {
+) -> sqlx::Result<Result<Uuid, Failure>> {
     // Nobody before the first admin: a user made now would take /setup
     // away and leave the instance without one.
     let set_up: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM users)")
@@ -236,7 +237,7 @@ async fn user_for(
     if !set_up {
         return Ok(Err(Failure::Unavailable));
     }
-    let linked: Option<i64> = sqlx::query_scalar(
+    let linked: Option<Uuid> = sqlx::query_scalar(
         "SELECT user_id FROM user_identities WHERE issuer = ?1 AND subject = ?2",
     )
     .bind(&identity.issuer)
@@ -255,7 +256,7 @@ async fn user_for(
     else {
         return Ok(Err(Failure::Email));
     };
-    let existing: Option<i64> = sqlx::query_scalar("SELECT id FROM users WHERE email = ?1")
+    let existing: Option<Uuid> = sqlx::query_scalar("SELECT id FROM users WHERE email = ?1")
         .bind(&email)
         .fetch_optional(&mut *tx)
         .await?;
@@ -271,11 +272,15 @@ async fn user_for(
         }
         Some(id) => id,
         None if auto_create => {
-            sqlx::query("INSERT INTO users (email, password_hash, is_admin) VALUES (?1, NULL, 0)")
-                .bind(&email)
-                .execute(&mut *tx)
-                .await?
-                .last_insert_rowid()
+            let id = Uuid::now_v7();
+            sqlx::query(
+                "INSERT INTO users (id, email, password_hash, is_admin) VALUES (?1, ?2, NULL, 0)",
+            )
+            .bind(id)
+            .bind(&email)
+            .execute(&mut *tx)
+            .await?;
+            id
         }
         None => return Ok(Err(Failure::UnknownUser)),
     };
@@ -289,7 +294,11 @@ async fn user_for(
 }
 
 /// Whether a user is linked to an account at this provider.
-async fn linked_to(tx: &mut sqlx::SqliteConnection, user: i64, issuer: &str) -> sqlx::Result<bool> {
+async fn linked_to(
+    tx: &mut sqlx::SqliteConnection,
+    user: Uuid,
+    issuer: &str,
+) -> sqlx::Result<bool> {
     sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM user_identities WHERE user_id = ?1 AND issuer = ?2)",
     )

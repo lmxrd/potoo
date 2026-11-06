@@ -18,6 +18,7 @@ use axum::http::StatusCode;
 use sqlx::{Connection, SqliteConnection};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
+use uuid::Uuid;
 
 /// Hits waiting for the writer. Beyond this the tracker answers 503
 /// instead of piling up memory.
@@ -30,7 +31,7 @@ const MAX_BATCH: usize = 500;
 /// A hit, ready to be stored.
 pub struct NewHit {
     pub created_at: String,
-    pub site_id: i64,
+    pub site_id: Uuid,
     pub kind: &'static str,
     pub path: String,
     pub name: Option<String>,
@@ -170,7 +171,10 @@ async fn write(db: &Db, hits: &mut Vec<NewHit>) {
 mod tests {
     use super::*;
 
-    fn hit(site_id: i64, n: usize) -> NewHit {
+    /// The one site of the tests.
+    const SITE: uuid::Uuid = uuid::Uuid::from_u128(1);
+
+    fn hit(site_id: uuid::Uuid, n: usize) -> NewHit {
         NewHit {
             created_at: crate::auth::now_iso(),
             site_id,
@@ -188,7 +192,8 @@ mod tests {
 
     async fn setup() -> (Db, Ingest, JoinHandle<()>) {
         let db = crate::db::open(":memory:").await;
-        sqlx::query("INSERT INTO sites (hostname) VALUES ('example.com')")
+        sqlx::query("INSERT INTO sites (id, hostname) VALUES (?1, 'example.com')")
+            .bind(SITE)
             .execute(db.writer())
             .await
             .unwrap();
@@ -207,7 +212,7 @@ mod tests {
     async fn flush_waits_for_every_queued_hit() {
         let (db, ingest, _writer) = setup().await;
         for n in 0..1500 {
-            ingest.submit(hit(1, n)).unwrap();
+            ingest.submit(hit(SITE, n)).unwrap();
         }
         ingest.flush().await;
         assert_eq!(stored(&db).await, 1500);
@@ -217,7 +222,7 @@ mod tests {
     async fn a_clean_stop_drains_the_queue() {
         let (db, ingest, writer) = setup().await;
         for n in 0..300 {
-            ingest.submit(hit(1, n)).unwrap();
+            ingest.submit(hit(SITE, n)).unwrap();
         }
         drop(ingest);
         writer.await.unwrap();
@@ -228,11 +233,11 @@ mod tests {
     async fn one_bad_hit_does_not_take_its_batch_down() {
         let (db, ingest, _writer) = setup().await;
         for n in 0..10 {
-            ingest.submit(hit(1, n)).unwrap();
+            ingest.submit(hit(SITE, n)).unwrap();
         }
-        ingest.submit(hit(999, 0)).unwrap(); // a site that does not exist
+        ingest.submit(hit(uuid::Uuid::from_u128(999), 0)).unwrap(); // a site that does not exist
         for n in 10..20 {
-            ingest.submit(hit(1, n)).unwrap();
+            ingest.submit(hit(SITE, n)).unwrap();
         }
         ingest.flush().await;
         assert_eq!(stored(&db).await, 20);
@@ -242,8 +247,8 @@ mod tests {
     async fn a_full_queue_answers_503() {
         let (queue, _hits) = mpsc::channel(1); // nobody reads it
         let ingest = Ingest { queue };
-        ingest.submit(hit(1, 0)).unwrap();
-        let error = ingest.submit(hit(1, 1)).unwrap_err();
+        ingest.submit(hit(SITE, 0)).unwrap();
+        let error = ingest.submit(hit(SITE, 1)).unwrap_err();
         assert_eq!(error.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 }

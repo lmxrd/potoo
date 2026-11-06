@@ -5,6 +5,7 @@ use axum::http::HeaderMap;
 use std::collections::HashSet;
 use std::net::IpAddr;
 use std::sync::{Mutex, OnceLock};
+use uuid::Uuid;
 
 /// The device class of a hit.
 pub enum Device {
@@ -278,7 +279,7 @@ async fn daily_salt(db: &Db) -> String {
 
 /// Pseudonymous, per-day, per-site visitor id. The IP and UA are never
 /// stored: only this hash of them, truncated to 32 hex characters.
-pub async fn visitor_hash(db: &Db, site_id: i64, ip: &str, ua: &str) -> String {
+pub async fn visitor_hash(db: &Db, site_id: Uuid, ip: &str, ua: &str) -> String {
     let salt = timed(Phase::Salt, daily_salt(db)).await;
     sha256_hex(&format!("{salt}|{site_id}|{ip}|{ua}"))[..32].to_string()
 }

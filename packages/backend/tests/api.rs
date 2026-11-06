@@ -223,7 +223,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
     )
     .await;
     assert_eq!(site["hostname"], json!("blog.example.com"));
-    let site_id = site["id"].as_i64().unwrap();
+    let site_id = site["id"].as_str().unwrap().to_string();
     // The window of the stats and the exports: twelve hours either side
     // of now, so it covers the hits this test collects.
     let window = (iso_from_now(-12), iso_from_now(12));
@@ -288,9 +288,15 @@ async fn setup_users_sites_collection_stats_and_exports() {
     assert_eq!(site["hostname"], json!("blog.example.com"));
     assert_eq!(site["honor_dnt"], json!(true));
     assert_eq!(
-        request(&app, Method::GET, "/api/sites/999999", Some(&session), None)
-            .await
-            .status(),
+        request(
+            &app,
+            Method::GET,
+            "/api/sites/0190f5b2-7c00-7000-8000-000000000000",
+            Some(&session),
+            None
+        )
+        .await
+        .status(),
         404
     );
     assert_eq!(
@@ -452,10 +458,10 @@ async fn setup_users_sites_collection_stats_and_exports() {
     // Users: the last admin cannot be demoted or deleted.
     let users =
         json(request(&app, Method::GET, "/api/auth/users", Some(&session), None).await).await;
-    let admin_id = users[0]["id"].as_i64().unwrap();
+    let admin_id = users[0]["id"].as_str().unwrap().to_string();
     assert_eq!(users[0]["is_admin"], json!(true));
     assert_eq!(users[1]["is_admin"], json!(false));
-    let user_id = users[1]["id"].as_i64().unwrap();
+    let user_id = users[1]["id"].as_str().unwrap().to_string();
     let response = app
         .client
         .request(
@@ -2219,7 +2225,7 @@ async fn enable(app: &TestApp, session: &str) -> String {
     secret
 }
 
-async fn reset_totp(app: &TestApp, session: &str, id: i64) -> Response {
+async fn reset_totp(app: &TestApp, session: &str, id: &str) -> Response {
     let path = format!("/api/auth/users/{id}/totp");
     request(app, Method::DELETE, &path, Some(session), None).await
 }
@@ -2485,13 +2491,18 @@ async fn two_factor_authentication_is_turned_off_by_the_user_or_an_admin() {
     enable(&app, &user).await;
     assert_eq!(password_login(&app, "b@example.com").await.status(), 200);
     let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
-    let id = users[1]["id"].as_i64().unwrap();
+    let id = users[1]["id"].as_str().unwrap().to_string();
     assert_eq!(users[1]["totp_enabled"], json!(true));
-    let own = users[0]["id"].as_i64().unwrap();
-    assert_eq!(reset_totp(&app, &user, id).await.status(), 403);
-    assert_eq!(reset_totp(&app, &admin, own).await.status(), 400);
-    assert_eq!(reset_totp(&app, &admin, 999).await.status(), 404);
-    assert_eq!(reset_totp(&app, &admin, id).await.status(), 204);
+    let own = users[0]["id"].as_str().unwrap().to_string();
+    assert_eq!(reset_totp(&app, &user, &id).await.status(), 403);
+    assert_eq!(reset_totp(&app, &admin, &own).await.status(), 400);
+    assert_eq!(
+        reset_totp(&app, &admin, "0190f5b2-7c00-7000-8000-000000000000")
+            .await
+            .status(),
+        404
+    );
+    assert_eq!(reset_totp(&app, &admin, &id).await.status(), 204);
     assert_eq!(password_login(&app, "b@example.com").await.status(), 204);
     let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
     assert_eq!(users[1]["totp_enabled"], json!(false));
@@ -2544,7 +2555,7 @@ async fn single_sign_on_only_refuses_passwords() {
         201
     );
     let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
-    let id = users[1]["id"].as_i64().unwrap();
+    let id = users[1]["id"].as_str().unwrap().to_string();
     let body = json!({ "new_password": "correct horse battery" });
     let path = format!("/api/auth/users/{id}/password");
     assert_eq!(post(&app, &path, &admin, Some(body)).await.status(), 403);
@@ -2673,7 +2684,7 @@ async fn api_keys_are_capped_by_their_scope() {
     assert!(!keys.to_string().contains(&token));
 
     // Revoked, unknown or malformed: 401.
-    let id = read["key"]["id"].as_i64().unwrap();
+    let id = read["key"]["id"].as_str().unwrap().to_string();
     let path = format!("/api/auth/api-keys/{id}");
     assert_eq!(
         request(&app, Method::DELETE, &path, Some(&admin), None)
@@ -2746,7 +2757,7 @@ async fn api_keys_are_capped_by_their_scope() {
     );
     // A user's keys go with them.
     let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
-    let id = users[1]["id"].as_i64().unwrap();
+    let id = users[1]["id"].as_str().unwrap().to_string();
     let path = format!("/api/auth/users/{id}");
     assert_eq!(
         request(&app, Method::DELETE, &path, Some(&admin), None)
@@ -2903,8 +2914,8 @@ async fn totp_required_makes_everyone_set_it_up() {
     let (page, _) = sso_step(&app, &provider, "b@example.com").await;
     assert_eq!(page, "/login?step=totp");
     let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
-    let id = users[1]["id"].as_i64().unwrap();
-    assert_eq!(reset_totp(&app, &admin, id).await.status(), 204);
+    let id = users[1]["id"].as_str().unwrap().to_string();
+    assert_eq!(reset_totp(&app, &admin, &id).await.status(), 204);
     let (page, _) = sso_step(&app, &provider, "b@example.com").await;
     assert_eq!(page, "/login?step=totp-setup");
 }
@@ -3030,7 +3041,7 @@ async fn sessions_end_with_a_password_change_a_deletion_or_a_logout() {
     let session = cookie(&request(&app, Method::POST, "/api/auth/login", None, Some(body)).await);
     assert!(signed_in(session.clone()).await);
     let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
-    let path = format!("/api/auth/users/{}", users[1]["id"]);
+    let path = format!("/api/auth/users/{}", users[1]["id"].as_str().unwrap());
     assert_eq!(
         request(&app, Method::DELETE, &path, Some(&admin), None)
             .await

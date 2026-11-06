@@ -13,6 +13,7 @@ use std::collections::HashMap;
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
+use uuid::Uuid;
 
 /// The import of hits from the CSV the export writes. All or nothing: the
 /// whole file is checked first, and the rows go in one transaction.
@@ -163,7 +164,7 @@ async fn import(
     let csv = read_csv(&state, request).await?;
 
     let mut tx = state.db.writer().begin().await?;
-    let sites: HashMap<String, i64> = sqlx::query_as("SELECT hostname, id FROM sites")
+    let sites: HashMap<String, Uuid> = sqlx::query_as("SELECT hostname, id FROM sites")
         .fetch_all(&mut *tx)
         .await?
         .into_iter()
@@ -186,11 +187,12 @@ async fn import(
     // be good.
     let mut sites = (*sites).clone();
     for hostname in &problems.new_sites {
-        let id = sqlx::query("INSERT INTO sites (hostname) VALUES (?1)")
+        let id = Uuid::now_v7();
+        sqlx::query("INSERT INTO sites (id, hostname) VALUES (?1, ?2)")
+            .bind(id)
             .bind(hostname)
             .execute(&mut *tx)
-            .await?
-            .last_insert_rowid();
+            .await?;
         sites.insert(hostname.clone(), id);
     }
     let mut reader = reader(without_bom(&csv));
@@ -340,7 +342,7 @@ impl Problems {
 }
 
 /// Every problem of the file, up to a limit, and how many there were.
-fn check(csv: &[u8], sites: &HashMap<String, i64>, create_sites: bool) -> Problems {
+fn check(csv: &[u8], sites: &HashMap<String, Uuid>, create_sites: bool) -> Problems {
     let mut problems = Problems::default();
     let csv = without_bom(csv);
     let mut lines = Lines::new(csv);
@@ -415,7 +417,7 @@ fn check(csv: &[u8], sites: &HashMap<String, i64>, create_sites: bool) -> Proble
 }
 
 struct Row {
-    site_id: i64,
+    site_id: Uuid,
     /// The hostname, when the site does not exist yet.
     new_site: Option<String>,
     created_at: String,
@@ -449,7 +451,7 @@ fn bad(column: &'static str, message: impl Into<String>) -> RowProblem {
 /// without a query string or fragment, referrers reduced to the hostname.
 fn parse_row(
     record: &csv::StringRecord,
-    sites: &HashMap<String, i64>,
+    sites: &HashMap<String, Uuid>,
     width: usize,
     create_sites: bool,
 ) -> Result<Row, RowProblem> {
@@ -467,7 +469,7 @@ fn parse_row(
         Some(&id) => (id, None),
         // A site to create: its id is known once it is inserted.
         None if create_sites => match validate_hostname(&host) {
-            Ok(hostname) => (0, Some(hostname)),
+            Ok(hostname) => (Uuid::nil(), Some(hostname)),
             Err(_) => {
                 return Err(RowProblem {
                     unknown_site: true,

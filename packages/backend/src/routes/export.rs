@@ -45,9 +45,14 @@ async fn export(
     let mut where_clauses: Vec<String> = Vec::new();
     let mut params: Vec<String> = Vec::new();
     if !ids.is_empty() {
-        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+        // The ids are 16-byte blobs: bound as hex, like every value here a string.
+        let placeholders = ids
+            .iter()
+            .map(|_| "unhex(?)")
+            .collect::<Vec<_>>()
+            .join(", ");
         where_clauses.push(format!("hits.site_id IN ({placeholders})"));
-        params.extend(ids.iter().map(|id| id.to_string()));
+        params.extend(ids.iter().map(|id| id.simple().to_string()));
     } else {
         where_clauses.push("1 = 0".into()); // no sites: an empty export
     }

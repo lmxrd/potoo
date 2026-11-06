@@ -31,6 +31,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
+use uuid::Uuid;
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
@@ -111,7 +112,7 @@ impl Step {
 pub(crate) async fn next_step<'e>(
     db: impl SqliteExecutor<'e>,
     state: &AppState,
-    user_id: i64,
+    user_id: Uuid,
 ) -> sqlx::Result<Option<Step>> {
     let on: bool = sqlx::query_scalar("SELECT totp_secret IS NOT NULL FROM users WHERE id = ?1")
         .bind(user_id)
@@ -130,14 +131,14 @@ pub(crate) async fn next_step<'e>(
 /// who proved who they are: `<user id>.<expiry, unix seconds>.<step>`. It is
 /// signed with its own key, made at start: a restart makes the user sign in
 /// again.
-pub(crate) fn challenge_cookie(state: &AppState, user_id: i64, step: Step) -> SignedCookieJar {
+pub(crate) fn challenge_cookie(state: &AppState, user_id: Uuid, step: Step) -> SignedCookieJar {
     let expires = unix_now() + CHALLENGE_TTL.as_secs();
     let value = format!("{user_id}.{expires}.{}", step.as_str());
     SignedCookieJar::new(state.challenge_key.clone()).add(challenge(value, state.secure_cookies))
 }
 
 /// The user of a valid, unexpired challenge cookie for this step, or a 401.
-fn challenged_user(state: &AppState, headers: &HeaderMap, step: Step) -> Result<i64, HttpError> {
+fn challenged_user(state: &AppState, headers: &HeaderMap, step: Step) -> Result<Uuid, HttpError> {
     let expired = || {
         HttpError::new(
             StatusCode::UNAUTHORIZED,
@@ -168,7 +169,7 @@ fn challenged_user(state: &AppState, headers: &HeaderMap, step: Step) -> Result<
 async fn finish_sign_in(
     state: &AppState,
     auth: &mut AuthSession,
-    user_id: i64,
+    user_id: Uuid,
 ) -> Result<CookieJar, HttpError> {
     let user = auth
         .backend
@@ -188,7 +189,7 @@ fn invalid_code() -> HttpError {
 /// Whether `code` is a valid code of the user's authenticator app or one of
 /// their recovery codes; either is used up. False when two-factor
 /// authentication is off. The caller counted the attempt (`state.limits`).
-async fn use_code(state: &AppState, user_id: i64, code: &str) -> Result<bool, HttpError> {
+async fn use_code(state: &AppState, user_id: Uuid, code: &str) -> Result<bool, HttpError> {
     if code.len() > 64 {
         return Ok(false);
     }
@@ -238,7 +239,7 @@ async fn use_code(state: &AppState, user_id: i64, code: &str) -> Result<bool, Ht
 /// Replace a user's recovery codes with new ones, returning them.
 async fn new_recovery_codes(
     tx: &mut sqlx::SqliteConnection,
-    user_id: i64,
+    user_id: Uuid,
 ) -> Result<Vec<String>, HttpError> {
     sqlx::query("DELETE FROM recovery_codes WHERE user_id = ?1")
         .bind(user_id)
@@ -393,7 +394,7 @@ async fn setup(
 }
 
 /// A new pending secret for a user who has two-factor authentication off.
-async fn start_setup(state: &AppState, user_id: i64, email: &str) -> Result<TotpSetup, HttpError> {
+async fn start_setup(state: &AppState, user_id: Uuid, email: &str) -> Result<TotpSetup, HttpError> {
     let secret = totp::new_secret();
     let updated =
         sqlx::query("UPDATE users SET totp_pending = ?1 WHERE id = ?2 AND totp_secret IS NULL")
@@ -454,7 +455,7 @@ async fn enable(
 /// (`state.limits`).
 async fn confirm_setup(
     state: &AppState,
-    user_id: i64,
+    user_id: Uuid,
     code: &str,
 ) -> Result<Vec<String>, HttpError> {
     let mut tx = state.db.writer().begin().await?;
@@ -526,7 +527,7 @@ async fn disable(
 
 /// Two-factor authentication off for a user: no secret, no recovery codes.
 /// False when there is no such user.
-async fn turn_off(state: &AppState, user_id: i64) -> Result<bool, HttpError> {
+async fn turn_off(state: &AppState, user_id: Uuid) -> Result<bool, HttpError> {
     let mut tx = state.db.writer().begin().await?;
     let updated = sqlx::query(
         "UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_last_step = 0
@@ -678,7 +679,7 @@ async fn regenerate_recovery_codes(
     operation_id = "resetUserTotp",
     summary = "Turn off two-factor authentication for a user",
     description = "For a user who lost their authenticator app and their recovery codes; they can set it up again. Not for your own account.",
-    params(("id" = i64, Path, description = "The user id")),
+    params(("id" = Uuid, Path, description = "The user id")),
     responses(
         (status = 204, description = "Off"),
         (status = 400, description = "Your own account", body = ErrorBody),
@@ -691,7 +692,7 @@ async fn regenerate_recovery_codes(
 async fn reset(
     State(state): State<AppState>,
     user: AuthUser,
-    Path(id): Path<i64>,
+    Path(id): Path<Uuid>,
 ) -> Result<Response, HttpError> {
     require_admin(&user)?;
     let User { id: own, .. } = user.0;

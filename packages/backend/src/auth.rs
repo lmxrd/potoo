@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqliteExecutor;
 use std::time::SystemTime;
 use utoipa::ToSchema;
+use uuid::Uuid;
 
 pub use crate::session::COOKIE;
 
@@ -18,7 +19,7 @@ pub const DATE_FORMATS: [&str; 4] = ["YYYY-MM-DD", "DD/MM/YYYY", "MM/DD/YYYY", "
 /// The signed-in user, as the session endpoint returns them.
 #[derive(Clone, Serialize, sqlx::FromRow, ToSchema)]
 pub struct User {
-    pub id: i64,
+    pub id: Uuid,
     pub email: String,
     pub is_admin: bool,
     /// One of the date formats of the settings, e.g. `YYYY-MM-DD`.
@@ -105,7 +106,7 @@ pub const API_KEY_PREFIX: &str = "potoo_";
 
 /// An API key in use: its id, scope and when it was last used.
 pub struct KeyUse {
-    pub id: i64,
+    pub id: Uuid,
     pub scope: Scope,
     pub last_used_at: Option<String>,
 }
@@ -114,7 +115,7 @@ pub struct KeyUse {
 struct KeyRow {
     #[sqlx(flatten)]
     user: User,
-    key_id: i64,
+    key_id: Uuid,
     scope: String,
     last_used_at: Option<String>,
 }

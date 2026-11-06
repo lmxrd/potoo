@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 /// How many read-only connections serve the dashboard and the export.
 const READERS: u32 = 4;
@@ -16,7 +17,7 @@ const SITE_TTL: Duration = Duration::from_secs(60);
 /// A registered site, as the tracker needs it.
 #[derive(Clone, Copy)]
 pub struct Site {
-    pub id: i64,
+    pub id: Uuid,
     pub honor_dnt: bool,
 }
 
@@ -64,7 +65,7 @@ impl Database {
         {
             return Ok(Some(*site));
         }
-        let site: Option<(i64, i64)> =
+        let site: Option<(Uuid, i64)> =
             sqlx::query_as("SELECT id, honor_dnt FROM sites WHERE hostname = ?1")
                 .bind(hostname)
                 .fetch_optional(self.reader())
@@ -195,6 +196,7 @@ async fn migrate(pool: &SqlitePool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn readers_see_the_writes_and_do_not_block_the_writer() {
@@ -388,6 +390,103 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// 0006 gives users, sites and API keys UUIDv7 ids: on a real file with
+    /// data from before, every row keeps its relations, the hits their ids,
+    /// and the new ids are version 7, in the order the rows were made.
+    #[tokio::test]
+    async fn the_uuid_migration_keeps_every_row_and_relation() {
+        let dir = std::env::temp_dir().join(format!("potoo-uuid-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("test.db");
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true)
+                    .journal_mode(SqliteJournalMode::Wal)
+                    .foreign_keys(true),
+            )
+            .await
+            .unwrap();
+        let all = sqlx::migrate!("./migrations");
+        sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(all.migrations[..5].to_vec()),
+            ..sqlx::migrate!("./migrations")
+        }
+        .run(&pool)
+        .await
+        .unwrap();
+        for sql in [
+            "INSERT INTO users (email, created_at) VALUES ('a@x.com', '2026-01-01T00:00:00.000Z'), ('b@x.com', '2026-02-01T00:00:00.000Z')",
+            "INSERT INTO sites (hostname, created_at) VALUES ('a.com', '2026-03-01T00:00:00.000Z'), ('b.com', '2026-03-02T00:00:00.000Z')",
+            "INSERT INTO hits (site_id, kind, path) VALUES (1, 'pageview', '/'), (2, 'pageview', '/b'), (2, 'click', '/c')",
+            "INSERT INTO user_identities (issuer, subject, user_id) VALUES ('https://id', 's', 2)",
+            "INSERT INTO recovery_codes (user_id, code_hash) VALUES (1, 'c')",
+            "INSERT INTO api_keys (user_id, name, prefix, token_hash, scope) VALUES (1, 'k', 'potoo_x', 't', 'read')",
+            "INSERT INTO sessions (id_hash, data, expires_at) VALUES ('h', '{}', 9999999999)",
+        ] {
+            sqlx::query(sqlx::AssertSqlSafe(sql))
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        pool.close().await;
+
+        let db = open(path.to_str().unwrap()).await;
+        let users: Vec<(Uuid, String)> = sqlx::query_as("SELECT id, email FROM users ORDER BY id")
+            .fetch_all(db.reader())
+            .await
+            .unwrap();
+        assert_eq!(
+            users.iter().map(|(_, e)| e.as_str()).collect::<Vec<_>>(),
+            ["a@x.com", "b@x.com"],
+            "ordered as they were made"
+        );
+        assert!(users.iter().all(|(id, _)| id.get_version_num() == 7));
+        let joined: Vec<(String, String)> = sqlx::query_as(
+            "SELECT s.hostname, h.path FROM hits h JOIN sites s ON s.id = h.site_id ORDER BY h.id",
+        )
+        .fetch_all(db.reader())
+        .await
+        .unwrap();
+        assert_eq!(
+            joined,
+            [
+                ("a.com".into(), "/".into()),
+                ("b.com".into(), "/b".into()),
+                ("b.com".into(), "/c".into())
+            ]
+        );
+        let owners: Vec<String> = sqlx::query_scalar(
+            "SELECT u.email FROM user_identities i JOIN users u ON u.id = i.user_id
+             UNION ALL SELECT u.email FROM recovery_codes r JOIN users u ON u.id = r.user_id
+             UNION ALL SELECT u.email FROM api_keys k JOIN users u ON u.id = k.user_id",
+        )
+        .fetch_all(db.reader())
+        .await
+        .unwrap();
+        assert_eq!(owners, ["b@x.com", "a@x.com", "a@x.com"]);
+        let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
+            .fetch_one(db.reader())
+            .await
+            .unwrap();
+        assert_eq!(sessions, 0, "sessions named users by the old ids");
+        let broken: Vec<(String, i64, String, i64)> = sqlx::query_as("PRAGMA foreign_key_check")
+            .fetch_all(db.writer())
+            .await
+            .unwrap();
+        assert!(broken.is_empty());
+        // An id is required: a row without one is refused.
+        let missing = sqlx::query("INSERT INTO sites (hostname) VALUES ('c.com')")
+            .execute(db.writer())
+            .await;
+        assert!(missing.is_err());
+        db.close().await;
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[tokio::test]
     async fn synchronous_is_normal_by_default_and_configurable() {
         let mode = |db: Db| async move {
@@ -409,7 +508,8 @@ mod tests {
     #[tokio::test]
     async fn sites_are_cached_until_forgotten() {
         let db = open(":memory:").await;
-        sqlx::query("INSERT INTO sites (hostname, honor_dnt) VALUES ('a.com', 0)")
+        sqlx::query("INSERT INTO sites (id, hostname, honor_dnt) VALUES (?1, 'a.com', 0)")
+            .bind(uuid::Uuid::now_v7())
             .execute(db.writer())
             .await
             .unwrap();
@@ -427,7 +527,8 @@ mod tests {
         assert!(db.site("a.com").await.unwrap().unwrap().honor_dnt);
 
         // A site added later is found: misses are not cached.
-        sqlx::query("INSERT INTO sites (hostname) VALUES ('nope.com')")
+        sqlx::query("INSERT INTO sites (id, hostname) VALUES (?1, 'nope.com')")
+            .bind(uuid::Uuid::now_v7())
             .execute(db.writer())
             .await
             .unwrap();

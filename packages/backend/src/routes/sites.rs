@@ -13,6 +13,7 @@ use std::collections::BTreeSet;
 use utoipa::{IntoParams, ToSchema};
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
+use uuid::Uuid;
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
@@ -46,7 +47,7 @@ pub struct StatsQuery {
 /// The ids of the sites a stats or export request selects: the comma
 /// separated hostnames it names (case does not matter; an unknown one is a
 /// 400 that says which), or every site's when there are none.
-pub async fn site_ids(state: &AppState, sites: Option<&str>) -> Result<Vec<i64>, HttpError> {
+pub async fn site_ids(state: &AppState, sites: Option<&str>) -> Result<Vec<Uuid>, HttpError> {
     let hostnames: BTreeSet<String> = sites
         .unwrap_or_default()
         .split(',')
@@ -84,7 +85,7 @@ pub fn range_and_filter(
 /// A registered site.
 #[derive(Serialize, sqlx::FromRow, ToSchema)]
 pub struct SiteRow {
-    pub id: i64,
+    pub id: Uuid,
     pub hostname: String,
     /// Whether hits from visitors who send Do Not Track (or Global Privacy
     /// Control) are ignored.
@@ -95,7 +96,7 @@ pub struct SiteRow {
 /// The site that was just created.
 #[derive(Serialize, ToSchema)]
 pub struct CreatedSite {
-    pub id: i64,
+    pub id: Uuid,
     pub hostname: String,
     pub honor_dnt: bool,
 }
@@ -204,12 +205,13 @@ async fn create(
     if taken.is_some() {
         return Err(HttpError::new(StatusCode::CONFLICT, "Site already exists"));
     }
-    let id = sqlx::query("INSERT INTO sites (hostname, honor_dnt) VALUES (?1, ?2)")
+    let id = Uuid::now_v7();
+    sqlx::query("INSERT INTO sites (id, hostname, honor_dnt) VALUES (?1, ?2, ?3)")
+        .bind(id)
         .bind(&hostname)
         .bind(input.honor_dnt as i64)
         .execute(&mut *tx)
-        .await?
-        .last_insert_rowid();
+        .await?;
     tx.commit().await?;
     Ok((
         StatusCode::CREATED,
@@ -234,7 +236,7 @@ pub struct DntInput {
     operation_id = "updateSite",
     summary = "Change a site's settings",
     description = "Whether Do Not Track is honored. Changing a site that does not exist is not an error.",
-    params(("id" = i64, Path, description = "The site id")),
+    params(("id" = Uuid, Path, description = "The site id")),
     request_body(content = DntInput, content_type = "application/json"),
     responses(
         (status = 204, description = "Changed"),
@@ -248,7 +250,7 @@ pub struct DntInput {
 async fn update(
     State(state): State<AppState>,
     user: AuthUser,
-    Path(id): Path<i64>,
+    Path(id): Path<Uuid>,
     ApiJson(input): ApiJson<DntInput>,
 ) -> Result<Response, HttpError> {
     if !user.0.is_admin {
@@ -270,7 +272,7 @@ async fn update(
     tag = "Sites",
     operation_id = "deleteSite",
     summary = "Delete a site and all of its hits",
-    params(("id" = i64, Path, description = "The site id")),
+    params(("id" = Uuid, Path, description = "The site id")),
     responses(
         (status = 204, description = "Deleted"),
         (status = 401, description = "Not signed in", body = ErrorBody),
@@ -281,7 +283,7 @@ async fn update(
 async fn delete(
     State(state): State<AppState>,
     user: AuthUser,
-    Path(id): Path<i64>,
+    Path(id): Path<Uuid>,
 ) -> Result<Response, HttpError> {
     if !user.0.is_admin {
         return Err(HttpError::forbidden());
@@ -300,7 +302,7 @@ async fn delete(
     tag = "Sites",
     operation_id = "getSite",
     summary = "One site",
-    params(("id" = i64, Path, description = "The site id")),
+    params(("id" = Uuid, Path, description = "The site id")),
     responses(
         (status = 200, description = "The site", body = SiteRow),
         (status = 401, description = "Not signed in", body = ErrorBody),
@@ -311,7 +313,7 @@ async fn delete(
 async fn get_site(
     State(state): State<AppState>,
     _user: AuthUser,
-    Path(id): Path<i64>,
+    Path(id): Path<Uuid>,
 ) -> Result<Json<SiteRow>, HttpError> {
     let site: Option<SiteRow> =
         sqlx::query_as("SELECT id, hostname, honor_dnt, created_at FROM sites WHERE id = ?1")
