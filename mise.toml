@@ -191,6 +191,15 @@ depends = ["install:frontend", "gen:sdk"]
 run = "pnpm run test"
 dir = "{{ config_root }}/packages/frontend"
 
+# The end-to-end smoke tests (packages/e2e, Playwright): a real browser
+# against the image just built, on a fresh database (scripts/e2e.sh).
+[tasks."test:e2e"]
+depends = ["build:docker", "install:frontend"]
+run = [
+  "pnpm --filter potoo-e2e exec playwright install chromium",
+  "scripts/e2e.sh",
+]
+
 # ---------------------------------------------------------------------------
 # Security
 # ---------------------------------------------------------------------------

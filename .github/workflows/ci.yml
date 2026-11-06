@@ -90,3 +90,23 @@ jobs:
       - run: mise run audit:image
         env:
           IMAGE: potoo:ci
+      # The end-to-end smoke tests (packages/e2e): a real browser against this
+      # image, on a fresh database. Only Chromium, cached by Playwright's
+      # version (its system libraries are installed every time).
+      - run: mise run install:frontend
+      - id: playwright
+        run: echo "version=$(jq -r '.devDependencies["@playwright/test"]' packages/e2e/package.json)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+      - run: pnpm --filter potoo-e2e exec playwright install --with-deps chromium
+      - run: scripts/e2e.sh
+        env:
+          CONTAINER: docker
+          IMAGE: potoo:ci
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: e2e-results
+          path: packages/e2e/test-results

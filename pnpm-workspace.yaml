@@ -1,9 +1,10 @@
-# The JavaScript packages: the frontend, and the SDK it imports, generated
-# from the backend's OpenAPI spec (`mise run gen:sdk`). One install and one
+# The JavaScript packages: the frontend, the SDK it imports (generated from
+# the backend's OpenAPI spec, `mise run gen:sdk`), and the end-to-end tests. One install and one
 # lockfile at this root.
 packages:
   - packages/frontend
   - packages/sdk
+  - packages/e2e
 
 # A version published less than a day ago is not installed (pnpm picks an
 # older one that fits, or fails): most hijacked releases are found and pulled
