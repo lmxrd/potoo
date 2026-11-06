@@ -1,0 +1,18 @@
+# Known vulnerabilities that are accepted, each with the reason. Each one
+# expires (`ignoreUntil`), so it comes back up in `mise run audit` and the
+# daily Security workflow to be looked at again.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2023-0071"
+ignoreUntil = 2027-05-06
+reason = "rsa (Marvin attack): no fixed version exists. It comes in through openidconnect, which only verifies the provider's RS256 signatures with its public key; the timing side channel is in decrypting and signing with a private key, which Potoo never does."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0194"
+ignoreUntil = 2027-05-06
+reason = "quick-xml 0.26 comes in only through pprof's flamegraphs, in the `profiling` feature: manual tooling, never in a release build or the image."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0195"
+ignoreUntil = 2027-05-06
+reason = "quick-xml 0.26 comes in only through pprof's flamegraphs, in the `profiling` feature: manual tooling, never in a release build or the image."

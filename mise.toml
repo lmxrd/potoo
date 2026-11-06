@@ -179,7 +179,7 @@ dir = "{{ config_root }}/backend"
 # new advisories come out for dependencies that did not change. A finding
 # to accept goes in osv-scanner.toml, with the reason.
 [tasks.audit]
-run = "osv-scanner scan source --lockfile backend/Cargo.lock --lockfile frontend/pnpm-lock.yaml"
+run = "osv-scanner scan source --config osv-scanner.toml --lockfile backend/Cargo.lock --lockfile frontend/pnpm-lock.yaml"
 dir = "{{ config_root }}"
 
 # Known vulnerabilities in an image (its Alpine packages): the fixable HIGH
