@@ -19,10 +19,11 @@ folder:
 ## Dependencies
 
 - Prefer a well-known, maintained package over writing the same thing
-  ourselves. Propose it first (name, version, why) and add it only once it
-  is approved. The workspace refuses versions less than a day old
-  (`minimumReleaseAge` in the root `pnpm-workspace.yaml`): take the newest
-  that is older.
+  ourselves. Propose it first (name, exact version, why) and get approval
+  before adding it, then add it at that exact version. Write it ourselves
+  only when no maintained one fits, and say why in a comment where it lives.
+- The workspace refuses versions less than a day old (`minimumReleaseAge`
+  in the root `pnpm-workspace.yaml`): take the newest that is older.
 
 ## Conventions
 
@@ -68,14 +69,6 @@ folder:
   gets `items` (`{ value, label }[]`), and `onValueChange` can pass `null`.
   State is in data attributes (`data-open`, `data-closed`, `data-checked`,
   `data-highlighted`, `data-disabled`), styled as `data-open:...`.
-- **Adding a shadcn component:** `pnpm dlx shadcn@latest add <name>`
-  (`components.json`), then rewrite its `@/lib/utils` and
-  `@/components/ui/*` imports to relative paths (`../../lib/utils`,
-  `./button`): there is no `@/` alias in the bundler; `tsconfig.json` has
-  the path only so the CLI can resolve its targets. The base-vega registry
-  (as of shadcn 4.23) imports `cn` from a package `"cn"` and lists `cn` as a
-  dependency: never install it, look at the file first
-  (`add <name> --dry-run --view`) and import `cn` from `../../lib/utils`.
 - **Theme:** colours only through the semantic tokens of `src/index.css`
   (`bg-background`, `text-foreground`, `bg-primary`, `text-muted-foreground`,
   `border-border`, ... plus potoo's `text-soft-foreground`, `fill-faint`,
@@ -94,3 +87,20 @@ folder:
 - **Tests:** Vitest, for the pure logic in `src/lib` (colocated
   `*.test.ts`, node environment). No component or snapshot tests.
 - TypeScript strict: unused imports and locals fail the check.
+
+## Imports
+
+- Use relative imports (`../lib/api`, `./button`); there is no `@/` alias in
+  the app or the bundler, and no file in `src/` imports from `@/`.
+- The API client comes from the `potoo-sdk` workspace package
+  (`packages/sdk`), by its entry points: `potoo-sdk` (the types and the
+  generated functions), `potoo-sdk/react-query` (query options and
+  mutations), `potoo-sdk/types` and `potoo-sdk/client`.
+- `tsconfig.json` keeps a `paths` entry for `@/*` only so the shadcn CLI can
+  resolve its targets. After `pnpm dlx shadcn@latest add <name>`
+  (`components.json`), rewrite the generated `@/lib/utils` and
+  `@/components/ui/*` imports to relative paths (`../../lib/utils`,
+  `./button`). The base-vega registry (as of shadcn 4.23) imports `cn` from
+  a package `"cn"` and lists `cn` as a dependency: never install it, look at
+  the file first (`add <name> --dry-run --view`) and import `cn` from
+  `../../lib/utils`.
