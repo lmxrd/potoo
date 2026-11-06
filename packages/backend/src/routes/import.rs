@@ -1,5 +1,5 @@
+use crate::auth::CurrentUser;
 use crate::error::{ApiError, ErrorBody};
-use crate::routes::auth::AuthUser;
 use crate::routes::collect::{clean_path, clean_referrer};
 use crate::routes::sites::validate_hostname;
 use crate::state::AppState;
@@ -154,11 +154,11 @@ impl IntoResponse for Failure {
 )]
 async fn import(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: CurrentUser,
     Query(query): Query<ImportQuery>,
     request: Request,
 ) -> Result<Json<ImportResult>, Failure> {
-    if !user.0.is_admin {
+    if !user.user.is_admin {
         return Err(ApiError::forbidden("Admin only").into());
     }
     let csv = read_csv(&state, request).await?;

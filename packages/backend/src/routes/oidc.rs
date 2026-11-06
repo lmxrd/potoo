@@ -6,10 +6,11 @@
 //! the settings say so, a new regular user without a password. Nobody signs
 //! in this way before the first admin exists.
 
+use crate::auth::{CurrentUser, require_admin};
 use crate::error::{ApiError, ErrorBody};
 use crate::extract::ApiJson;
 use crate::oidc::{CALLBACK_PATH, Failure, Identity, LOGIN_COOKIE, LOGIN_TTL, Settings};
-use crate::routes::auth::{AuthUser, require_admin, validate_email};
+use crate::routes::auth::validate_email;
 use crate::routes::totp::{Step, challenge_cookie, next_step};
 use crate::sessions::{self, AuthSession};
 use crate::state::AppState;
@@ -388,7 +389,7 @@ fn view(state: &AppState, headers: &HeaderMap) -> OidcSettings {
 )]
 async fn get_settings(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: CurrentUser,
     headers: HeaderMap,
 ) -> Result<Json<OidcSettings>, ApiError> {
     require_admin(&user)?;
@@ -414,7 +415,7 @@ async fn get_settings(
 )]
 async fn update_settings(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: CurrentUser,
     headers: HeaderMap,
     ApiJson(body): ApiJson<UpdateOidcSettings>,
 ) -> Result<Json<OidcSettings>, ApiError> {

@@ -2,10 +2,10 @@
 //! `Authorization: Bearer <token>`. Managed with the session only (a key
 //! cannot list, make or revoke keys); the token is shown once, on creation.
 
+use crate::auth::SessionUser;
 use crate::auth::{API_KEY_PREFIX, Scope, iso};
 use crate::error::{ApiError, ErrorBody};
 use crate::extract::ApiJson;
-use crate::routes::auth::SessionUser;
 use crate::state::AppState;
 use crate::util::{random_hex, sha256_hex};
 use axum::Json;

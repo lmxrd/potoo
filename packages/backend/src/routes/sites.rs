@@ -1,7 +1,7 @@
+use crate::auth::CurrentUser;
 use crate::error::{ApiError, ErrorBody};
 use crate::extract::ApiJson;
 use crate::filter;
-use crate::routes::auth::AuthUser;
 use crate::state::AppState;
 use crate::stats::parse_range;
 use axum::Json;
@@ -115,7 +115,7 @@ pub struct CreatedSite {
 )]
 async fn list(
     State(state): State<AppState>,
-    _user: AuthUser,
+    _user: CurrentUser,
 ) -> Result<Json<Vec<SiteRow>>, ApiError> {
     let rows: Vec<SiteRow> =
         sqlx::query_as("SELECT id, hostname, honor_dnt, created_at FROM sites ORDER BY hostname")
@@ -190,10 +190,10 @@ fn default_true() -> bool {
 )]
 async fn create(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: CurrentUser,
     ApiJson(input): ApiJson<SiteInput>,
 ) -> Result<Response, ApiError> {
-    if !user.0.is_admin {
+    if !user.user.is_admin {
         return Err(ApiError::forbidden("Admin only"));
     }
     let hostname = validate_hostname(&input.hostname)?;
@@ -249,11 +249,11 @@ pub struct DntInput {
 )]
 async fn update(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: CurrentUser,
     Path(id): Path<Uuid>,
     ApiJson(input): ApiJson<DntInput>,
 ) -> Result<Response, ApiError> {
-    if !user.0.is_admin {
+    if !user.user.is_admin {
         return Err(ApiError::forbidden("Admin only"));
     }
     sqlx::query("UPDATE sites SET honor_dnt = ?1 WHERE id = ?2")
@@ -282,10 +282,10 @@ async fn update(
 )]
 async fn delete(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<Response, ApiError> {
-    if !user.0.is_admin {
+    if !user.user.is_admin {
         return Err(ApiError::forbidden("Admin only"));
     }
     sqlx::query("DELETE FROM sites WHERE id = ?1")
@@ -312,7 +312,7 @@ async fn delete(
 )]
 async fn get_site(
     State(state): State<AppState>,
-    _user: AuthUser,
+    _user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<Json<SiteRow>, ApiError> {
     let site: Option<SiteRow> =

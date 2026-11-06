@@ -1,5 +1,5 @@
 use crate::auth::{
-    DATE_FORMATS, KeyUse, Scope, User, hash_password, iso, key_user, verify_password,
+    CurrentUser, DATE_FORMATS, SessionUser, User, hash_password, require_admin, verify_password,
 };
 use crate::error::{ApiError, ErrorBody};
 use crate::extract::ApiJson;
@@ -9,14 +9,13 @@ use crate::sessions::{self, AuthSession};
 use crate::state::AppState;
 use crate::visitor::client_ip;
 use axum::Json;
-use axum::extract::{ConnectInfo, FromRequestParts, State};
+use axum::extract::{ConnectInfo, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum_login::AuthnBackend as _;
 use serde::{Deserialize, Serialize};
 use sqlx::SqliteExecutor;
 use std::net::SocketAddr;
-use std::time::{Duration, SystemTime};
 use utoipa::ToSchema;
 use utoipa_axum::router::OpenApiRouter;
 use utoipa_axum::routes;
@@ -34,119 +33,6 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(list_users, create_user))
         .routes(routes!(change_role, delete_user))
         .routes(routes!(reset_password))
-}
-
-/// How a request is signed in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Access {
-    /// The session cookie: everything the user may do.
-    Session,
-    /// An API key (`Authorization: Bearer`), capped by its scope.
-    Key(Scope),
-}
-
-/// The signed-in user, as a request extractor: a valid session cookie, or
-/// an API key, or a 401. A read key is refused anything but GET and HEAD
-/// here (403); admin endpoints check the rest in `require_admin`. The
-/// account's own settings (email, password, two-factor authentication, API
-/// keys) take a `SessionUser` instead: no key reaches them.
-pub struct AuthUser(pub User, pub Access);
-
-impl FromRequestParts<AppState> for AuthUser {
-    type Rejection = ApiError;
-
-    async fn from_request_parts(
-        parts: &mut axum::http::request::Parts,
-        state: &AppState,
-    ) -> Result<Self, Self::Rejection> {
-        if let Some(token) = bearer(&parts.headers) {
-            let (user, key) = key_user(state.db.reader(), token)
-                .await
-                .ok_or_else(ApiError::unauthorized)?;
-            if key.scope == Scope::Read && !parts.method.is_safe() {
-                return Err(ApiError::new(
-                    StatusCode::FORBIDDEN,
-                    "This API key can only read",
-                ));
-            }
-            note_key_use(state, &key).await;
-            return Ok(AuthUser(user, Access::Key(key.scope)));
-        }
-        let user = auth_session(parts, state)
-            .await?
-            .user
-            .ok_or_else(ApiError::unauthorized)?;
-        Ok(AuthUser(user, Access::Session))
-    }
-}
-
-/// The request's session (axum-login loads the signed-in user, if any).
-async fn auth_session(
-    parts: &mut axum::http::request::Parts,
-    state: &AppState,
-) -> Result<AuthSession, ApiError> {
-    AuthSession::from_request_parts(parts, state)
-        .await
-        .map_err(|(_, e)| ApiError::internal(format!("no session layer: {e}")))
-}
-
-/// The signed-in user of a session cookie only: an API key is refused
-/// (403), so a leaked key cannot change the account or make more keys.
-pub struct SessionUser(pub User);
-
-impl FromRequestParts<AppState> for SessionUser {
-    type Rejection = ApiError;
-
-    async fn from_request_parts(
-        parts: &mut axum::http::request::Parts,
-        state: &AppState,
-    ) -> Result<Self, Self::Rejection> {
-        match AuthUser::from_request_parts(parts, state).await? {
-            AuthUser(user, Access::Session) => Ok(SessionUser(user)),
-            AuthUser(_, Access::Key(_)) => Err(ApiError::new(
-                StatusCode::FORBIDDEN,
-                "Not with an API key: sign in",
-            )),
-        }
-    }
-}
-
-/// The token of an `Authorization: Bearer` header.
-fn bearer(headers: &HeaderMap) -> Option<&str> {
-    let value = headers.get("authorization")?.to_str().ok()?;
-    let (scheme, token) = value.split_once(' ')?;
-    scheme.eq_ignore_ascii_case("bearer").then(|| token.trim())
-}
-
-/// Records when a key was used, at most once a minute, so that a busy
-/// script does not take the one writer for every request. A failure is
-/// only logged: the request goes on.
-async fn note_key_use(state: &AppState, key: &KeyUse) {
-    let now = SystemTime::now();
-    let stale = iso(now - Duration::from_secs(60));
-    if key
-        .last_used_at
-        .as_deref()
-        .is_some_and(|last| last > stale.as_str())
-    {
-        return;
-    }
-    if let Err(e) = sqlx::query("UPDATE api_keys SET last_used_at = ?1 WHERE id = ?2")
-        .bind(iso(now))
-        .bind(key.id)
-        .execute(state.db.writer())
-        .await
-    {
-        tracing::warn!("cannot record the use of API key {}: {e}", key.id);
-    }
-}
-
-/// Admin only: an admin's session, or an admin's admin-scoped key.
-pub(crate) fn require_admin(user: &AuthUser) -> Result<(), ApiError> {
-    match user {
-        AuthUser(u, Access::Session | Access::Key(Scope::Admin)) if u.is_admin => Ok(()),
-        _ => Err(ApiError::forbidden("Admin only")),
-    }
 }
 
 /// A theme is one small JSON object — {"base": "light" | "dark",
@@ -671,7 +557,7 @@ async fn change_password(
 )]
 async fn list_users(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: CurrentUser,
 ) -> Result<Json<Vec<UserRow>>, ApiError> {
     require_admin(&user)?;
     let rows: Vec<UserRow> = sqlx::query_as(
@@ -706,7 +592,7 @@ async fn list_users(
 )]
 async fn create_user(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: CurrentUser,
     ApiJson(body): ApiJson<CreateUser>,
 ) -> Result<Response, ApiError> {
     require_admin(&user)?;
@@ -769,7 +655,7 @@ async fn create_user(
 )]
 async fn change_role(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: CurrentUser,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
     ApiJson(body): ApiJson<ChangeRole>,
 ) -> Result<Response, ApiError> {
@@ -815,7 +701,7 @@ async fn change_role(
 )]
 async fn delete_user(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: CurrentUser,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
 ) -> Result<Response, ApiError> {
     require_admin(&user)?;
@@ -864,7 +750,7 @@ async fn delete_user(
 )]
 async fn reset_password(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: CurrentUser,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
     ApiJson(body): ApiJson<ResetPassword>,
 ) -> Result<Response, ApiError> {

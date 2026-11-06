@@ -1,7 +1,13 @@
+use crate::error::ApiError;
+use crate::sessions::AuthSession;
+use crate::state::AppState;
 use crate::util::sha256_hex;
 use argon2::Argon2;
 use argon2::password_hash::phc::PasswordHash;
 use argon2::password_hash::{PasswordHasher, PasswordVerifier, generate_salt};
+use axum::extract::FromRequestParts;
+use axum::http::request::Parts;
+use axum::http::{HeaderMap, header};
 use serde::{Deserialize, Serialize};
 use sqlx::SqliteExecutor;
 use std::time::SystemTime;
@@ -153,4 +159,113 @@ pub fn now_iso() -> String {
 pub fn iso(t: SystemTime) -> String {
     let t = jiff::Timestamp::try_from(t).expect("a time within jiff's range");
     format!("{t:.3}")
+}
+
+/// The signed-in user, as a request extractor: a valid session cookie, or
+/// else an API key (`Authorization: Bearer`), or a 401. A read key is
+/// refused anything but GET and HEAD (403); admin endpoints check the rest
+/// in [`require_admin`]. The account's own settings (email, password,
+/// two-factor authentication, API keys) take a [`SessionUser`] instead: no
+/// key reaches them.
+pub struct CurrentUser {
+    pub user: User,
+    /// The API key the request was made with, if not a session.
+    pub api_key: Option<KeyUse>,
+}
+
+impl FromRequestParts<AppState> for CurrentUser {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        if let Some(token) = bearer(&parts.headers) {
+            let (user, key) = key_user(state.db.reader(), token)
+                .await
+                .ok_or_else(ApiError::unauthorized)?;
+            if key.scope == Scope::Read && !parts.method.is_safe() {
+                return Err(ApiError::forbidden("This API key can only read"));
+            }
+            note_key_use(state, &key).await;
+            return Ok(CurrentUser {
+                user,
+                api_key: Some(key),
+            });
+        }
+        let session = AuthSession::from_request_parts(parts, state)
+            .await
+            .map_err(|(_, e)| ApiError::internal(format!("no session layer: {e}")))?;
+        let user = session.user.ok_or_else(ApiError::unauthorized)?;
+        Ok(CurrentUser {
+            user,
+            api_key: None,
+        })
+    }
+}
+
+/// The signed-in user of a session cookie only: an API key is refused
+/// (403), so a leaked key cannot change the account or make more keys.
+pub struct SessionUser(pub User);
+
+impl FromRequestParts<AppState> for SessionUser {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        match CurrentUser::from_request_parts(parts, state).await? {
+            CurrentUser {
+                user,
+                api_key: None,
+            } => Ok(SessionUser(user)),
+            CurrentUser {
+                api_key: Some(_), ..
+            } => Err(ApiError::forbidden("Not with an API key: sign in")),
+        }
+    }
+}
+
+/// Admin only: an admin's session, or an admin's admin-scoped key.
+pub fn require_admin(current: &CurrentUser) -> Result<(), ApiError> {
+    let scope_allows = current
+        .api_key
+        .as_ref()
+        .is_none_or(|key| key.scope == Scope::Admin);
+    if current.user.is_admin && scope_allows {
+        Ok(())
+    } else {
+        Err(ApiError::forbidden("Admin only"))
+    }
+}
+
+/// The token of an `Authorization: Bearer` header.
+fn bearer(headers: &HeaderMap) -> Option<&str> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    let (scheme, token) = value.split_once(' ')?;
+    scheme.eq_ignore_ascii_case("bearer").then(|| token.trim())
+}
+
+/// Records when a key was used, at most once a minute, so that a busy
+/// script does not take the one writer for every request. A failure is
+/// only logged: the request goes on.
+async fn note_key_use(state: &AppState, key: &KeyUse) {
+    let now = SystemTime::now();
+    let stale = iso(now - std::time::Duration::from_secs(60));
+    if key
+        .last_used_at
+        .as_deref()
+        .is_some_and(|last| last > stale.as_str())
+    {
+        return;
+    }
+    if let Err(e) = sqlx::query("UPDATE api_keys SET last_used_at = ?1 WHERE id = ?2")
+        .bind(iso(now))
+        .bind(key.id)
+        .execute(state.db.writer())
+        .await
+    {
+        tracing::warn!("cannot record the use of API key {}: {e}", key.id);
+    }
 }

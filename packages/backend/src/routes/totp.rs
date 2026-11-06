@@ -10,10 +10,10 @@
 //! the latter starts the session.
 
 use crate::auth::User;
+use crate::auth::{CurrentUser, SessionUser, require_admin};
 use crate::error::{ApiError, ErrorBody};
 use crate::extract::ApiJson;
 use crate::limits::UserAction;
-use crate::routes::auth::{AuthUser, SessionUser, require_admin};
 use crate::sessions::{self, AuthSession};
 use crate::state::AppState;
 use crate::totp;
@@ -696,11 +696,11 @@ async fn regenerate_recovery_codes(
 )]
 async fn reset(
     State(state): State<AppState>,
-    user: AuthUser,
+    user: CurrentUser,
     Path(id): Path<Uuid>,
 ) -> Result<Response, ApiError> {
     require_admin(&user)?;
-    let User { id: own, .. } = user.0;
+    let User { id: own, .. } = user.user;
     if id == own {
         return Err(ApiError::bad_request(
             "Turn off your own two-factor authentication in your settings",

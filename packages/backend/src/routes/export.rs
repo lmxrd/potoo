@@ -1,7 +1,7 @@
+use crate::auth::CurrentUser;
 use crate::csv;
 use crate::error::{ApiError, ErrorBody};
 use crate::filter::filter_sql;
-use crate::routes::auth::AuthUser;
 use crate::routes::sites::{StatsQuery, range_and_filter, site_ids};
 use crate::state::AppState;
 use crate::stats::range_bounds;
@@ -35,7 +35,7 @@ pub fn router() -> OpenApiRouter<AppState> {
 )]
 async fn export(
     State(state): State<AppState>,
-    _user: AuthUser,
+    _user: CurrentUser,
     Query(query): Query<StatsQuery>,
 ) -> Result<Response, ApiError> {
     let (range, filters) = range_and_filter(&query)?;

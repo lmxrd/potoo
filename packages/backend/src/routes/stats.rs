@@ -1,5 +1,5 @@
+use crate::auth::CurrentUser;
 use crate::error::{ApiError, ErrorBody};
-use crate::routes::auth::AuthUser;
 use crate::routes::sites::{StatsQuery, range_and_filter, site_ids};
 use crate::state::AppState;
 use crate::stats::{SiteStats, stats_for};
@@ -30,7 +30,7 @@ pub fn router() -> OpenApiRouter<AppState> {
 )]
 async fn stats(
     State(state): State<AppState>,
-    _user: AuthUser,
+    _user: CurrentUser,
     Query(query): Query<StatsQuery>,
 ) -> Result<Json<SiteStats>, ApiError> {
     let (range, filters) = range_and_filter(&query)?;
