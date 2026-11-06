@@ -54,6 +54,7 @@ jiff = "0.2.39"
 uuid = { version = "1.29.0", features = ["v7", "serde"] }
 
 [dev-dependencies]
+axum-test = "21.1.0"
 # The tests' stand-in single sign-on provider: openidconnect's ID token
 # claims take chrono times. The app itself uses jiff.
 chrono = "0.4.45"

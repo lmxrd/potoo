@@ -1,15 +1,19 @@
-//! End-to-end tests over real HTTP, against an in-memory database.
+//! Integration tests: the app on axum-test's TestServer, over a real local
+//! socket (the app reads the client's address from the connection), against
+//! an in-memory database.
 
+use axum::http::Method;
+use axum_test::{TestResponse as Response, TestServer};
 use potoo::{app, auth, db, geo, oidc, state::AppState};
-use reqwest::{Client, Method, Response};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
 const UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1";
 
 struct TestApp {
+    server: TestServer,
+    /// Where the server listens, e.g. `http://127.0.0.1:41234`.
     base: String,
-    client: Client,
 }
 
 async fn spawn_app() -> TestApp {
@@ -70,20 +74,16 @@ async fn spawn(options: Options) -> TestApp {
         challenge_key: axum_extra::extract::cookie::Key::generate(),
         totp_required: options.totp_required,
     };
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(async move {
-        axum::serve(
-            listener,
-            app(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
-        )
-        .await
-        .unwrap();
-    });
-    TestApp {
-        base: format!("http://{addr}"),
-        client: Client::new(),
-    }
+    let server = TestServer::builder()
+        .http_transport()
+        .build(app(state).into_make_service_with_connect_info::<std::net::SocketAddr>());
+    let base = server
+        .server_address()
+        .expect("an http transport")
+        .to_string()
+        .trim_end_matches('/')
+        .to_string();
+    TestApp { server, base }
 }
 
 /// Now, give or take some hours, as the API takes times.
@@ -116,21 +116,21 @@ async fn request(
     body: Option<Value>,
 ) -> Response {
     let mut builder = app
-        .client
-        .request(method, format!("{}{path}", app.base))
-        .header("user-agent", UA)
-        .header("x-forwarded-for", "203.0.113.5");
+        .server
+        .method(method, path)
+        .add_header("user-agent", UA)
+        .add_header("x-forwarded-for", "203.0.113.5");
     if let Some(session) = session {
-        builder = builder.header("cookie", session);
+        builder = builder.add_header("cookie", session);
     }
     if let Some(body) = body {
         builder = builder.json(&body);
     }
-    builder.send().await.unwrap()
+    builder.await
 }
 
 async fn json(response: Response) -> Value {
-    response.json().await.unwrap()
+    response.json()
 }
 
 #[tokio::test]
@@ -151,7 +151,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         Some(admin.clone()),
     )
     .await;
-    assert_eq!(response.status(), 201);
+    assert_eq!(response.status_code(), 201);
     let session = cookie(&response);
     assert_eq!(
         request(
@@ -162,7 +162,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
             Some(admin.clone())
         )
         .await
-        .status(),
+        .status_code(),
         409
     );
 
@@ -176,7 +176,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
             Some(json!({ "email": "a@example.com", "password": "wrong password" })),
         )
         .await
-        .status(),
+        .status_code(),
         401
     );
     assert_eq!(
@@ -188,7 +188,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
             Some(admin.clone())
         )
         .await
-        .status(),
+        .status_code(),
         204
     );
 
@@ -202,13 +202,13 @@ async fn setup_users_sites_collection_stats_and_exports() {
             Some(json!({ "email": "u@example.com", "password": "another long pass" })),
         )
         .await
-        .status(),
+        .status_code(),
         201
     );
     assert_eq!(
         request(&app, Method::GET, "/api/sites", None, None)
             .await
-            .status(),
+            .status_code(),
         401
     );
     let site = json(
@@ -234,19 +234,19 @@ async fn setup_users_sites_collection_stats_and_exports() {
     assert_eq!(
         hit(json!({ "type": "pageview", "host": "blog.example.com", "path": "/a?secret=1" }))
             .await
-            .status(),
+            .status_code(),
         204
     );
     assert_eq!(
         hit(json!({ "type": "click", "host": "blog.example.com", "path": "/a", "name": "signup" }))
             .await
-            .status(),
+            .status_code(),
         204
     );
     assert_eq!(
         hit(json!({ "type": "pageview", "host": "unknown.com", "path": "/" }))
             .await
-            .status(),
+            .status_code(),
         204
     );
 
@@ -296,13 +296,13 @@ async fn setup_users_sites_collection_stats_and_exports() {
             None
         )
         .await
-        .status(),
+        .status_code(),
         404
     );
     assert_eq!(
         request(&app, Method::GET, "/api/sites/1", None, None)
             .await
-            .status(),
+            .status_code(),
         401
     );
     // The per-site stats endpoint is gone: /api/stats takes `sites`.
@@ -315,20 +315,18 @@ async fn setup_users_sites_collection_stats_and_exports() {
             None
         )
         .await
-        .status(),
+        .status_code(),
         404
     );
 
     // DNT: honored by default, and the admin can turn that off.
     let response = app
-        .client
-        .request(Method::PATCH, format!("{}/api/sites/{site_id}", app.base))
-        .header("cookie", &session)
+        .server
+        .method(Method::PATCH, &format!("/api/sites/{site_id}"))
+        .add_header("cookie", &session)
         .json(&json!({ "honor_dnt": false }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 204);
+        .await;
+    assert_eq!(response.status_code(), 204);
 
     // The same stats with an RSQL filter, across sites.
     let stats = json(
@@ -378,7 +376,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         None,
     )
     .await;
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status_code(), 400);
     assert_eq!(
         json(response).await["error"],
         json!("Unknown site: nope.example.com")
@@ -396,8 +394,8 @@ async fn setup_users_sites_collection_stats_and_exports() {
         None,
     )
     .await;
-    assert_eq!(export.status(), 200);
-    let csv = export.text().await.unwrap();
+    assert_eq!(export.status_code(), 200);
+    let csv = export.text();
     assert!(csv.starts_with(
         "site,created_at,kind,path,name,referrer,country,device,browser,os,visitor\r\n"
     ));
@@ -416,9 +414,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
         None,
     )
     .await
-    .text()
-    .await
-    .unwrap();
+    .text();
     assert_eq!(filtered.lines().count(), 2); // the header and the click
     assert!(filtered.contains("click,/a,signup"));
 
@@ -433,7 +429,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
             Some(json!({ "theme": "{\"base\":\"dark\",\"accent\":\"#38BDF8\"}" })),
         )
         .await
-        .status(),
+        .status_code(),
         204
     );
     let with_theme =
@@ -451,7 +447,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
             Some(json!({ "theme": "{\"base\":\"blue\"}" })),
         )
         .await
-        .status(),
+        .status_code(),
         400
     );
 
@@ -463,17 +459,12 @@ async fn setup_users_sites_collection_stats_and_exports() {
     assert_eq!(users[1]["is_admin"], json!(false));
     let user_id = users[1]["id"].as_str().unwrap().to_string();
     let response = app
-        .client
-        .request(
-            Method::PATCH,
-            format!("{}/api/auth/users/{admin_id}", app.base),
-        )
-        .header("cookie", &session)
+        .server
+        .method(Method::PATCH, &format!("/api/auth/users/{admin_id}"))
+        .add_header("cookie", &session)
         .json(&json!({ "is_admin": false }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 409);
+        .await;
+    assert_eq!(response.status_code(), 409);
     assert_eq!(
         request(
             &app,
@@ -483,7 +474,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
             None
         )
         .await
-        .status(),
+        .status_code(),
         409
     );
     assert_eq!(
@@ -495,7 +486,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
             None
         )
         .await
-        .status(),
+        .status_code(),
         204
     );
 
@@ -509,13 +500,13 @@ async fn setup_users_sites_collection_stats_and_exports() {
             Some(json!({}))
         )
         .await
-        .status(),
+        .status_code(),
         204
     );
     assert_eq!(
         request(&app, Method::GET, "/api/sites", Some(&session), None)
             .await
-            .status(),
+            .status_code(),
         401
     );
 }
@@ -526,25 +517,18 @@ async fn pixel_tracker_and_api_404() {
 
     // The no-JS pixel: a GIF that records a pageview from its referer.
     let response = app
-        .client
-        .get(format!("{}/api/pixel?h=example.com&p=/page", app.base))
-        .header("user-agent", UA)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 200);
+        .server
+        .get("/api/pixel?h=example.com&p=/page")
+        .add_header("user-agent", UA)
+        .await;
+    assert_eq!(response.status_code(), 200);
     assert_eq!(response.headers().get("content-type").unwrap(), "image/gif");
-    let bytes = response.bytes().await.unwrap();
+    let bytes = response.into_bytes();
     assert_eq!(&bytes[..3], b"GIF");
 
     // The tracker script points its beacons at /api/collect.
-    let response = app
-        .client
-        .get(format!("{}/tracker.js", app.base))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 200);
+    let response = app.server.get("/tracker.js").await;
+    assert_eq!(response.status_code(), 200);
     assert!(
         response
             .headers()
@@ -554,17 +538,17 @@ async fn pixel_tracker_and_api_404() {
             .unwrap()
             .starts_with("text/javascript")
     );
-    let js = response.text().await.unwrap();
+    let js = response.text();
     assert!(js.contains("new URL(\"api/collect\", s.src)"));
 
     // Liveness, for healthchecks: 200 with an OK body.
     let response = request(&app, Method::GET, "/api/health", None, None).await;
-    assert_eq!(response.status(), 200);
-    assert_eq!(response.text().await.unwrap(), "OK");
+    assert_eq!(response.status_code(), 200);
+    assert_eq!(response.text(), "OK");
 
     // Unknown API paths answer with JSON, not the frontend.
     let response = request(&app, Method::GET, "/api/nope", None, None).await;
-    assert_eq!(response.status(), 404);
+    assert_eq!(response.status_code(), 404);
     assert_eq!(json(response).await["error"], json!("Not found"));
 }
 
@@ -587,24 +571,20 @@ async fn bots_and_dnt_are_not_recorded() {
     .await;
 
     let bot = app
-        .client
-        .post(format!("{}/api/collect", app.base))
-        .header("user-agent", "curl/8.0")
+        .server
+        .post("/api/collect")
+        .add_header("user-agent", "curl/8.0")
         .json(&json!({ "type": "pageview", "host": "example.com", "path": "/" }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(bot.status(), 204);
+        .await;
+    assert_eq!(bot.status_code(), 204);
     let dnt = app
-        .client
-        .post(format!("{}/api/collect", app.base))
-        .header("user-agent", UA)
-        .header("dnt", "1")
+        .server
+        .post("/api/collect")
+        .add_header("user-agent", UA)
+        .add_header("dnt", "1")
         .json(&json!({ "type": "pageview", "host": "example.com", "path": "/" }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(dnt.status(), 204);
+        .await;
+    assert_eq!(dnt.status_code(), 204);
 
     let window = (iso_from_now(-12), iso_from_now(12));
     let stats = json(
@@ -643,7 +623,7 @@ async fn every_documented_operation_is_routed() {
                 None,
             )
             .await;
-            let status = response.status().as_u16();
+            let status = response.status_code().as_u16();
             assert_ne!(status, 405, "{method} {path} is documented but not routed");
             if !path.contains('{') {
                 assert_ne!(status, 404, "{method} {path} is documented but not routed");
@@ -664,14 +644,12 @@ async fn pageviews(app: &TestApp, session: &str, window: &(String, String), q: &
 }
 
 async fn post_raw(app: &TestApp, path: &str, content_type: &str, body: &str) -> Response {
-    app.client
-        .post(format!("{}{path}", app.base))
-        .header("user-agent", UA)
-        .header("content-type", content_type)
-        .body(body.to_string())
-        .send()
+    app.server
+        .post(path)
+        .add_header("user-agent", UA)
+        .add_header("content-type", content_type)
+        .bytes(body.to_string().into())
         .await
-        .unwrap()
 }
 
 /// Bodies are JSON and nothing else, except at the tracker's endpoint,
@@ -683,7 +661,7 @@ async fn bodies_are_json_only_except_at_collect() {
 
     // Valid JSON in another content type is a 415, in the API's error shape.
     let response = post_raw(&app, "/api/auth/setup", "text/plain", credentials).await;
-    assert_eq!(response.status(), 415);
+    assert_eq!(response.status_code(), 415);
     assert_eq!(
         json(response).await["error"],
         json!("Expected a JSON body (Content-Type: application/json)")
@@ -691,17 +669,17 @@ async fn bodies_are_json_only_except_at_collect() {
     // Invalid JSON, or JSON of the wrong shape, is a 400.
     for body in ["{nope", r#"{"email": 1}"#, ""] {
         let response = post_raw(&app, "/api/auth/setup", "application/json", body).await;
-        assert_eq!(response.status(), 400, "{body:?}");
+        assert_eq!(response.status_code(), 400, "{body:?}");
         assert_eq!(json(response).await["error"], json!("Invalid request body"));
     }
     // Nothing was created by any of those; the real thing works.
     let response = post_raw(&app, "/api/auth/setup", "application/json", credentials).await;
-    assert_eq!(response.status(), 201);
+    assert_eq!(response.status_code(), 201);
 
     // A login with a body the API cannot read fails like a wrong password.
     for (content_type, body) in [("text/plain", credentials), ("application/json", "{nope")] {
         let response = post_raw(&app, "/api/auth/login", content_type, body).await;
-        assert_eq!(response.status(), 401, "{content_type} {body}");
+        assert_eq!(response.status_code(), 401, "{content_type} {body}");
     }
 
     // The tracker's endpoint takes text/plain and JSON, and answers 204 to
@@ -713,19 +691,17 @@ async fn bodies_are_json_only_except_at_collect() {
         ("text/plain", "garbage"),
     ] {
         let response = post_raw(&app, "/api/collect", content_type, body).await;
-        assert_eq!(response.status(), 204, "{content_type} {body}");
+        assert_eq!(response.status_code(), 204, "{content_type} {body}");
     }
 }
 
 async fn post_csv(app: &TestApp, session: &str, content_type: &str, body: &str) -> Response {
-    app.client
-        .post(format!("{}/api/import", app.base))
-        .header("cookie", session)
-        .header("content-type", content_type)
-        .body(body.to_string())
-        .send()
+    app.server
+        .post("/api/import")
+        .add_header("cookie", session)
+        .add_header("content-type", content_type)
+        .bytes(body.to_string().into())
         .await
-        .unwrap()
 }
 
 /// The import: admin only, all or nothing, and what it adds is cleaned like
@@ -792,14 +768,19 @@ async fn import_adds_every_row_or_none() {
         .await,
     );
     assert_eq!(
-        post_csv(&app, &member, "text/csv", &good).await.status(),
+        post_csv(&app, &member, "text/csv", &good)
+            .await
+            .status_code(),
         403
     );
-    assert_eq!(post_csv(&app, "", "text/csv", &good).await.status(), 401);
+    assert_eq!(
+        post_csv(&app, "", "text/csv", &good).await.status_code(),
+        401
+    );
     assert_eq!(
         post_csv(&app, &session, "application/json", &good)
             .await
-            .status(),
+            .status_code(),
         415
     );
 
@@ -818,7 +799,7 @@ async fn import_adds_every_row_or_none() {
         &format!("{good}{}", &bad[header.len()..]),
     )
     .await;
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status_code(), 400);
     let body = json(response).await;
     assert_eq!(body["total_problems"], json!(3));
     let problems = body["problems"].as_array().unwrap();
@@ -841,20 +822,22 @@ async fn import_adds_every_row_or_none() {
     // A wrong header, and a file without rows.
     for wrong in ["site,when\nblog.example.com,now\n", header] {
         assert_eq!(
-            post_csv(&app, &session, "text/csv", wrong).await.status(),
+            post_csv(&app, &session, "text/csv", wrong)
+                .await
+                .status_code(),
             400
         );
     }
 
     // The good file, as the body and as a form.
     let response = post_csv(&app, &session, "text/csv", &good).await;
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status_code(), 200);
     assert_eq!(json(response).await["imported"], json!(3));
     let form = format!(
         "--b\r\nContent-Disposition: form-data; name=\"file\"; filename=\"hits.csv\"\r\nContent-Type: text/csv\r\n\r\n{good}\r\n--b--\r\n"
     );
     let response = post_csv(&app, &session, "multipart/form-data; boundary=b", &form).await;
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status_code(), 200);
     assert_eq!(json(response).await["imported"], json!(3));
 
     // Cleaned like a tracked hit; no visitors, only pageviews.
@@ -910,9 +893,7 @@ async fn import_adds_every_row_or_none() {
         None,
     )
     .await
-    .text()
-    .await
-    .unwrap();
+    .text();
     assert!(export.contains("blog.example.com,2026-03-04T12:00:00.000Z,pageview,/a,,news.example.org,no,desktop,chrome,macos"));
     assert!(
         export.contains(
@@ -928,7 +909,7 @@ async fn import_adds_every_row_or_none() {
          blog.example.com,2026-03-05T12:00:00Z,pageview,/a,,,us,mobile,safari,ios,fedcba9876543210fedcba9876543210\r\n\
          blog.example.com,2026-03-05T13:00:00Z,pageview,/a,,,,,,,\r\n";
     let response = post_csv(&app, &session, "text/csv", with_visitor).await;
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status_code(), 200);
     assert_eq!(json(response).await["imported"], json!(4));
     let stats = fetch_stats().await;
     assert_eq!(stats["pageviews"], json!(8));
@@ -942,25 +923,23 @@ async fn import_adds_every_row_or_none() {
     let create = |body: String| {
         let (app, session) = (&app, &session);
         async move {
-            app.client
-                .post(format!("{}/api/import?create_sites=true", app.base))
-                .header("cookie", session)
-                .header("content-type", "text/csv")
-                .body(body)
-                .send()
+            app.server
+                .post("/api/import?create_sites=true")
+                .add_header("cookie", session)
+                .add_header("content-type", "text/csv")
+                .bytes(body.into())
                 .await
-                .unwrap()
         }
     };
     assert_eq!(
         post_csv(&app, &session, "text/csv", new_site)
             .await
-            .status(),
+            .status_code(),
         400
     );
     let invalid = new_site.replace("new.example.com", "not a host");
     let response = create(invalid).await;
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status_code(), 400);
     assert!(
         json(response).await["error"]
             .as_str()
@@ -976,7 +955,7 @@ async fn import_adds_every_row_or_none() {
         "nothing was created"
     );
     let response = create(new_site.to_string()).await;
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status_code(), 200);
     let body = json(response).await;
     assert_eq!(
         (body["imported"].clone(), body["sites_created"].clone()),
@@ -988,7 +967,9 @@ async fn import_adds_every_row_or_none() {
 
     let wrong = with_visitor.replace(",visitor\r\n", ",who\r\n");
     assert_eq!(
-        post_csv(&app, &session, "text/csv", &wrong).await.status(),
+        post_csv(&app, &session, "text/csv", &wrong)
+            .await
+            .status_code(),
         400
     );
 }
@@ -1212,14 +1193,6 @@ fn urlencoding(value: &str) -> String {
         .collect()
 }
 
-/// A client that does not follow redirects: the tests look at them.
-fn no_redirects() -> Client {
-    Client::builder()
-        .redirect(reqwest::redirect::Policy::none())
-        .build()
-        .unwrap()
-}
-
 /// The value of a cookie a response sets, as a `cookie` header value.
 fn set_cookie(response: &Response, name: &str) -> Option<String> {
     response
@@ -1246,12 +1219,8 @@ struct Login {
 }
 
 async fn start_login(app: &TestApp) -> Login {
-    let response = no_redirects()
-        .get(format!("{}/api/auth/oidc/login", app.base))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 303);
+    let response = app.server.get("/api/auth/oidc/login").await;
+    assert_eq!(response.status_code(), 303);
     let url = reqwest::Url::parse(&location(&response)).expect("a redirect to the provider");
     let param = |name: &str| {
         url.query_pairs()
@@ -1269,11 +1238,11 @@ async fn start_login(app: &TestApp) -> Login {
 
 /// The provider's redirect back to the app.
 async fn callback(app: &TestApp, query: &str, cookie: Option<&str>) -> Response {
-    let mut request = no_redirects().get(format!("{}/api/auth/oidc/callback?{query}", app.base));
+    let mut request = app.server.get(&format!("/api/auth/oidc/callback?{query}"));
     if let Some(cookie) = cookie {
-        request = request.header("cookie", cookie);
+        request = request.add_header("cookie", cookie);
     }
-    request.send().await.unwrap()
+    request.await
 }
 
 /// A whole login with these claims (the nonce is the login's): the
@@ -1291,7 +1260,7 @@ async fn sign_in(
         Some(&login.cookie),
     )
     .await;
-    assert_eq!(response.status(), 303);
+    assert_eq!(response.status_code(), 303);
     match set_cookie(&response, "potoo_session") {
         Some(session) => {
             assert_eq!(location(&response), "/");
@@ -1335,7 +1304,7 @@ async fn configure(app: &TestApp, session: &str, provider: &provider::Provider, 
         .unwrap()
         .extend(extra.as_object().unwrap().clone());
     let response = save_oidc(app, session, body).await;
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status_code(), 200);
 }
 
 async fn session_of(app: &TestApp, session: Option<&str>) -> Value {
@@ -1350,12 +1319,8 @@ async fn single_sign_on_is_off_until_a_working_provider_is_set() {
     let app = spawn_app().await;
     let admin = admin_session(&app).await;
     assert_eq!(session_of(&app, None).await["oidc"], json!(null));
-    let response = no_redirects()
-        .get(format!("{}/api/auth/oidc/login", app.base))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 303);
+    let response = app.server.get("/api/auth/oidc/login").await;
+    assert_eq!(response.status_code(), 303);
     assert_eq!(location(&response), "/login?error=unavailable");
 
     // No password is only for single sign-on.
@@ -1368,7 +1333,7 @@ async fn single_sign_on_is_off_until_a_working_provider_is_set() {
         Some(passwordless.clone()),
     )
     .await;
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status_code(), 400);
 
     // A provider that does not answer, or not over TLS, is refused, and
     // nothing changes.
@@ -1379,7 +1344,7 @@ async fn single_sign_on_is_off_until_a_working_provider_is_set() {
             json!({ "issuer": issuer, "client_id": "potoo" }),
         )
         .await;
-        assert_eq!(response.status(), 400, "{issuer}");
+        assert_eq!(response.status_code(), 400, "{issuer}");
     }
     let settings =
         json(request(&app, Method::GET, "/api/admin/oidc", Some(&admin), None).await).await;
@@ -1412,19 +1377,19 @@ async fn single_sign_on_is_off_until_a_working_provider_is_set() {
     assert_eq!(
         request(&app, Method::GET, "/api/admin/oidc", Some(&user), None)
             .await
-            .status(),
+            .status_code(),
         403
     );
     assert_eq!(
         save_oidc(&app, &user, json!({ "label": "x" }))
             .await
-            .status(),
+            .status_code(),
         403
     );
     assert_eq!(
         request(&app, Method::GET, "/api/admin/oidc", None, None)
             .await
-            .status(),
+            .status_code(),
         401
     );
 
@@ -1433,7 +1398,7 @@ async fn single_sign_on_is_off_until_a_working_provider_is_set() {
     let provider = provider::spawn().await;
     configure(&app, &admin, &provider, json!({ "label": "Acme ID" })).await;
     let settings = request(&app, Method::GET, "/api/admin/oidc", Some(&admin), None).await;
-    let settings = settings.text().await.unwrap();
+    let settings = settings.text();
     assert!(!settings.contains(provider::CLIENT_SECRET), "{settings}");
     let settings: Value = serde_json::from_str(&settings).unwrap();
     assert_eq!(settings["enabled"], json!(true));
@@ -1450,7 +1415,7 @@ async fn single_sign_on_is_off_until_a_working_provider_is_set() {
         Some(passwordless),
     )
     .await;
-    assert_eq!(response.status(), 201);
+    assert_eq!(response.status_code(), 201);
 
     // Leaving a field out keeps it; an empty secret removes it.
     let response = save_oidc(&app, &admin, json!({ "client_secret": "" })).await;
@@ -1551,7 +1516,7 @@ async fn single_sign_on_refuses_bad_callbacks() {
         provider::Claims::new(&provider, "account-1", "b@example.com", &login.nonce)
     };
     let refused = |response: Response, error: &str| {
-        assert_eq!(response.status(), 303);
+        assert_eq!(response.status_code(), 303);
         assert_eq!(location(&response), format!("/login?error={error}"));
         assert_eq!(set_cookie(&response, "potoo_session"), None);
     };
@@ -1696,7 +1661,7 @@ async fn single_sign_on_creates_regular_users_without_a_password() {
             Some(json!({ "email": "new@example.com", "password": password })),
         )
     };
-    assert_eq!(login("correct horse battery").await.status(), 401);
+    assert_eq!(login("correct horse battery").await.status_code(), 401);
 
     // A first password needs no current one ...
     let change = |body: Value| {
@@ -1709,21 +1674,21 @@ async fn single_sign_on_creates_regular_users_without_a_password() {
         )
     };
     let response = change(json!({ "new_password": "correct horse battery" })).await;
-    assert_eq!(response.status(), 204);
+    assert_eq!(response.status_code(), 204);
     assert_eq!(
         session_of(&app, Some(&session)).await["user"]["has_password"],
         json!(true)
     );
-    assert_eq!(login("correct horse battery").await.status(), 204);
+    assert_eq!(login("correct horse battery").await.status_code(), 204);
     // ... the next one does.
     let response = change(json!({ "new_password": "another horse battery" })).await;
-    assert_eq!(response.status(), 401);
+    assert_eq!(response.status_code(), 401);
     let response = change(json!({
         "current_password": "correct horse battery",
         "new_password": "another horse battery",
     }))
     .await;
-    assert_eq!(response.status(), 204);
+    assert_eq!(response.status_code(), 204);
 }
 
 /// An OIDC_* variable turns single sign-on on by itself, and its
@@ -1749,7 +1714,7 @@ async fn environment_variables_lock_their_fields() {
     assert_eq!(settings["locked"], json!(["issuer", "client_id", "label"]));
     assert_eq!(settings["issuer"], json!(provider.issuer));
     let response = save_oidc(&app, &admin, json!({ "label": "Other" })).await;
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status_code(), 400);
     assert!(
         json(response).await["error"]
             .as_str()
@@ -1757,7 +1722,7 @@ async fn environment_variables_lock_their_fields() {
             .contains("OIDC_LABEL")
     );
     let response = save_oidc(&app, &admin, json!({ "auto_create": true })).await;
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status_code(), 200);
     assert_eq!(
         session_of(&app, None).await["oidc"],
         json!({ "label": "Env ID" })
@@ -1802,7 +1767,7 @@ async fn single_sign_on_signs_nobody_in_before_setup() {
         Some(json!({ "email": "admin@example.com", "password": "correct horse battery" })),
     )
     .await;
-    assert_eq!(response.status(), 201);
+    assert_eq!(response.status_code(), 201);
 }
 
 /// Two admins saving different fields at once both keep their change, and
@@ -1820,7 +1785,10 @@ async fn concurrent_saves_of_the_settings_keep_both_changes() {
             save_oidc(&app, &admin, json!({ "label": label })),
             save_oidc(&app, &admin, json!({ "scopes": scopes })),
         );
-        assert_eq!((a.status().as_u16(), b.status().as_u16()), (200, 200));
+        assert_eq!(
+            (a.status_code().as_u16(), b.status_code().as_u16()),
+            (200, 200)
+        );
         let settings =
             json(request(&app, Method::GET, "/api/admin/oidc", Some(&admin), None).await).await;
         assert_eq!(
@@ -1855,11 +1823,7 @@ async fn a_provider_that_is_down_is_not_asked_by_every_login() {
     .await;
     admin_session(&app).await;
     for _ in 0..3 {
-        let response = no_redirects()
-            .get(format!("{}/api/auth/oidc/login", app.base))
-            .send()
-            .await
-            .unwrap();
+        let response = app.server.get("/api/auth/oidc/login").await;
         assert_eq!(location(&response), "/login?error=unavailable");
     }
     assert_eq!(asked.load(Ordering::SeqCst), 1);
@@ -1883,17 +1847,13 @@ fn set_cookie_header(response: &Response, name: &str) -> Option<String> {
 #[tokio::test]
 async fn the_login_cookie_is_scoped_and_used_up() {
     let provider = provider::spawn().await;
-    let start = |app: &TestApp| {
-        no_redirects()
-            .get(format!("{}/api/auth/oidc/login", app.base))
-            .send()
-    };
+    let start = |app: &TestApp| app.server.get("/api/auth/oidc/login");
 
     // Over plain http (no PUBLIC_URL): a plain cookie, for the callback only.
     let app = spawn_app().await;
     let admin = admin_session(&app).await;
     configure(&app, &admin, &provider, json!({})).await;
-    let response = start(&app).await.unwrap();
+    let response = start(&app).await;
     let cookie = set_cookie_header(&response, "potoo_oidc").expect("the login cookie");
     for attribute in [
         "HttpOnly",
@@ -1925,7 +1885,7 @@ async fn the_login_cookie_is_scoped_and_used_up() {
     .await;
     let admin = secure_admin_session(&https).await;
     configure(&https, &admin, &provider, json!({})).await;
-    let response = start(&https).await.unwrap();
+    let response = start(&https).await;
     let header = set_cookie_header(&response, "__Host-potoo_oidc").expect("the login cookie");
     for attribute in ["HttpOnly", "SameSite=Lax", "Path=/;", "Secure"] {
         assert!(header.contains(attribute), "{attribute} in {header}");
@@ -1936,15 +1896,11 @@ async fn the_login_cookie_is_scoped_and_used_up() {
     // before a restart, say) is cleared as well.
     let cookie = set_cookie(&response, "__Host-potoo_oidc").expect("the login cookie");
     for cookie in [cookie.as_str(), "__Host-potoo_oidc=not-signed-here"] {
-        let response = no_redirects()
-            .get(format!(
-                "{}/api/auth/oidc/callback?state=x&code=y",
-                https.base
-            ))
-            .header("cookie", cookie)
-            .send()
-            .await
-            .unwrap();
+        let response = https
+            .server
+            .get("/api/auth/oidc/callback?state=x&code=y")
+            .add_header("cookie", cookie)
+            .await;
         let cleared =
             set_cookie_header(&response, "__Host-potoo_oidc").expect("the cookie cleared");
         for attribute in [
@@ -2036,7 +1992,7 @@ async fn a_new_issuer_does_not_get_the_old_secret() {
         json!({ "issuer": first.issuer, "client_id": provider::CLIENT_ID }),
     )
     .await;
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status_code(), 400);
     assert!(
         json(response).await["error"]
             .as_str()
@@ -2091,7 +2047,7 @@ async fn a_provider_must_use_tls_and_answer_briefly() {
         json!({ "issuer": plain_token_endpoint, "client_id": "potoo" }),
     )
     .await;
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status_code(), 400);
     let error = json(response).await["error"].as_str().unwrap().to_string();
     assert!(error.contains("http://id.example.com/token"), "{error}");
 
@@ -2102,7 +2058,7 @@ async fn a_provider_must_use_tls_and_answer_briefly() {
         json!({ "issuer": huge, "client_id": "potoo" }),
     )
     .await;
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status_code(), 400);
     let error = json(response).await["error"].as_str().unwrap().to_string();
     assert!(error.contains("larger than"), "{error}");
 }
@@ -2160,12 +2116,8 @@ async fn a_callback_on_another_scheme_is_a_misconfiguration() {
     let plain = spawn_app().await;
     let admin = admin_session(&plain).await;
     configure(&plain, &admin, &provider, callback.clone()).await;
-    let start = |app: &TestApp| {
-        no_redirects()
-            .get(format!("{}/api/auth/oidc/login", app.base))
-            .send()
-    };
-    let response = start(&plain).await.unwrap();
+    let start = |app: &TestApp| app.server.get("/api/auth/oidc/login");
+    let response = start(&plain).await;
     assert_eq!(location(&response), "/login?error=misconfigured");
     assert_eq!(set_cookie(&response, "potoo_oidc"), None);
 
@@ -2177,7 +2129,7 @@ async fn a_callback_on_another_scheme_is_a_misconfiguration() {
     .await;
     let admin = secure_admin_session(&https).await;
     configure(&https, &admin, &provider, callback).await;
-    let response = start(&https).await.unwrap();
+    let response = start(&https).await;
     assert!(location(&response).starts_with(&provider.issuer));
 }
 
@@ -2221,7 +2173,7 @@ async fn enable(app: &TestApp, session: &str) -> String {
     let secret = setup["secret"].as_str().unwrap().to_string();
     let body = json!({ "code": totp_code(&secret, 0) });
     let response = post(app, "/api/auth/totp/enable", session, Some(body)).await;
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status_code(), 200);
     secret
 }
 
@@ -2241,7 +2193,9 @@ async fn two_factor_authentication() {
         json!(false)
     );
     assert_eq!(
-        password_login(&app, "admin@example.com").await.status(),
+        password_login(&app, "admin@example.com")
+            .await
+            .status_code(),
         204
     );
 
@@ -2253,7 +2207,7 @@ async fn two_factor_authentication() {
         Some(json!({ "code": "123456" })),
     )
     .await;
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status_code(), 400);
     let setup = json(post(&app, "/api/auth/totp/setup", &admin, None).await).await;
     let secret = setup["secret"].as_str().unwrap().to_string();
     let uri = setup["uri"].as_str().unwrap();
@@ -2273,7 +2227,7 @@ async fn two_factor_authentication() {
         Some(json!({ "code": wrong })),
     )
     .await;
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status_code(), 400);
     let response = post(
         &app,
         "/api/auth/totp/enable",
@@ -2281,7 +2235,7 @@ async fn two_factor_authentication() {
         Some(json!({ "code": totp_code(&secret, 0) })),
     )
     .await;
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status_code(), 200);
     let codes: Vec<String> = serde_json::from_value(json(response).await["codes"].clone()).unwrap();
     assert_eq!(codes.len(), 10);
     assert_eq!(
@@ -2292,13 +2246,13 @@ async fn two_factor_authentication() {
     assert_eq!(
         post(&app, "/api/auth/totp/setup", &admin, None)
             .await
-            .status(),
+            .status_code(),
         409
     );
 
     // The password alone does not sign in any more.
     let response = password_login(&app, "admin@example.com").await;
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status_code(), 200);
     assert_eq!(set_cookie(&response, auth::COOKIE), None);
     let challenge = set_cookie(&response, "potoo_2fa").expect("the challenge cookie");
     assert_eq!(
@@ -2310,7 +2264,7 @@ async fn two_factor_authentication() {
     assert_eq!(
         second_step(&app, None, &totp_code(&secret, 0))
             .await
-            .status(),
+            .status_code(),
         401
     );
     assert_eq!(
@@ -2320,18 +2274,20 @@ async fn two_factor_authentication() {
             &totp_code(&secret, 0)
         )
         .await
-        .status(),
+        .status_code(),
         401
     );
     // The code used to enable it (this step) is used up; the next step's
     // code is in the allowed skew and works, once.
     assert_eq!(
-        second_step(&app, Some(&challenge), wrong).await.status(),
+        second_step(&app, Some(&challenge), wrong)
+            .await
+            .status_code(),
         400
     );
     let next = totp_code(&secret, 1);
     let response = second_step(&app, Some(&challenge), &next).await;
-    assert_eq!(response.status(), 204);
+    assert_eq!(response.status_code(), 204);
     let session = set_cookie(&response, auth::COOKIE).expect("the session cookie");
     assert_eq!(
         session_of(&app, Some(&session)).await["user"]["email"],
@@ -2340,26 +2296,30 @@ async fn two_factor_authentication() {
     let response = password_login(&app, "admin@example.com").await;
     let challenge = set_cookie(&response, "potoo_2fa").unwrap();
     assert_eq!(
-        second_step(&app, Some(&challenge), &next).await.status(),
+        second_step(&app, Some(&challenge), &next)
+            .await
+            .status_code(),
         400
     );
     assert_eq!(
         second_step(&app, Some(&challenge), &totp_code(&secret, -1))
             .await
-            .status(),
+            .status_code(),
         400
     );
 
     // A recovery code works once, typed loosely.
     let typed = codes[0].to_uppercase().replace('-', " ");
     assert_eq!(
-        second_step(&app, Some(&challenge), &typed).await.status(),
+        second_step(&app, Some(&challenge), &typed)
+            .await
+            .status_code(),
         204
     );
     assert_eq!(
         second_step(&app, Some(&challenge), &codes[0])
             .await
-            .status(),
+            .status_code(),
         400
     );
 
@@ -2371,13 +2331,13 @@ async fn two_factor_authentication() {
         Some(json!({ "code": codes[1] })),
     )
     .await;
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status_code(), 200);
     let new_codes: Vec<String> =
         serde_json::from_value(json(response).await["codes"].clone()).unwrap();
     assert_eq!(
         second_step(&app, Some(&challenge), &codes[2])
             .await
-            .status(),
+            .status_code(),
         400
     );
 
@@ -2385,7 +2345,7 @@ async fn two_factor_authentication() {
     assert_eq!(
         second_step(&app, Some(&challenge), &new_codes[0])
             .await
-            .status(),
+            .status_code(),
         204
     );
 }
@@ -2409,13 +2369,13 @@ async fn attempts_are_limited_per_email_address_and_user() {
         )
     };
     // Right or wrong, every attempt counts: the sixth is refused.
-    assert_eq!(attempt("wrong password").await.status(), 401);
+    assert_eq!(attempt("wrong password").await.status_code(), 401);
     for _ in 0..3 {
-        assert_eq!(attempt("correct horse battery").await.status(), 204);
+        assert_eq!(attempt("correct horse battery").await.status_code(), 204);
     }
-    assert_eq!(attempt("wrong password").await.status(), 401);
+    assert_eq!(attempt("wrong password").await.status_code(), 401);
     let response = attempt("correct horse battery").await;
-    assert_eq!(response.status(), 429);
+    assert_eq!(response.status_code(), 429);
     let wait: u64 = response.headers()["retry-after"]
         .to_str()
         .unwrap()
@@ -2437,18 +2397,18 @@ async fn attempts_are_limited_per_email_address_and_user() {
         Some(json!({ "email": "b@example.com", "password": "wrong password" })),
     )
     .await;
-    assert_eq!(other.status(), 401);
+    assert_eq!(other.status_code(), 401);
 
     // Codes: five per user, then 429 even for a right one.
     let secret = enable(&app, &admin).await;
     for _ in 0..4 {
         let body = json!({ "code": "000000" });
         let response = post(&app, "/api/auth/totp/recovery-codes", &admin, Some(body)).await;
-        assert_eq!(response.status(), 400);
+        assert_eq!(response.status_code(), 400);
     }
     let body = json!({ "code": totp_code(&secret, 1) });
     let response = post(&app, "/api/auth/totp/recovery-codes", &admin, Some(body)).await;
-    assert_eq!(response.status(), 429);
+    assert_eq!(response.status_code(), 429);
 }
 
 #[tokio::test]
@@ -2463,7 +2423,7 @@ async fn two_factor_authentication_is_turned_off_by_the_user_or_an_admin() {
         Some(json!({ "email": "b@example.com", "password": "correct horse battery" })),
     )
     .await;
-    assert_eq!(response.status(), 201);
+    assert_eq!(response.status_code(), 201);
     let user = cookie(&password_login(&app, "b@example.com").await);
 
     // The user turns it off with a code; a wrong one changes nothing.
@@ -2475,7 +2435,7 @@ async fn two_factor_authentication_is_turned_off_by_the_user_or_an_admin() {
         Some(json!({ "code": "abc" })),
     )
     .await;
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status_code(), 400);
     let response = post(
         &app,
         "/api/auth/totp/disable",
@@ -2483,27 +2443,36 @@ async fn two_factor_authentication_is_turned_off_by_the_user_or_an_admin() {
         Some(json!({ "code": totp_code(&secret, 1) })),
     )
     .await;
-    assert_eq!(response.status(), 204);
-    assert_eq!(password_login(&app, "b@example.com").await.status(), 204);
+    assert_eq!(response.status_code(), 204);
+    assert_eq!(
+        password_login(&app, "b@example.com").await.status_code(),
+        204
+    );
 
     // An admin turns it off for someone who lost their app, not for
     // themselves; regular users cannot.
     enable(&app, &user).await;
-    assert_eq!(password_login(&app, "b@example.com").await.status(), 200);
+    assert_eq!(
+        password_login(&app, "b@example.com").await.status_code(),
+        200
+    );
     let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
     let id = users[1]["id"].as_str().unwrap().to_string();
     assert_eq!(users[1]["totp_enabled"], json!(true));
     let own = users[0]["id"].as_str().unwrap().to_string();
-    assert_eq!(reset_totp(&app, &user, &id).await.status(), 403);
-    assert_eq!(reset_totp(&app, &admin, &own).await.status(), 400);
+    assert_eq!(reset_totp(&app, &user, &id).await.status_code(), 403);
+    assert_eq!(reset_totp(&app, &admin, &own).await.status_code(), 400);
     assert_eq!(
         reset_totp(&app, &admin, "0190f5b2-7c00-7000-8000-000000000000")
             .await
-            .status(),
+            .status_code(),
         404
     );
-    assert_eq!(reset_totp(&app, &admin, &id).await.status(), 204);
-    assert_eq!(password_login(&app, "b@example.com").await.status(), 204);
+    assert_eq!(reset_totp(&app, &admin, &id).await.status_code(), 204);
+    assert_eq!(
+        password_login(&app, "b@example.com").await.status_code(),
+        204
+    );
     let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
     assert_eq!(users[1]["totp_enabled"], json!(false));
 }
@@ -2527,38 +2496,41 @@ async fn single_sign_on_only_refuses_passwords() {
 
     // No password signs in, not even the right one.
     let response = password_login(&app, "admin@example.com").await;
-    assert_eq!(response.status(), 403);
+    assert_eq!(response.status_code(), 403);
     assert_eq!(set_cookie(&response, auth::COOKIE), None);
     // The code step is for single sign-on too: without its cookie, a 401.
-    assert_eq!(second_step(&app, None, "123456").await.status(), 401);
+    assert_eq!(second_step(&app, None, "123456").await.status_code(), 401);
 
     // Passwords cannot be set; users are made without one.
     let body = json!({ "new_password": "another horse battery", "current_password": "correct horse battery" });
     assert_eq!(
         post(&app, "/api/auth/password", &admin, Some(body))
             .await
-            .status(),
+            .status_code(),
         403
     );
     let body = json!({ "email": "b@example.com", "password": "correct horse battery" });
     assert_eq!(
         post(&app, "/api/auth/users", &admin, Some(body))
             .await
-            .status(),
+            .status_code(),
         403
     );
     let body = json!({ "email": "b@example.com" });
     assert_eq!(
         post(&app, "/api/auth/users", &admin, Some(body))
             .await
-            .status(),
+            .status_code(),
         201
     );
     let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
     let id = users[1]["id"].as_str().unwrap().to_string();
     let body = json!({ "new_password": "correct horse battery" });
     let path = format!("/api/auth/users/{id}/password");
-    assert_eq!(post(&app, &path, &admin, Some(body)).await.status(), 403);
+    assert_eq!(
+        post(&app, &path, &admin, Some(body)).await.status_code(),
+        403
+    );
 
     // Single sign-on signs both in.
     for email in ["admin@example.com", "b@example.com"] {
@@ -2583,19 +2555,19 @@ async fn with_key(
     body: Option<Value>,
 ) -> Response {
     let mut builder = app
-        .client
-        .request(method, format!("{}{path}", app.base))
-        .header("authorization", format!("Bearer {key}"));
+        .server
+        .method(method, path)
+        .add_header("authorization", format!("Bearer {key}"));
     if let Some(body) = body {
         builder = builder.json(&body);
     }
-    builder.send().await.unwrap()
+    builder.await
 }
 
 async fn create_key(app: &TestApp, session: &str, scope: &str) -> Value {
     let body = json!({ "name": format!("{scope} key"), "scope": scope });
     let response = post(app, "/api/auth/api-keys", session, Some(body)).await;
-    assert_eq!(response.status(), 201);
+    assert_eq!(response.status_code(), 201);
     json(response).await
 }
 
@@ -2623,33 +2595,33 @@ async fn api_keys_are_capped_by_their_scope() {
     assert_eq!(
         with_key(&app, Method::GET, "/api/sites", &token, None)
             .await
-            .status(),
+            .status_code(),
         200
     );
     assert_eq!(
         with_key(&app, Method::POST, "/api/sites", &token, Some(site.clone()))
             .await
-            .status(),
+            .status_code(),
         403
     );
     // Write: changes, but no admin endpoints.
     assert_eq!(
         with_key(&app, Method::POST, "/api/sites", &write, Some(site))
             .await
-            .status(),
+            .status_code(),
         201
     );
     assert_eq!(
         with_key(&app, Method::GET, "/api/auth/users", &write, None)
             .await
-            .status(),
+            .status_code(),
         403
     );
     // Admin: what the admin may.
     assert_eq!(
         with_key(&app, Method::GET, "/api/auth/users", &admin_key, None)
             .await
-            .status(),
+            .status_code(),
         200
     );
 
@@ -2658,20 +2630,20 @@ async fn api_keys_are_capped_by_their_scope() {
         assert_eq!(
             with_key(&app, Method::GET, "/api/auth/api-keys", key, None)
                 .await
-                .status(),
+                .status_code(),
             403
         );
         let body = json!({ "name": "more", "scope": "read" });
         assert_eq!(
             with_key(&app, Method::POST, "/api/auth/api-keys", key, Some(body))
                 .await
-                .status(),
+                .status_code(),
             403
         );
         assert_eq!(
             with_key(&app, Method::POST, "/api/auth/totp/setup", key, None)
                 .await
-                .status(),
+                .status_code(),
             403
         );
     }
@@ -2689,31 +2661,31 @@ async fn api_keys_are_capped_by_their_scope() {
     assert_eq!(
         request(&app, Method::DELETE, &path, Some(&admin), None)
             .await
-            .status(),
+            .status_code(),
         204
     );
     assert_eq!(
         request(&app, Method::DELETE, &path, Some(&admin), None)
             .await
-            .status(),
+            .status_code(),
         404
     );
     assert_eq!(
         with_key(&app, Method::GET, "/api/sites", &token, None)
             .await
-            .status(),
+            .status_code(),
         401
     );
     assert_eq!(
         with_key(&app, Method::GET, "/api/sites", "potoo_nope", None)
             .await
-            .status(),
+            .status_code(),
         401
     );
     assert_eq!(
         with_key(&app, Method::GET, "/api/sites", "nope", None)
             .await
-            .status(),
+            .status_code(),
         401
     );
 
@@ -2726,7 +2698,7 @@ async fn api_keys_are_capped_by_their_scope() {
         assert_eq!(
             post(&app, "/api/auth/api-keys", &admin, Some(body))
                 .await
-                .status(),
+                .status_code(),
             400
         );
     }
@@ -2742,7 +2714,7 @@ async fn api_keys_are_capped_by_their_scope() {
     assert_eq!(
         post(&app, "/api/auth/api-keys", &user, Some(body))
             .await
-            .status(),
+            .status_code(),
         403
     );
     let user_key = create_key(&app, &user, "write").await["token"]
@@ -2752,7 +2724,7 @@ async fn api_keys_are_capped_by_their_scope() {
     assert_eq!(
         with_key(&app, Method::GET, "/api/sites", &user_key, None)
             .await
-            .status(),
+            .status_code(),
         200
     );
     // A user's keys go with them.
@@ -2762,13 +2734,13 @@ async fn api_keys_are_capped_by_their_scope() {
     assert_eq!(
         request(&app, Method::DELETE, &path, Some(&admin), None)
             .await
-            .status(),
+            .status_code(),
         204
     );
     assert_eq!(
         with_key(&app, Method::GET, "/api/sites", &user_key, None)
             .await
-            .status(),
+            .status_code(),
         401
     );
 }
@@ -2784,7 +2756,7 @@ async fn sso_step(app: &TestApp, provider: &provider::Provider, email: &str) -> 
         Some(&login.cookie),
     )
     .await;
-    assert_eq!(response.status(), 303);
+    assert_eq!(response.status_code(), 303);
     assert_eq!(set_cookie(&response, auth::COOKIE), None);
     let challenge = set_cookie(&response, "potoo_2fa").expect("the challenge cookie");
     (location(&response), challenge)
@@ -2809,9 +2781,9 @@ async fn single_sign_on_asks_for_the_code_too() {
         None,
     )
     .await;
-    assert_eq!(response.status(), 401);
+    assert_eq!(response.status_code(), 401);
     let response = second_step(&app, Some(&challenge), &totp_code(&secret, 1)).await;
-    assert_eq!(response.status(), 204);
+    assert_eq!(response.status_code(), 204);
     let session = set_cookie(&response, auth::COOKIE).expect("the session cookie");
     assert_eq!(
         session_of(&app, Some(&session)).await["user"]["email"],
@@ -2837,7 +2809,7 @@ async fn totp_required_makes_everyone_set_it_up() {
 
     // The password leads to setting the app up, not to a session.
     let response = password_login(&app, "admin@example.com").await;
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status_code(), 200);
     assert_eq!(set_cookie(&response, auth::COOKIE), None);
     let challenge = set_cookie(&response, "potoo_2fa").unwrap();
     assert_eq!(
@@ -2846,7 +2818,9 @@ async fn totp_required_makes_everyone_set_it_up() {
     );
     // Not the code step: there is no app yet.
     assert_eq!(
-        second_step(&app, Some(&challenge), "123456").await.status(),
+        second_step(&app, Some(&challenge), "123456")
+            .await
+            .status_code(),
         401
     );
     let enroll = |path: &'static str, body: Option<Value>| {
@@ -2857,12 +2831,12 @@ async fn totp_required_makes_everyone_set_it_up() {
         Some(json!({ "code": "123456" })),
     )
     .await;
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status_code(), 400);
     let setup = json(enroll("/api/auth/login/totp/setup", None).await).await;
     let secret = setup["secret"].as_str().unwrap().to_string();
     let body = json!({ "code": totp_code(&secret, 0) });
     let response = enroll("/api/auth/login/totp/enable", Some(body)).await;
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status_code(), 200);
     let session = set_cookie(&response, auth::COOKIE).expect("the session cookie");
     assert_eq!(json(response).await["codes"].as_array().unwrap().len(), 10);
     assert_eq!(
@@ -2878,7 +2852,7 @@ async fn totp_required_makes_everyone_set_it_up() {
     assert_eq!(
         post(&app, "/api/auth/totp/disable", &admin, Some(body))
             .await
-            .status(),
+            .status_code(),
         403
     );
 
@@ -2888,7 +2862,7 @@ async fn totp_required_makes_everyone_set_it_up() {
     assert_eq!(
         post(&app, "/api/auth/users", &admin, Some(body))
             .await
-            .status(),
+            .status_code(),
         201
     );
     let (page, challenge) = sso_step(&app, &provider, "b@example.com").await;
@@ -2910,12 +2884,12 @@ async fn totp_required_makes_everyone_set_it_up() {
         Some(json!({ "code": totp_code(&secret, 0) })),
     )
     .await;
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status_code(), 200);
     let (page, _) = sso_step(&app, &provider, "b@example.com").await;
     assert_eq!(page, "/login?step=totp");
     let users = json(request(&app, Method::GET, "/api/auth/users", Some(&admin), None).await).await;
     let id = users[1]["id"].as_str().unwrap().to_string();
-    assert_eq!(reset_totp(&app, &admin, &id).await.status(), 204);
+    assert_eq!(reset_totp(&app, &admin, &id).await.status_code(), 204);
     let (page, _) = sso_step(&app, &provider, "b@example.com").await;
     assert_eq!(page, "/login?step=totp-setup");
 }
@@ -2939,26 +2913,26 @@ async fn the_authenticator_app_can_be_replaced() {
         Some(body),
     )
     .await;
-    assert_eq!(response.status(), 403);
+    assert_eq!(response.status_code(), 403);
 
     // Confirming needs a replacement started, which needs a current code.
     let body = json!({ "code": "123456" });
     assert_eq!(
         post(&app, "/api/auth/totp/replace/confirm", &admin, Some(body))
             .await
-            .status(),
+            .status_code(),
         400
     );
     let body = json!({ "code": "abc" });
     assert_eq!(
         post(&app, "/api/auth/totp/replace", &admin, Some(body))
             .await
-            .status(),
+            .status_code(),
         400
     );
     let body = json!({ "code": totp_code(&old, 1) });
     let response = post(&app, "/api/auth/totp/replace", &admin, Some(body)).await;
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status_code(), 200);
     let new = json(response).await["secret"].as_str().unwrap().to_string();
     assert_ne!(new, old);
 
@@ -2972,7 +2946,7 @@ async fn the_authenticator_app_can_be_replaced() {
     assert_eq!(
         post(&app, "/api/auth/totp/replace/confirm", &admin, Some(body))
             .await
-            .status(),
+            .status_code(),
         400
     );
     // Confirmed: the new app works, the old one does not.
@@ -2980,7 +2954,7 @@ async fn the_authenticator_app_can_be_replaced() {
     assert_eq!(
         post(&app, "/api/auth/totp/replace/confirm", &admin, Some(body))
             .await
-            .status(),
+            .status_code(),
         204
     );
     let response = password_login(&app, "admin@example.com").await;
@@ -2990,12 +2964,12 @@ async fn the_authenticator_app_can_be_replaced() {
         assert_eq!(
             second_step(&app, Some(&challenge), &old_code)
                 .await
-                .status(),
+                .status_code(),
             400
         );
     }
     let response = second_step(&app, Some(&challenge), &totp_code(&new, 1)).await;
-    assert_eq!(response.status(), 204);
+    assert_eq!(response.status_code(), 204);
 }
 
 #[tokio::test]
@@ -3006,7 +2980,7 @@ async fn sessions_end_with_a_password_change_a_deletion_or_a_logout() {
     assert_eq!(
         post(&app, "/api/auth/users", &admin, Some(body))
             .await
-            .status(),
+            .status_code(),
         201
     );
     let laptop = cookie(&password_login(&app, "b@example.com").await);
@@ -3023,7 +2997,7 @@ async fn sessions_end_with_a_password_change_a_deletion_or_a_logout() {
     assert_eq!(
         post(&app, "/api/auth/password", &laptop, Some(body))
             .await
-            .status(),
+            .status_code(),
         204
     );
     assert!(signed_in(laptop.clone()).await);
@@ -3031,7 +3005,9 @@ async fn sessions_end_with_a_password_change_a_deletion_or_a_logout() {
 
     // Signing out ends the session.
     assert_eq!(
-        post(&app, "/api/auth/logout", &laptop, None).await.status(),
+        post(&app, "/api/auth/logout", &laptop, None)
+            .await
+            .status_code(),
         204
     );
     assert!(!signed_in(laptop).await);
@@ -3045,7 +3021,7 @@ async fn sessions_end_with_a_password_change_a_deletion_or_a_logout() {
     assert_eq!(
         request(&app, Method::DELETE, &path, Some(&admin), None)
             .await
-            .status(),
+            .status_code(),
         204
     );
     assert!(!signed_in(session).await);
@@ -3054,14 +3030,14 @@ async fn sessions_end_with_a_password_change_a_deletion_or_a_logout() {
 /// A POST as a browser on another origin would send it.
 async fn from_site(app: &TestApp, path: &str, session: Option<&str>, site: &str) -> Response {
     let mut builder = app
-        .client
-        .post(format!("{}{path}", app.base))
-        .header("sec-fetch-site", site)
+        .server
+        .post(path)
+        .add_header("sec-fetch-site", site)
         .json(&json!({}));
     if let Some(session) = session {
-        builder = builder.header("cookie", session);
+        builder = builder.add_header("cookie", session);
     }
-    builder.send().await.unwrap()
+    builder.await
 }
 
 #[tokio::test]
@@ -3074,7 +3050,7 @@ async fn requests_from_other_origins_are_refused() {
     for site in ["same-site", "cross-site"] {
         for path in ["/api/sites", "/api/auth/logout", "/api/auth/login"] {
             let response = from_site(&app, path, Some(&admin), site).await;
-            assert_eq!(response.status(), 403, "{site} {path}");
+            assert_eq!(response.status_code(), 403, "{site} {path}");
         }
     }
     assert!(session_of(&app, Some(&admin)).await["user"].is_object());
@@ -3082,55 +3058,47 @@ async fn requests_from_other_origins_are_refused() {
     // A multipart upload (no CORS preflight) from a sibling subdomain.
     let form = "--b\r\nContent-Disposition: form-data; name=\"file\"\r\n\r\ncreated_at,site,kind,path\n\r\n--b--\r\n";
     let response = app
-        .client
-        .post(format!("{}/api/import", app.base))
-        .header("cookie", &admin)
-        .header("sec-fetch-site", "same-site")
-        .header("content-type", "multipart/form-data; boundary=b")
-        .body(form)
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 403);
+        .server
+        .post("/api/import")
+        .add_header("cookie", &admin)
+        .add_header("sec-fetch-site", "same-site")
+        .add_header("content-type", "multipart/form-data; boundary=b")
+        .bytes(form.into())
+        .await;
+    assert_eq!(response.status_code(), 403);
 
     // Without Fetch Metadata, the Origin decides.
     let response = app
-        .client
-        .post(format!("{}/api/sites", app.base))
-        .header("cookie", &admin)
-        .header("origin", "https://blog.example.com")
+        .server
+        .post("/api/sites")
+        .add_header("cookie", &admin)
+        .add_header("origin", "https://blog.example.com")
         .json(&json!({ "hostname": "a.example.com" }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 403);
+        .await;
+    assert_eq!(response.status_code(), 403);
 
     // Potoo's own pages, the tracker and API keys pass.
     let response = app
-        .client
-        .post(format!("{}/api/sites", app.base))
-        .header("cookie", &admin)
-        .header("sec-fetch-site", "same-origin")
-        .header("origin", &app.base)
+        .server
+        .post("/api/sites")
+        .add_header("cookie", &admin)
+        .add_header("sec-fetch-site", "same-origin")
+        .add_header("origin", &app.base)
         .json(&json!({ "hostname": "a.example.com" }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 201);
+        .await;
+    assert_eq!(response.status_code(), 201);
     let response = from_site(&app, "/api/collect", None, "cross-site").await;
-    assert_eq!(response.status(), 204);
+    assert_eq!(response.status_code(), 204);
     let key = create_key(&app, &admin, "write").await["token"]
         .as_str()
         .unwrap()
         .to_string();
     let response = app
-        .client
-        .post(format!("{}/api/sites", app.base))
-        .header("authorization", format!("Bearer {key}"))
-        .header("sec-fetch-site", "cross-site")
+        .server
+        .post("/api/sites")
+        .add_header("authorization", format!("Bearer {key}"))
+        .add_header("sec-fetch-site", "cross-site")
         .json(&json!({ "hostname": "b.example.com" }))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(response.status(), 201);
+        .await;
+    assert_eq!(response.status_code(), 201);
 }
