@@ -9,13 +9,17 @@
 # `mise run build:linux` with ARCH=amd64 or arm64 builds either one, on a
 # Mac too. A profiling image passes its own binary with --build-arg BINARY
 # (mise run build:profiling).
-FROM alpine:3
+# An exact Alpine release, so the base changes only in a pull request
+# (Dependabot's, as fix(deps): a release follows). `apk upgrade` takes the
+# package fixes Alpine published since that release.
+FROM alpine:3.24.4
 ARG TARGETARCH
 ARG BINARY=dist/potoo-linux-${TARGETARCH}
 
 # A writable /data for the database and the GeoIP database.
 # ca-certificates is what the GeoIP download needs.
-RUN apk add --no-cache ca-certificates \
+RUN apk upgrade --no-cache \
+  && apk add --no-cache ca-certificates \
   && addgroup -S potoo && adduser -S -G potoo potoo \
   && mkdir /data && chown potoo /data
 COPY ${BINARY} /usr/local/bin/potoo
@@ -25,10 +29,10 @@ ENV PORT=8000 \
 VOLUME /data
 EXPOSE 8000
 
-# The healthcheck: the backend answers /api/health with 200 OK. Shell
-# form, so $PORT expands; wget is busybox's.
+# The healthcheck: `potoo healthcheck` asks the running server's
+# /api/health (on $PORT) and fails unless it answers 200.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD wget -q -O /dev/null "http://127.0.0.1:$PORT/api/health" || exit 1
+  CMD ["/usr/local/bin/potoo", "healthcheck"]
 
 USER potoo
 ENTRYPOINT ["/usr/local/bin/potoo"]

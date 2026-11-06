@@ -5,6 +5,16 @@ use std::time::Duration;
 
 #[tokio::main]
 async fn main() {
+    // The container healthcheck: no database, no server, only a request to
+    // the one already running (the same command as woodmouse's).
+    if std::env::args().nth(1).as_deref() == Some("healthcheck") {
+        if let Err(e) = healthcheck().await {
+            eprintln!("unhealthy: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     tracing_subscriber::fmt().init();
 
     // The binary is built for musl (the Docker image is Alpine), so the
@@ -137,5 +147,28 @@ async fn purge(db: &db::Db, retention_days: i64) {
         .await
     {
         eprintln!("retention purge failed: {e}");
+    }
+}
+
+/// `GET /api/health` on this machine, by hand, so that the healthcheck needs
+/// nothing from the image (no wget or curl). Succeeds on a 200, fails
+/// otherwise.
+async fn healthcheck() -> Result<(), Box<dyn std::error::Error>> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let port: u16 = std::env::var("PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(8000);
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port)).await?;
+    stream
+        .write_all(b"GET /api/health HTTP/1.0\r\nHost: localhost\r\n\r\n")
+        .await?;
+    let mut head = [0u8; 12];
+    stream.read_exact(&mut head).await?;
+    if &head == b"HTTP/1.1 200" || &head == b"HTTP/1.0 200" {
+        Ok(())
+    } else {
+        Err("the health endpoint did not answer 200".into())
     }
 }
