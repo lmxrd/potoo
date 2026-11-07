@@ -19,8 +19,8 @@ pub fn router() -> OpenApiRouter<AppState> {
     // The tracker sends text/plain via sendBeacon, so no CORS preflight
     // is needed; the wildcard keeps the pixel usable anywhere.
     OpenApiRouter::new()
-        .routes(routes!(collect_post))
-        .routes(routes!(collect_pixel))
+        .routes(routes!(collect))
+        .routes(routes!(pixel))
         .layer(CorsLayer::permissive())
 }
 
@@ -28,7 +28,7 @@ pub fn router() -> OpenApiRouter<AppState> {
 /// ending. It belongs at the root: it is the one thing other people's
 /// pages load, not part of the dashboard's API.
 pub fn tracker_router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(tracker))
+    OpenApiRouter::new().routes(routes!(tracker_script))
 }
 
 /// The host part of a URL or bare hostname, lowercased.
@@ -163,20 +163,24 @@ pub struct CollectBody {
 }
 
 // The beacon endpoint of /api/collect, hit by the tracker script.
+/// Record a hit (the tracker script).
+///
+/// Sent by /tracker.js with sendBeacon: the body is a JSON object sent as text/plain, so that no CORS
+/// preflight is needed (application/json is accepted too: this is the only endpoint that takes anything
+/// but JSON). Answers 204 for every well-formed request, also for hits that are ignored (bots, Do Not
+/// Track, unknown sites). The hit is queued and written within milliseconds; with 20,000 hits waiting
+/// the answer is 503.
 #[utoipa::path(
     post,
     path = "/collect",
     tag = "Tracking",
-    operation_id = "collectHit",
-    summary = "Record a hit (the tracker script)",
-    description = "Sent by /tracker.js with sendBeacon: the body is a JSON object sent as text/plain, so that no CORS preflight is needed (application/json is accepted too: this is the only endpoint that takes anything but JSON). Answers 204 for every well-formed request, also for hits that are ignored (bots, Do Not Track, unknown sites). The hit is queued and written within milliseconds; with 20,000 hits waiting the answer is 503.",
     request_body(content((CollectBody = "text/plain"), (CollectBody = "application/json"))),
     responses(
         (status = 204, description = "The hit was accepted, or ignored"),
         (status = 503, description = "Too many hits queued, try again", body = ErrorBody),
     ),
 )]
-async fn collect_post(
+async fn collect(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
@@ -210,20 +214,21 @@ async fn collect_post(
 
 // No-JS fallback: <img src=".../api/pixel?h=example.com&p=/page">.
 // Without `p`/`h`, the Referer header is used when the browser sends it.
+/// Record a pageview (the no-JS pixel).
+///
+/// A transparent 1x1 GIF; requesting it is the visit. Without h and p the site and the path come from
+/// the Referer header. Counts pageviews only.
 #[utoipa::path(
     get,
     path = "/pixel",
     tag = "Tracking",
-    operation_id = "getPixel",
-    summary = "Record a pageview (the no-JS pixel)",
-    description = "A transparent 1x1 GIF; requesting it is the visit. Without h and p the site and the path come from the Referer header. Counts pageviews only.",
     params(("h" = Option<String>, Query, description = "The site's hostname"), ("p" = Option<String>, Query, description = "The page's path"), ("r" = Option<String>, Query, description = "The referrer")),
     responses(
         (status = 200, description = "The GIF", body = String, content_type = "image/gif"),
         (status = 503, description = "Too many hits queued, try again", body = ErrorBody),
     ),
 )]
-async fn collect_pixel(
+async fn pixel(
     State(state): State<AppState>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     headers: HeaderMap,
@@ -262,18 +267,19 @@ async fn collect_pixel(
         .into_response())
 }
 
+/// The tracker script.
+///
+/// The cookie-less script a site includes with a single script tag. Options are data attributes on the
+/// tag: data-clicks, data-outbound, data-host.
 #[utoipa::path(
     get,
     path = "/tracker.js",
     tag = "Tracking",
-    operation_id = "getTrackerScript",
-    summary = "The tracker script",
-    description = "The cookie-less script a site includes with a single script tag. Options are data attributes on the tag: data-clicks, data-outbound, data-host.",
     responses(
         (status = 200, description = "The script", body = String, content_type = "text/javascript"),
     ),
 )]
-async fn tracker() -> Response {
+async fn tracker_script() -> Response {
     (
         StatusCode::OK,
         [

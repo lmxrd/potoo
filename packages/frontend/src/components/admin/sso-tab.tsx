@@ -3,9 +3,9 @@ import { useState } from "react";
 import { useRouter } from "@tanstack/react-router";
 import type { OidcSettings, UpdateOidcSettings } from "potoo-sdk";
 import {
-  getOidcSettingsOptions,
-  getOidcSettingsQueryKey,
-  updateOidcSettingsMutation,
+  adminGetOidcOptions,
+  adminGetOidcQueryKey,
+  adminUpdateOidcMutation,
 } from "potoo-sdk/react-query";
 import { errorMessage } from "../../lib/api";
 import { Button } from "../ui/button";
@@ -21,7 +21,7 @@ type TextField = "issuer" | "client_id" | "scopes" | "label" | "redirect_url";
  * client secret is never shown: it is replaced when one is typed.
  */
 export function SsoTab() {
-  const { data, error } = useQuery(getOidcSettingsOptions());
+  const { data, error } = useQuery(adminGetOidcOptions());
   // Above the form, which starts over from what the server saved (trimmed
   // values, a secret that is set or not): "Saved." outlives that. Before any
   // return: hooks run in the same order on every render.
@@ -42,7 +42,7 @@ function Form({
 }) {
   const queryClient = useQueryClient();
   const router = useRouter();
-  const update = useMutation({ ...updateOidcSettingsMutation(), meta: { inline: true } });
+  const update = useMutation({ ...adminUpdateOidcMutation(), meta: { inline: true } });
   const [values, setValues] = useState<Record<TextField, string>>({
     issuer: settings.issuer,
     client_id: settings.client_id,
@@ -98,7 +98,7 @@ function Form({
           setSecret("");
           setRemoveSecret(false);
           setSaved(true);
-          await queryClient.invalidateQueries({ queryKey: getOidcSettingsQueryKey() });
+          await queryClient.invalidateQueries({ queryKey: adminGetOidcQueryKey() });
           // The login page's button comes from the session.
           await router.invalidate();
         } catch (err) {

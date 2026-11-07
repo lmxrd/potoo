@@ -6,15 +6,11 @@
 idiomatic_version_file_enable_tools = ["node", "pnpm", "rust"]
 
 [tools]
-# The C compiler and linker of the static Linux binary (scripts/build-linux.sh),
-# so that it builds on a Mac too.
-zig = "0.15.2"
-"github:rust-cross/cargo-zigbuild" = "0.24.0"
-# Restarts the backend when its code changes (dev:backend).
-watchexec = "2.8.0"
-# The vulnerability scanners of `mise run audit` and `audit:image`.
-"aqua:google/osv-scanner" = "2.7.0"
-"aqua:aquasecurity/trivy" = "0.76.1"
+watchexec = "2.8.0" # backend hot reload (dev:backend)
+zig = "0.15.2" # musl cross-compile (cargo zigbuild): C code for ring/SQLite and static linking
+"github:rust-cross/cargo-zigbuild" = "0.24.0" # builds the static release binaries via zig cc (scripts/build-linux.sh)
+"aqua:google/osv-scanner" = "2.7.0" # known vulnerabilities in the lockfiles (mise run audit)
+"aqua:aquasecurity/trivy" = "0.76.1" # known vulnerabilities in the image (mise run audit:image)
 
 # ---------------------------------------------------------------------------
 # Development
@@ -26,19 +22,18 @@ watchexec = "2.8.0"
 description = "Run dev mode"
 depends = ["dev:backend", "dev:frontend"]
 
-# Restarted when its code changes. It needs packages/frontend/dist to exist
-# to compile, even in debug.
+# Restarted when its code changes.
 [tasks."dev:backend"]
 description = "Run and watch for changes for the backend"
-depends = ["build:frontend"]
+depends = ["ensure:dist"]
 run = "watchexec --restart --stop-signal SIGINT --watch src --watch api --watch Cargo.toml --watch Cargo.lock --exts rs,toml,sql --ignore '**/target/**' -- cargo run"
-dir = "{{ config_root }}/packages/backend"
+dir = "packages/backend"
 
 [tasks."dev:frontend"]
 description = "Run the frontend dev server"
-depends = ["install:frontend", "gen:sdk"]
+depends = ["gen:sdk"]
 run = "pnpm run dev"
-dir = "{{ config_root }}/packages/frontend"
+dir = "packages/frontend"
 
 # Run the server against a built frontend. Depends on the build so a stale
 # binary can never serve yesterday's code.
@@ -46,7 +41,7 @@ dir = "{{ config_root }}/packages/frontend"
 description = "Build the release binary and run it"
 depends = ["build"]
 run = "../../dist/potoo"
-dir = "{{ config_root }}/packages/backend"
+dir = "packages/backend"
 
 # Tasks with sources and outputs are skipped when the outputs are newer
 # than the sources.
@@ -59,7 +54,6 @@ description = "Install the JavaScript workspace (frontend, SDK and e2e) from the
 run = "pnpm install"
 sources = ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", "packages/*/package.json"]
 outputs = ["node_modules/.pnpm/lock.yaml"]
-dir = "{{ config_root }}"
 
 # ---------------------------------------------------------------------------
 # Generated code
@@ -67,7 +61,7 @@ dir = "{{ config_root }}"
 
 [tasks."gen:spec"]
 description = "Generate the OpenAPI spec from the backend"
-dir = "{{ config_root }}/packages/backend"
+dir = "packages/backend"
 run = "cargo run --package api --bin specs"
 # Skip regeneration while the sources are older than the generated specs.
 sources = ["api/src/**/*.rs", "api/migrations/**/*", "**/Cargo.toml"]
@@ -78,11 +72,11 @@ outputs = ["target/specs/openapi.json", "target/specs/openapi.yaml"]
 # never generate it twice at once.
 [tasks."gen:sdk"]
 description = "Regenerate the SDK (packages/sdk) from the OpenAPI spec"
-depends = ["install:frontend", "gen:spec"]
+depends = ["gen:spec", "install:frontend"]
 run = "pnpm run openapi-ts"
 sources = ["../backend/target/specs/openapi.json", "openapi-ts.config.ts"]
 outputs = ["src/index.ts"]
-dir = "{{ config_root }}/packages/sdk"
+dir = "packages/sdk"
 
 # ---------------------------------------------------------------------------
 # Build
@@ -108,11 +102,11 @@ sources = [
   "../frontend/dist/**/*",
 ]
 outputs = ["../../dist/potoo"]
-dir = "{{ config_root }}/packages/backend"
+dir = "packages/backend"
 
 [tasks."build:frontend"]
 description = "Build the frontend bundle into frontend/dist"
-depends = ["install:frontend", "gen:sdk"]
+depends = ["gen:sdk"]
 run = "pnpm run build"
 sources = [
   "src/**/*",
@@ -124,11 +118,19 @@ sources = [
   "../sdk/src/**/*",
   "../../pnpm-lock.yaml",
 ]
-dir = "{{ config_root }}/packages/frontend"
+dir = "packages/frontend"
 
 # The static Linux binary (musl) the image copies, dist/potoo-linux-<arch>:
 # built outside the image, with this machine's cargo cache. ARCH=amd64 or
 # arm64 picks the architecture (default: this machine's).
+# rust-embed fails to compile when packages/frontend/dist does not exist, but
+# checks and tests never read the bundle, so an empty directory is enough:
+# they need not wait for the frontend build. Release builds
+# (build:linux) still depend on the real build:frontend.
+[tasks."ensure:dist"]
+description = "Make sure packages/frontend/dist exists (rust-embed needs the folder to compile)"
+run = "mkdir -p packages/frontend/dist"
+
 [tasks."build:linux"]
 description = "Build the static (musl) Linux binary for this machine's CPU architecture into dist/, with the frontend embedded"
 depends = ["build:frontend"]
@@ -160,18 +162,17 @@ podman build --format docker --build-arg BINARY=dist/potoo-linux-$arch-profiling
 description = "Run each stack's checks"
 depends = ["check:frontend", "check:backend"]
 
-# rust-embed needs packages/frontend/dist to exist to compile, hence the build.
 [tasks."check:backend"]
 description = "Run backend checks (rustfmt, clippy)"
-depends = ["build:frontend"]
+depends = ["ensure:dist"]
 run = ["cargo fmt --all --check", "cargo clippy --workspace --all-targets --all-features -- -D warnings"]
-dir = "{{ config_root }}/packages/backend"
+dir = "packages/backend"
 
 [tasks."check:frontend"]
 description = "Run frontend checks (typecheck, lint, format)"
-depends = ["install:frontend", "gen:sdk"]
+depends = ["gen:sdk"]
 run = "pnpm run check"
-dir = "{{ config_root }}/packages/frontend"
+dir = "packages/frontend"
 
 [tasks.fix]
 description = "Auto-fix in each stack"
@@ -180,13 +181,13 @@ depends = ["fix:backend", "fix:frontend"]
 [tasks."fix:backend"]
 description = "Auto-fix backend formatting"
 run = "cargo fmt --all"
-dir = "{{ config_root }}/packages/backend"
+dir = "packages/backend"
 
 [tasks."fix:frontend"]
 description = "Auto-fix frontend lint and formatting"
 depends = ["install:frontend"]
 run = "pnpm run fix"
-dir = "{{ config_root }}/packages/frontend"
+dir = "packages/frontend"
 
 # Unit and integration tests: the backend's (cargo) and the frontend's
 # (Vitest). The end-to-end smoke tests are `test:e2e`.
@@ -196,16 +197,16 @@ depends = ["test:backend", "test:frontend"]
 
 [tasks."test:backend"]
 description = "Run the backend tests"
-depends = ["build:frontend"]
+depends = ["ensure:dist"]
 run = "cargo test --workspace"
 sources = ["src/**/*", "api/**/*", "**/Cargo.toml", "Cargo.lock"]
-dir = "{{ config_root }}/packages/backend"
+dir = "packages/backend"
 
 [tasks."test:frontend"]
 description = "Run the frontend tests"
-depends = ["install:frontend", "gen:sdk"]
+depends = ["gen:sdk"]
 run = "pnpm run test"
-dir = "{{ config_root }}/packages/frontend"
+dir = "packages/frontend"
 
 # The end-to-end smoke tests (packages/e2e, Playwright): a real browser
 # against the image just built, on a fresh database (scripts/e2e.sh).
@@ -228,7 +229,6 @@ run = [
 [tasks.audit]
 description = "Known vulnerabilities in the locked crates and npm packages (osv-scanner: OSV, RustSec and GitHub advisories)"
 run = "osv-scanner scan source --config osv-scanner.toml --lockfile packages/backend/Cargo.lock --lockfile pnpm-lock.yaml"
-dir = "{{ config_root }}"
 
 # Known vulnerabilities in an image (its Alpine packages): the fixable HIGH
 # and CRITICAL ones fail. IMAGE picks it, by default the published one; CI
@@ -252,9 +252,9 @@ run = "scripts/loadtest.sh"
 # none. Deterministic: seeding twice gives the same data.
 [tasks.seed]
 description = "Fill the dev database with a year of demo data (wipes every hit)"
-depends = ["build:frontend"]
+depends = ["ensure:dist"]
 run = "cargo run --package api --bin seed"
-dir = "{{ config_root }}/packages/backend"
+dir = "packages/backend"
 
 # Remove everything that is generated or local: the Rust build (and the
 # OpenAPI spec in it), node_modules, the frontend build and the generated SDK,
@@ -262,7 +262,6 @@ dir = "{{ config_root }}/packages/backend"
 # `mise run install:frontend` and a build bring it all back.
 [tasks.clean]
 description = "Remove everything generated or local (builds, node_modules, the SDK, the local data)"
-dir = "{{ config_root }}"
 run = """
 rm -rf packages/backend/target packages/backend/data data dist
 rm -rf node_modules packages/*/node_modules packages/frontend/dist packages/sdk/src

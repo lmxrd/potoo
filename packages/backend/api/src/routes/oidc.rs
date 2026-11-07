@@ -30,13 +30,13 @@ use uuid::Uuid;
 /// The login and the callback, nested under /auth.
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(login))
-        .routes(routes!(callback))
+        .routes(routes!(oidc_login))
+        .routes(routes!(oidc_callback))
 }
 
 /// The provider settings, nested under /admin.
 pub fn admin_router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(get_settings, update_settings))
+    OpenApiRouter::new().routes(routes!(admin_get_oidc, admin_update_oidc))
 }
 
 /// The login cookie's name and path. Over https it is a `__Host-` cookie,
@@ -69,18 +69,22 @@ fn failed(failure: Failure) -> Redirect {
     Redirect::to(&format!("/login?error={}", failure.code()))
 }
 
+/// Sign in with single sign-on.
+///
+/// Redirects the browser to the provider, or to `/login?error=unavailable` when single sign-on is off
+/// or the provider cannot be reached (it is not asked again for 30 seconds), or to
+/// `/login?error=misconfigured` when the callback URL is not on the scheme (http or https) of
+/// `PUBLIC_URL`. Sets a short-lived signed cookie that holds the login, so that only this browser can
+/// finish it.
 #[utoipa::path(
     get,
     path = "/oidc/login",
     tag = "Auth",
-    operation_id = "oidcLogin",
-    summary = "Sign in with single sign-on",
-    description = "Redirects the browser to the provider, or to `/login?error=unavailable` when single sign-on is off or the provider cannot be reached (it is not asked again for 30 seconds), or to `/login?error=misconfigured` when the callback URL is not on the scheme (http or https) of `PUBLIC_URL`. Sets a short-lived signed cookie that holds the login, so that only this browser can finish it.",
     responses(
         (status = 303, description = "To the provider, or back to the login page"),
     ),
 )]
-async fn login(State(state): State<AppState>, headers: HeaderMap) -> Response {
+async fn oidc_login(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let secure = state.secure_cookies;
     let redirect_url = state
         .oidc
@@ -119,20 +123,25 @@ pub struct CallbackParams {
     error: Option<String>,
 }
 
+/// The provider's callback.
+///
+/// Where the provider sends the browser back. Signs the user in (the session cookie is set) and
+/// redirects to `/`; or, for two-factor authentication first, sets the short-lived challenge cookie and
+/// redirects to `/login?step=totp` (a code) or `/login?step=totp-setup` (setting the app up, with
+/// `TOTP_REQUIRED`); or redirects to `/login?error=<code>`: `unavailable` (also before the first admin
+/// is set up), `state`, `provider`, `token`, `email`, `unknown_user` or `linked` (the user with that
+/// email is linked to another account at the provider).
 #[utoipa::path(
     get,
     path = "/oidc/callback",
     tag = "Auth",
-    operation_id = "oidcCallback",
-    summary = "The provider's callback",
-    description = "Where the provider sends the browser back. Signs the user in (the session cookie is set) and redirects to `/`; or, for two-factor authentication first, sets the short-lived challenge cookie and redirects to `/login?step=totp` (a code) or `/login?step=totp-setup` (setting the app up, with `TOTP_REQUIRED`); or redirects to `/login?error=<code>`: `unavailable` (also before the first admin is set up), `state`, `provider`, `token`, `email`, `unknown_user` or `linked` (the user with that email is linked to another account at the provider).",
     params(CallbackParams),
     responses(
         (status = 303, description = "Signed in, to `/`; or back to the login page"),
         (status = 500, description = "The database failed", body = ErrorBody),
     ),
 )]
-async fn callback(
+async fn oidc_callback(
     State(state): State<AppState>,
     jar: CookieJar,
     mut auth: AuthSession,
@@ -375,12 +384,11 @@ fn view(state: &AppState, headers: &HeaderMap) -> OidcSettings {
     }
 }
 
+/// The single sign-on settings.
 #[utoipa::path(
     get,
     path = "/oidc",
     tag = "Admin",
-    operation_id = "getOidcSettings",
-    summary = "The single sign-on settings",
     responses(
         (status = 200, description = "The settings in effect", body = OidcSettings),
         (status = 401, description = "Not signed in", body = ErrorBody),
@@ -388,7 +396,7 @@ fn view(state: &AppState, headers: &HeaderMap) -> OidcSettings {
     ),
     security(("session" = []), ("api_key" = [])),
 )]
-async fn get_settings(
+async fn admin_get_oidc(
     State(state): State<AppState>,
     user: CurrentUser,
     headers: HeaderMap,
@@ -397,13 +405,16 @@ async fn get_settings(
     Ok(Json(view(&state, &headers)))
 }
 
+/// Change the single sign-on settings.
+///
+/// Takes effect at once. With an issuer and a client id set, the provider must answer its discovery
+/// document, or nothing changes (400). A field set by an environment variable cannot be changed (400).
+/// A new issuer removes the client secret unless one is sent with it, and is refused (400) while the
+/// secret comes from `OIDC_CLIENT_SECRET` and the issuer does not.
 #[utoipa::path(
     put,
     path = "/oidc",
     tag = "Admin",
-    operation_id = "updateOidcSettings",
-    summary = "Change the single sign-on settings",
-    description = "Takes effect at once. With an issuer and a client id set, the provider must answer its discovery document, or nothing changes (400). A field set by an environment variable cannot be changed (400). A new issuer removes the client secret unless one is sent with it, and is refused (400) while the secret comes from `OIDC_CLIENT_SECRET` and the issuer does not.",
     request_body(content = UpdateOidcSettings, content_type = "application/json"),
     responses(
         (status = 200, description = "The settings now in effect", body = OidcSettings),
@@ -414,7 +425,7 @@ async fn get_settings(
     ),
     security(("session" = []), ("api_key" = [])),
 )]
-async fn update_settings(
+async fn admin_update_oidc(
     State(state): State<AppState>,
     user: CurrentUser,
     headers: HeaderMap,

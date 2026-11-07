@@ -5,7 +5,7 @@ import {
   deleteSiteMutation,
   getSiteOptions,
   getSiteQueryKey,
-  getStatsOptions,
+  statsOptions,
   updateSiteMutation,
 } from "potoo-sdk/react-query";
 import { Button } from "../components/ui/button";
@@ -43,7 +43,7 @@ function SitePage() {
   const { data: stats, error: statsError } = useQuery({
     // The query never runs while the range is invalid (`enabled`), so the
     // empty one it is built from is never sent.
-    ...getStatsOptions({ query: params ?? { from: "", to: "" } }),
+    ...statsOptions({ query: params ?? { from: "", to: "" } }),
     enabled: params !== null,
     placeholderData: keepPreviousData,
   });

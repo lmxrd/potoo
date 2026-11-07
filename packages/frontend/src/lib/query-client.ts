@@ -21,7 +21,10 @@ export const queryClient: QueryClient = new QueryClient({
     },
   }),
   defaultOptions: {
-    // A failed request shows at once, and switching back to the tab does not reload every chart.
-    queries: { retry: false, refetchOnWindowFocus: false },
+    queries: {
+      // A failed request shows at once, and switching back to the tab does not reload every chart.
+      retry: false,
+      refetchOnWindowFocus: false,
+    },
   },
 });

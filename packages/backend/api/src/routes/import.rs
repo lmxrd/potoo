@@ -19,7 +19,7 @@ use uuid::Uuid;
 /// whole file is checked first, and the rows go in one transaction.
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(import))
+        .routes(routes!(import_hits))
         .layer(DefaultBodyLimit::max(MAX_BODY))
 }
 
@@ -129,13 +129,22 @@ impl IntoResponse for Failure {
     }
 }
 
+/// Import hits from CSV.
+///
+/// Adds the rows of a CSV in the export's format (site, created_at, kind, path, name, referrer,
+/// country, device, browser, os and optionally visitor; a header row names the columns). Sent as
+/// multipart/form-data with the CSV in a `file` part, or as the body itself with Content-Type text/csv
+/// or text/plain. Admin only. All or nothing: if a row cannot be read or names a site that does not
+/// exist, nothing is added and the answer lists what is wrong. With `create_sites=true` the sites of
+/// the file that do not exist are created (with the defaults of a new site) in the same transaction, in
+/// place of being refused. Referrer, country, device, browser and os may be empty (unknown). The header
+/// may end with an optional `visitor` column, the hash the export writes; hits without one add
+/// pageviews but no unique visitors. Paths and referrers are reduced as they are for tracked hits; the
+/// rows are not checked for duplicates. At most 256 MB.
 #[utoipa::path(
     post,
     path = "/",
     tag = "Stats",
-    operation_id = "importHits",
-    summary = "Import hits from CSV",
-    description = "Adds the rows of a CSV in the export's format (site, created_at, kind, path, name, referrer, country, device, browser, os and optionally visitor; a header row names the columns). Sent as multipart/form-data with the CSV in a `file` part, or as the body itself with Content-Type text/csv or text/plain. Admin only. All or nothing: if a row cannot be read or names a site that does not exist, nothing is added and the answer lists what is wrong. With `create_sites=true` the sites of the file that do not exist are created (with the defaults of a new site) in the same transaction, in place of being refused. Referrer, country, device, browser and os may be empty (unknown). The header may end with an optional `visitor` column, the hash the export writes; hits without one add pageviews but no unique visitors. Paths and referrers are reduced as they are for tracked hits; the rows are not checked for duplicates. At most 256 MB.",
     params(ImportQuery),
     request_body(content(
         (ImportForm = "multipart/form-data"),
@@ -152,7 +161,7 @@ impl IntoResponse for Failure {
     ),
     security(("session" = []), ("api_key" = [])),
 )]
-async fn import(
+async fn import_hits(
     State(state): State<AppState>,
     user: CurrentUser,
     Query(query): Query<ImportQuery>,

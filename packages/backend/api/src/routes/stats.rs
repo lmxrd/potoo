@@ -13,13 +13,15 @@ pub fn router() -> OpenApiRouter<AppState> {
 }
 
 // The aggregated numbers of one dashboard view, across sites.
+/// The numbers of a dashboard view.
+///
+/// Page views and visitors over a range, for any subset of the sites, filtered by facet, with the
+/// breakdowns the dashboard shows. "Visitors" counts distinct daily hashes, which include the site id,
+/// so the same person on two sites counts as two visitors.
 #[utoipa::path(
     get,
     path = "/",
     tag = "Stats",
-    operation_id = "getStats",
-    summary = "The numbers of a dashboard view",
-    description = "Page views and visitors over a range, for any subset of the sites, filtered by facet, with the breakdowns the dashboard shows. \"Visitors\" counts distinct daily hashes, which include the site id, so the same person on two sites counts as two visitors.",
     params(StatsQuery),
     responses(
         (status = 200, description = "The aggregated numbers", body = SiteStats),

@@ -15,16 +15,19 @@ use utoipa_axum::routes;
 /// CSV rows — the same range, sites and filter the stats endpoints take,
 /// one row per hit, oldest first.
 pub fn router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(export))
+    OpenApiRouter::new().routes(routes!(export_hits))
 }
 
+/// Export the hits of a dashboard view as CSV.
+///
+/// Every recorded hit of the selected view, oldest first, one CSV row each: site, created_at, kind,
+/// path, name, referrer, country, device, browser, os, visitor (the pseudonymous visitor hash of the
+/// day; empty for an imported hit that had none). Takes the same parameters as the stats, so what you
+/// see is what you get. Sent as an attachment named potoo-export-<timestamp>.csv.
 #[utoipa::path(
     get,
     path = "/",
     tag = "Stats",
-    operation_id = "exportHits",
-    summary = "Export the hits of a dashboard view as CSV",
-    description = "Every recorded hit of the selected view, oldest first, one CSV row each: site, created_at, kind, path, name, referrer, country, device, browser, os, visitor (the pseudonymous visitor hash of the day; empty for an imported hit that had none). Takes the same parameters as the stats, so what you see is what you get. Sent as an attachment named potoo-export-<timestamp>.csv.",
     params(StatsQuery),
     responses(
         (status = 200, description = "The hits as CSV", body = String, content_type = "text/csv", headers(("content-disposition" = String, description = "attachment; filename=\"potoo-export-<timestamp>.csv\""))),
@@ -33,7 +36,7 @@ pub fn router() -> OpenApiRouter<AppState> {
     ),
     security(("session" = []), ("api_key" = [])),
 )]
-async fn export(
+async fn export_hits(
     State(state): State<AppState>,
     _user: CurrentUser,
     Query(query): Query<StatsQuery>,

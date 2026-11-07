@@ -17,8 +17,8 @@ use uuid::Uuid;
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list, create))
-        .routes(routes!(get_site, update, delete))
+        .routes(routes!(list_sites, create_site))
+        .routes(routes!(get_site, update_site, delete_site))
 }
 
 /// What the stats and the export are computed over: an exact window,
@@ -101,19 +101,18 @@ pub struct CreatedSite {
     pub honor_dnt: bool,
 }
 
+/// List the sites.
 #[utoipa::path(
     get,
     path = "/",
     tag = "Sites",
-    operation_id = "listSites",
-    summary = "List the sites",
     responses(
         (status = 200, description = "All sites, by hostname", body = Vec<SiteRow>),
         (status = 401, description = "Not signed in", body = ErrorBody),
     ),
     security(("session" = []), ("api_key" = [])),
 )]
-async fn list(
+async fn list_sites(
     State(state): State<AppState>,
     _user: CurrentUser,
 ) -> Result<Json<Vec<SiteRow>>, ApiError> {
@@ -171,12 +170,11 @@ fn default_true() -> bool {
     true
 }
 
+/// Register a site.
 #[utoipa::path(
     post,
     path = "/",
     tag = "Sites",
-    operation_id = "createSite",
-    summary = "Register a site",
     request_body(content = SiteInput, content_type = "application/json"),
     responses(
         (status = 201, description = "The site was registered", body = CreatedSite),
@@ -188,7 +186,7 @@ fn default_true() -> bool {
     ),
     security(("session" = []), ("api_key" = [])),
 )]
-async fn create(
+async fn create_site(
     State(state): State<AppState>,
     user: CurrentUser,
     ApiJson(input): ApiJson<SiteInput>,
@@ -229,13 +227,13 @@ pub struct DntInput {
     pub honor_dnt: bool,
 }
 
+/// Change a site's settings.
+///
+/// Whether Do Not Track is honored. Changing a site that does not exist is not an error.
 #[utoipa::path(
     patch,
     path = "/{id}",
     tag = "Sites",
-    operation_id = "updateSite",
-    summary = "Change a site's settings",
-    description = "Whether Do Not Track is honored. Changing a site that does not exist is not an error.",
     params(("id" = Uuid, Path, description = "The site id")),
     request_body(content = DntInput, content_type = "application/json"),
     responses(
@@ -247,7 +245,7 @@ pub struct DntInput {
     ),
     security(("session" = []), ("api_key" = [])),
 )]
-async fn update(
+async fn update_site(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
@@ -266,12 +264,11 @@ async fn update(
 }
 
 // Deleting a site deletes all of its hits.
+/// Delete a site and all of its hits.
 #[utoipa::path(
     delete,
     path = "/{id}",
     tag = "Sites",
-    operation_id = "deleteSite",
-    summary = "Delete a site and all of its hits",
     params(("id" = Uuid, Path, description = "The site id")),
     responses(
         (status = 204, description = "Deleted"),
@@ -280,7 +277,7 @@ async fn update(
     ),
     security(("session" = []), ("api_key" = [])),
 )]
-async fn delete(
+async fn delete_site(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,
@@ -296,12 +293,11 @@ async fn delete(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+/// One site.
 #[utoipa::path(
     get,
     path = "/{id}",
     tag = "Sites",
-    operation_id = "getSite",
-    summary = "One site",
     params(("id" = Uuid, Path, description = "The site id")),
     responses(
         (status = 200, description = "The site", body = SiteRow),

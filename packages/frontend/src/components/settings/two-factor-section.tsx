@@ -6,12 +6,12 @@ import { Button } from "../ui/button";
 import { ErrorText } from "../common/error-text";
 import { Input } from "../ui/input";
 import {
-  confirmReplaceTotpMutation,
-  disableTotpMutation,
-  replaceTotpMutation,
-  enableTotpMutation,
-  regenerateRecoveryCodesMutation,
-  setupTotpMutation,
+  totpReplaceConfirmMutation,
+  totpDisableMutation,
+  totpReplaceMutation,
+  totpEnableMutation,
+  totpRecoveryCodesMutation,
+  totpSetupMutation,
 } from "potoo-sdk/react-query";
 import type { TotpSetup } from "potoo-sdk/types";
 import { errorMessage } from "../../lib/api";
@@ -28,12 +28,12 @@ export function TwoFactorSection({ enabled, required }: { enabled: boolean; requ
   const [codes, setCodes] = useState<string[]>();
   const [code, setCode] = useState("");
   const [error, setError] = useState<string>();
-  const start = useMutation({ ...setupTotpMutation(), meta: { inline: true } });
-  const enable = useMutation({ ...enableTotpMutation(), meta: { inline: true } });
-  const disable = useMutation({ ...disableTotpMutation(), meta: { inline: true } });
-  const regenerate = useMutation({ ...regenerateRecoveryCodesMutation(), meta: { inline: true } });
-  const replace = useMutation({ ...replaceTotpMutation(), meta: { inline: true } });
-  const confirmReplace = useMutation({ ...confirmReplaceTotpMutation(), meta: { inline: true } });
+  const start = useMutation({ ...totpSetupMutation(), meta: { inline: true } });
+  const enable = useMutation({ ...totpEnableMutation(), meta: { inline: true } });
+  const disable = useMutation({ ...totpDisableMutation(), meta: { inline: true } });
+  const regenerate = useMutation({ ...totpRecoveryCodesMutation(), meta: { inline: true } });
+  const replace = useMutation({ ...totpReplaceMutation(), meta: { inline: true } });
+  const confirmReplace = useMutation({ ...totpReplaceConfirmMutation(), meta: { inline: true } });
   const [replacement, setReplacement] = useState<TotpSetup>();
   const [replaced, setReplaced] = useState(false);
 

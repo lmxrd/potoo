@@ -25,27 +25,33 @@ const ConfirmContext = createContext<Confirm | null>(null);
 /**
  * One confirmation dialog for the whole app (shadcn's AlertDialog), asked
  * through `useConfirm`: `if (await confirm({...})) ...`, where the browser's
- * `confirm()` was.
+ * `confirm()` would be.
  */
 export function ConfirmProvider({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  // Kept after closing, so the texts stay while the dialog fades out.
   const [options, setOptions] = useState<ConfirmOptions | null>(null);
   const resolve = useRef<(answer: boolean) => void>(() => {});
   const confirm = useCallback<Confirm>(
     (next) =>
       new Promise((done) => {
+        // A confirmation still open is answered no.
+        resolve.current(false);
         resolve.current = done;
         setOptions(next);
+        setOpen(true);
       }),
     [],
   );
   const answer = (value: boolean) => {
     resolve.current(value);
-    setOptions(null);
+    resolve.current = () => {};
+    setOpen(false);
   };
   return (
     <ConfirmContext.Provider value={confirm}>
       {children}
-      <AlertDialog open={options !== null} onOpenChange={(open) => !open && answer(false)}>
+      <AlertDialog open={open} onOpenChange={(next) => !next && answer(false)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{options?.title}</AlertDialogTitle>

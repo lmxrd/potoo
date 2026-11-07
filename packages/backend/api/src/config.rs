@@ -1,4 +1,4 @@
-//! Settings read from the environment (the same helpers as woodmouse's).
+//! Settings read from the environment.
 
 /// The value with surrounding whitespace removed; `None` while it is empty.
 pub fn non_empty(value: Option<String>) -> Option<String> {
@@ -12,7 +12,7 @@ pub fn var(name: &str) -> Option<String> {
     non_empty(std::env::var(name).ok())
 }
 
-/// Where Potoo is reached from (`PUBLIC_URL`), without a trailing slash.
+/// Where the app is reached from (`PUBLIC_URL`), without a trailing slash.
 pub fn public_url() -> Option<String> {
     var("PUBLIC_URL").map(|u| u.trim_end_matches('/').to_string())
 }
@@ -38,9 +38,8 @@ pub fn parse_database_url(url: &str) -> Result<String, String> {
     Ok(options.get_filename().to_string_lossy().into_owned())
 }
 
-/// A yes/no setting: `1`/`0`, `true`/`false`, `yes`/`no` or `on`/`off` (any
-/// case); `None` while unset or blank. Anything else is an error, so a typo
-/// stops the server instead of silently meaning "off".
+/// A yes/no setting: `1`/`0`, `true`/`false`, `yes`/`no` or `on`/`off` (any case); `None` while unset or
+/// blank. Anything else is an error, so a typo stops the server instead of silently meaning "off".
 pub fn flag(name: &str) -> Result<Option<bool>, String> {
     parse_flag(name, &std::env::var(name).unwrap_or_default())
 }

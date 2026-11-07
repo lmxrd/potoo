@@ -7,7 +7,7 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import type { User } from "potoo-sdk";
-import { getAuthStatusOptions, getMeOptions, logoutMutation } from "potoo-sdk/react-query";
+import { authStatusOptions, meOptions, logoutMutation } from "potoo-sdk/react-query";
 import { ChevronDownIcon } from "lucide-react";
 import { Button } from "../components/ui/button";
 import {
@@ -25,10 +25,10 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   beforeLoad: async ({ location, context }) => {
     // Always fresh: both change with settings and sign-ins. The signed-in
     // user is null while nobody is (`/api/auth/me` answers 401).
-    const status = await context.queryClient.fetchQuery(getAuthStatusOptions());
+    const status = await context.queryClient.fetchQuery(authStatusOptions());
     const user = status.bootstrap_required
       ? null
-      : await context.queryClient.fetchQuery(getMeOptions()).catch(() => null);
+      : await context.queryClient.fetchQuery(meOptions()).catch(() => null);
     const session = { ...status, user };
     // The theme applies before anything renders, so there is no flash of
     // the default palette.

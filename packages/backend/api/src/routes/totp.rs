@@ -34,19 +34,19 @@ use uuid::Uuid;
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
         .routes(routes!(login_totp))
-        .routes(routes!(login_setup))
-        .routes(routes!(login_enable))
-        .routes(routes!(setup))
-        .routes(routes!(enable))
-        .routes(routes!(disable))
-        .routes(routes!(regenerate_recovery_codes))
-        .routes(routes!(replace))
-        .routes(routes!(confirm_replace))
+        .routes(routes!(login_totp_setup))
+        .routes(routes!(login_totp_enable))
+        .routes(routes!(totp_setup))
+        .routes(routes!(totp_enable))
+        .routes(routes!(totp_disable))
+        .routes(routes!(totp_recovery_codes))
+        .routes(routes!(totp_replace))
+        .routes(routes!(totp_replace_confirm))
 }
 
 /// Turning off a user's two-factor authentication, nested under /admin.
 pub fn admin_router() -> OpenApiRouter<AppState> {
-    OpenApiRouter::new().routes(routes!(reset))
+    OpenApiRouter::new().routes(routes!(admin_reset_totp))
 }
 
 /// How long the second step may wait after the password.
@@ -94,13 +94,16 @@ pub struct RecoveryCodes {
     pub codes: Vec<String>,
 }
 
+/// Sign in: the second step.
+///
+/// After `/login` answered `totp_required` (or single sign-on sent the browser to `/login?step=totp`):
+/// a code from the authenticator app, or a recovery code (used up), sets the session cookie. Needs the
+/// cookie the first step set, good for five minutes. After five wrong codes for a user within 15
+/// minutes, their codes are refused for a while (429, with a Retry-After header).
 #[utoipa::path(
     post,
     path = "/login/totp",
     tag = "Auth",
-    operation_id = "loginTotp",
-    summary = "Sign in: the second step",
-    description = "After `/login` answered `totp_required` (or single sign-on sent the browser to `/login?step=totp`): a code from the authenticator app, or a recovery code (used up), sets the session cookie. Needs the cookie the first step set, good for five minutes. After five wrong codes for a user within 15 minutes, their codes are refused for a while (429, with a Retry-After header).",
     request_body(content = TotpCode, content_type = "application/json"),
     responses(
         (status = 204, description = "Signed in"),
@@ -131,20 +134,22 @@ async fn login_totp(
     Ok((StatusCode::NO_CONTENT, jar).into_response())
 }
 
+/// Sign in: set up the authenticator app.
+///
+/// With `TOTP_REQUIRED`, after `/login` answered `totp_setup_required` (or single sign-on sent the
+/// browser to `/login?step=totp-setup`): a new secret for the app, as `/totp/setup` gives. Starting
+/// again replaces it.
 #[utoipa::path(
     post,
     path = "/login/totp/setup",
     tag = "Auth",
-    operation_id = "loginTotpSetup",
-    summary = "Sign in: set up the authenticator app",
-    description = "With `TOTP_REQUIRED`, after `/login` answered `totp_setup_required` (or single sign-on sent the browser to `/login?step=totp-setup`): a new secret for the app, as `/totp/setup` gives. Starting again replaces it.",
     responses(
         (status = 200, description = "The secret", body = TotpSetup),
         (status = 401, description = "No first step, or it expired: sign in again", body = ErrorBody),
         (status = 409, description = "Two-factor authentication is already on", body = ErrorBody),
     ),
 )]
-async fn login_setup(
+async fn login_totp_setup(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<TotpSetup>, ApiError> {
@@ -157,13 +162,14 @@ async fn login_setup(
     Ok(Json(start_setup(&state, user_id, &email).await?))
 }
 
+/// Sign in: turn two-factor authentication on.
+///
+/// Confirms the secret of `/login/totp/setup` with a code from the app, sets the session cookie, and
+/// answers the recovery codes, shown this once.
 #[utoipa::path(
     post,
     path = "/login/totp/enable",
     tag = "Auth",
-    operation_id = "loginTotpEnable",
-    summary = "Sign in: turn two-factor authentication on",
-    description = "Confirms the secret of `/login/totp/setup` with a code from the app, sets the session cookie, and answers the recovery codes, shown this once.",
     request_body(content = TotpCode, content_type = "application/json"),
     responses(
         (status = 200, description = "On, and signed in", body = RecoveryCodes),
@@ -174,7 +180,7 @@ async fn login_setup(
         (status = 429, description = "Too many attempts, try again later", body = ErrorBody),
     ),
 )]
-async fn login_enable(
+async fn login_totp_enable(
     State(state): State<AppState>,
     mut auth: AuthSession,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -193,13 +199,14 @@ async fn login_enable(
     Ok((jar, Json(RecoveryCodes { codes })).into_response())
 }
 
+/// Start setting up two-factor authentication.
+///
+/// A new secret for an authenticator app. Nothing changes until `/totp/enable` confirms it with a code;
+/// starting again replaces it.
 #[utoipa::path(
     post,
     path = "/totp/setup",
     tag = "Account",
-    operation_id = "setupTotp",
-    summary = "Start setting up two-factor authentication",
-    description = "A new secret for an authenticator app. Nothing changes until `/totp/enable` confirms it with a code; starting again replaces it.",
     responses(
         (status = 200, description = "The secret", body = TotpSetup),
         (status = 401, description = "Not signed in", body = ErrorBody),
@@ -207,7 +214,7 @@ async fn login_enable(
     ),
     security(("session" = [])),
 )]
-async fn setup(
+async fn totp_setup(
     State(state): State<AppState>,
     SessionOnlyUser(user): SessionOnlyUser,
 ) -> Result<Json<TotpSetup>, ApiError> {
@@ -239,13 +246,14 @@ fn already_on() -> ApiError {
     )
 }
 
+/// Turn two-factor authentication on.
+///
+/// Confirms the secret of `/totp/setup` with a code from the app. Answers the recovery codes, shown
+/// this once.
 #[utoipa::path(
     post,
     path = "/totp/enable",
     tag = "Account",
-    operation_id = "enableTotp",
-    summary = "Turn two-factor authentication on",
-    description = "Confirms the secret of `/totp/setup` with a code from the app. Answers the recovery codes, shown this once.",
     request_body(content = TotpCode, content_type = "application/json"),
     responses(
         (status = 200, description = "On", body = RecoveryCodes),
@@ -257,7 +265,7 @@ fn already_on() -> ApiError {
     ),
     security(("session" = [])),
 )]
-async fn enable(
+async fn totp_enable(
     State(state): State<AppState>,
     SessionOnlyUser(user): SessionOnlyUser,
     mut auth: AuthSession,
@@ -307,13 +315,14 @@ async fn confirm_setup(
     Ok(codes)
 }
 
+/// Turn two-factor authentication off.
+///
+/// Needs a code from the app, or a recovery code. The recovery codes are deleted. Refused while
+/// `TOTP_REQUIRED` is set.
 #[utoipa::path(
     post,
     path = "/totp/disable",
     tag = "Account",
-    operation_id = "disableTotp",
-    summary = "Turn two-factor authentication off",
-    description = "Needs a code from the app, or a recovery code. The recovery codes are deleted. Refused while `TOTP_REQUIRED` is set.",
     request_body(content = TotpCode, content_type = "application/json"),
     responses(
         (status = 204, description = "Off"),
@@ -325,7 +334,7 @@ async fn confirm_setup(
     ),
     security(("session" = [])),
 )]
-async fn disable(
+async fn totp_disable(
     State(state): State<AppState>,
     SessionOnlyUser(user): SessionOnlyUser,
     mut auth: AuthSession,
@@ -346,13 +355,16 @@ async fn disable(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+/// Start replacing the authenticator app.
+///
+/// For a new phone or app: a code from the current app, or a recovery code, gives a new secret. Two-
+/// factor authentication stays on, with the current app, until `/totp/replace/confirm` confirms the new
+/// one; so this works while it is required (`TOTP_REQUIRED`) too. Starting again replaces the new
+/// secret.
 #[utoipa::path(
     post,
     path = "/totp/replace",
     tag = "Account",
-    operation_id = "replaceTotp",
-    summary = "Start replacing the authenticator app",
-    description = "For a new phone or app: a code from the current app, or a recovery code, gives a new secret. Two-factor authentication stays on, with the current app, until `/totp/replace/confirm` confirms the new one; so this works while it is required (`TOTP_REQUIRED`) too. Starting again replaces the new secret.",
     request_body(content = TotpCode, content_type = "application/json"),
     responses(
         (status = 200, description = "The new secret", body = TotpSetup),
@@ -364,7 +376,7 @@ async fn disable(
     ),
     security(("session" = [])),
 )]
-async fn replace(
+async fn totp_replace(
     State(state): State<AppState>,
     SessionOnlyUser(user): SessionOnlyUser,
     ApiJson(body): ApiJson<TotpCode>,
@@ -389,13 +401,14 @@ async fn replace(
     Ok(Json(TotpSetup { uri, secret }).into_response())
 }
 
+/// Finish replacing the authenticator app.
+///
+/// A code from the new app: its secret replaces the old one, which stops working. The recovery codes
+/// are kept. A wrong code changes nothing.
 #[utoipa::path(
     post,
     path = "/totp/replace/confirm",
     tag = "Account",
-    operation_id = "confirmReplaceTotp",
-    summary = "Finish replacing the authenticator app",
-    description = "A code from the new app: its secret replaces the old one, which stops working. The recovery codes are kept. A wrong code changes nothing.",
     request_body(content = TotpCode, content_type = "application/json"),
     responses(
         (status = 204, description = "Replaced"),
@@ -407,7 +420,7 @@ async fn replace(
     ),
     security(("session" = [])),
 )]
-async fn confirm_replace(
+async fn totp_replace_confirm(
     State(state): State<AppState>,
     SessionOnlyUser(user): SessionOnlyUser,
     mut auth: AuthSession,
@@ -439,13 +452,13 @@ async fn confirm_replace(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+/// New recovery codes.
+///
+/// Needs a code from the app, or a recovery code. The old recovery codes stop working.
 #[utoipa::path(
     post,
     path = "/totp/recovery-codes",
     tag = "Account",
-    operation_id = "regenerateRecoveryCodes",
-    summary = "New recovery codes",
-    description = "Needs a code from the app, or a recovery code. The old recovery codes stop working.",
     request_body(content = TotpCode, content_type = "application/json"),
     responses(
         (status = 200, description = "The new codes, shown this once", body = RecoveryCodes),
@@ -456,7 +469,7 @@ async fn confirm_replace(
     ),
     security(("session" = [])),
 )]
-async fn regenerate_recovery_codes(
+async fn totp_recovery_codes(
     State(state): State<AppState>,
     SessionOnlyUser(user): SessionOnlyUser,
     ApiJson(body): ApiJson<TotpCode>,
@@ -473,13 +486,14 @@ async fn regenerate_recovery_codes(
 
 // For a user who lost their authenticator and their recovery codes. Not for
 // the admin's own account: they turn it off in their settings, with a code.
+/// Turn off two-factor authentication for a user.
+///
+/// For a user who lost their authenticator app and their recovery codes; they can set it up again. Not
+/// for your own account.
 #[utoipa::path(
     delete,
     path = "/users/{id}/totp",
     tag = "Users",
-    operation_id = "resetUserTotp",
-    summary = "Turn off two-factor authentication for a user",
-    description = "For a user who lost their authenticator app and their recovery codes; they can set it up again. Not for your own account.",
     params(("id" = Uuid, Path, description = "The user id")),
     responses(
         (status = 204, description = "Off"),
@@ -490,7 +504,7 @@ async fn regenerate_recovery_codes(
     ),
     security(("session" = []), ("api_key" = [])),
 )]
-async fn reset(
+async fn admin_reset_totp(
     State(state): State<AppState>,
     user: CurrentUser,
     Path(id): Path<Uuid>,

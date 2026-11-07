@@ -1,9 +1,9 @@
-import type { GetStatsData } from "potoo-sdk";
+import type { StatsData } from "potoo-sdk";
 import { client } from "potoo-sdk/client";
 import type { RangeQuery } from "./date-range";
 
 /** The parameters of the stats and the export: one shape for both. */
-export type StatsQuery = NonNullable<GetStatsData["query"]>;
+export type StatsQuery = NonNullable<StatsData["query"]>;
 
 /**
  * The query of a dashboard view: its range (null for an invalid custom

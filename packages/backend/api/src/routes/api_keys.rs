@@ -20,8 +20,8 @@ use uuid::Uuid;
 
 pub fn router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list_keys, create_key))
-        .routes(routes!(revoke_key))
+        .routes(routes!(list_api_keys, create_api_key))
+        .routes(routes!(revoke_api_key))
 }
 
 /// The most keys one user may have, so a script gone wrong stops somewhere.
@@ -91,13 +91,13 @@ pub struct CreatedApiKey {
 
 const COLUMNS: &str = "id, name, prefix, scope, created_at, last_used_at, expires_at";
 
+/// List your API keys.
+///
+/// Your own keys, newest first, expired ones included. Not with an API key.
 #[utoipa::path(
     get,
     path = "/api-keys",
     tag = "Account",
-    operation_id = "listApiKeys",
-    summary = "List your API keys",
-    description = "Your own keys, newest first, expired ones included. Not with an API key.",
     responses(
         (status = 200, description = "The keys", body = Vec<ApiKey>),
         (status = 401, description = "Not signed in", body = ErrorBody),
@@ -105,7 +105,7 @@ const COLUMNS: &str = "id, name, prefix, scope, created_at, last_used_at, expire
     ),
     security(("session" = [])),
 )]
-async fn list_keys(
+async fn list_api_keys(
     State(state): State<AppState>,
     SessionOnlyUser(user): SessionOnlyUser,
 ) -> Result<Json<Vec<ApiKey>>, ApiError> {
@@ -118,13 +118,16 @@ async fn list_keys(
     Ok(Json(rows.into_iter().map(ApiKeyRow::into_key).collect()))
 }
 
+/// Create an API key.
+///
+/// Answers the token, shown this once: send it as `Authorization: Bearer <token>`. A `read` key may
+/// only GET; a `write` key may also change things but reaches no admin endpoint; an `admin` key (admins
+/// only) may do what its user may. No key reaches your account's settings or keys. At most 50 keys per
+/// user.
 #[utoipa::path(
     post,
     path = "/api-keys",
     tag = "Account",
-    operation_id = "createApiKey",
-    summary = "Create an API key",
-    description = "Answers the token, shown this once: send it as `Authorization: Bearer <token>`. A `read` key may only GET; a `write` key may also change things but reaches no admin endpoint; an `admin` key (admins only) may do what its user may. No key reaches your account's settings or keys. At most 50 keys per user.",
     request_body(content = CreateApiKey, content_type = "application/json"),
     responses(
         (status = 201, description = "Created", body = CreatedApiKey),
@@ -136,7 +139,7 @@ async fn list_keys(
     ),
     security(("session" = [])),
 )]
-async fn create_key(
+async fn create_api_key(
     State(state): State<AppState>,
     SessionOnlyUser(user): SessionOnlyUser,
     ApiJson(body): ApiJson<CreateApiKey>,
@@ -200,13 +203,13 @@ async fn create_key(
         .into_response())
 }
 
+/// Revoke an API key.
+///
+/// It stops working at once. Not with an API key.
 #[utoipa::path(
     delete,
     path = "/api-keys/{id}",
     tag = "Account",
-    operation_id = "revokeApiKey",
-    summary = "Revoke an API key",
-    description = "It stops working at once. Not with an API key.",
     params(("id" = Uuid, Path, description = "The key id")),
     responses(
         (status = 204, description = "Revoked"),
@@ -216,7 +219,7 @@ async fn create_key(
     ),
     security(("session" = [])),
 )]
-async fn revoke_key(
+async fn revoke_api_key(
     State(state): State<AppState>,
     SessionOnlyUser(user): SessionOnlyUser,
     Path(id): Path<Uuid>,

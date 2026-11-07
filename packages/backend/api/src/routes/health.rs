@@ -19,16 +19,13 @@ pub struct Health {
     pub db: String,
 }
 
-/// Liveness probe with a database round-trip, for the Docker healthcheck and
-/// load balancers. The body reports the two concerns separately; the HTTP
-/// status is 200 only when both are healthy (503 when the database is
-/// unreachable).
+/// Liveness probe with a database round-trip. The body reports the two
+/// concerns separately; the HTTP status is 200 only when both are healthy
+/// (503 when the database is unreachable).
 #[utoipa::path(
     get,
     path = "/health",
     tag = "System",
-    operation_id = "getHealth",
-    summary = "Liveness",
     responses(
         (status = 200, description = "Service and database are healthy", body = Health),
         (status = 503, description = "Database unreachable", body = Health)

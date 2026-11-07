@@ -111,8 +111,12 @@ real file; add one when you change how the pools are used.
 it** (nothing generated is committed; the server serves the spec only with
 `SWAGGER_UI=true`, at `/swagger-ui`):
 
-- Every handler has a `#[utoipa::path]` (path, method, `operation_id`,
-  tag, request body, every response including the errors, `security`) and
+- Every handler has a `#[utoipa::path]` (path, method, tag, request body,
+  every response including the errors, `security`) and a doc comment: its
+  first line is the operation's summary, the rest its description. The
+  operation id is the handler's name (`admin_list_users`), so handler names
+  are unique across the API and the SDK calls them in camelCase
+  (`adminListUsersOptions`). It
   is registered with `.routes(routes!(handler))` on the `OpenApiRouter` of
   its module's `router()` (utoipa-axum): the router is the one and only
   list, so a routed endpoint is documented and a documented one is routed

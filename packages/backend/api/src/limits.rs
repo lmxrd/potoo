@@ -2,12 +2,12 @@
 //! memory only (the address is never stored). The quotas are potoo's:
 //!
 //! - per email (lowercase) of a password sign-in: a burst of 5, then 1 a minute;
-//! - per client address (`TRUST_PROXY`-aware, see `routes::auth::client_ip`) of a password sign-in, the
+//! - per client address (`TRUST_PROXY`-aware, see `visitor::client_ip`) of a password sign-in, the
 //!   two-factor code step and two-factor setup at sign-in: a burst of 30, then 1 every 6 seconds;
 //! - per user, for two-factor codes (the code step, setup, and every settings action that checks a code)
 //!   and, separately, for password changes: a burst of 5, then 1 a minute.
 //!
-//! Over a limit the answer is 429 with `Retry-After` (seconds). `main` calls [`Limits::retain_recent`]
+//! Over a limit the answer is 429 with `Retry-After` (seconds). `jobs` calls [`Limits::retain_recent`]
 //! now and then, so keys that have refilled are forgotten and memory stays bounded.
 
 use std::num::NonZeroU32;

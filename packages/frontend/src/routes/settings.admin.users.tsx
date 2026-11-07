@@ -2,13 +2,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import {
-  changeUserRoleMutation,
-  createUserMutation,
-  deleteUserMutation,
-  listUsersOptions,
-  listUsersQueryKey,
-  resetUserPasswordMutation,
-  resetUserTotpMutation,
+  adminUpdateUserMutation,
+  adminCreateUserMutation,
+  adminDeleteUserMutation,
+  adminListUsersOptions,
+  adminListUsersQueryKey,
+  adminResetPasswordMutation,
+  adminResetTotpMutation,
 } from "potoo-sdk/react-query";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -29,14 +29,14 @@ function Users() {
   const passwordOptional = session.sso !== null;
   // With single sign-on only (OIDC_ONLY) there are no passwords at all.
   const passwords = session.password_login;
-  const { data: users, error } = useQuery(listUsersOptions());
+  const { data: users, error } = useQuery(adminListUsersOptions());
   const queryClient = useQueryClient();
-  const reload = () => queryClient.invalidateQueries({ queryKey: listUsersQueryKey() });
-  const createUser = useMutation({ ...createUserMutation(), meta: { inline: true } });
-  const changeRole = useMutation({ ...changeUserRoleMutation(), meta: { inline: true } });
-  const deleteUser = useMutation({ ...deleteUserMutation(), meta: { inline: true } });
-  const resetPassword = useMutation({ ...resetUserPasswordMutation(), meta: { inline: true } });
-  const resetTotp = useMutation({ ...resetUserTotpMutation(), meta: { inline: true } });
+  const reload = () => queryClient.invalidateQueries({ queryKey: adminListUsersQueryKey() });
+  const createUser = useMutation({ ...adminCreateUserMutation(), meta: { inline: true } });
+  const changeRole = useMutation({ ...adminUpdateUserMutation(), meta: { inline: true } });
+  const deleteUser = useMutation({ ...adminDeleteUserMutation(), meta: { inline: true } });
+  const resetPassword = useMutation({ ...adminResetPasswordMutation(), meta: { inline: true } });
+  const resetTotp = useMutation({ ...adminResetTotpMutation(), meta: { inline: true } });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [admin, setAdmin] = useState(false);

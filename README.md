@@ -477,6 +477,9 @@ Since 0.6:
   updating.
 - **The OpenAPI spec** is also published as `openapi.yaml` next to
   `openapi.json`, and `SWAGGER_UI=true` serves it at `/swagger-ui`.
+- **Operation ids are the handlers' names**, in snake_case (`getMe` is now
+  `me`, `listUsers` is `admin_list_users`). A client generated from the spec
+  gets new function names; the paths are unchanged.
 
 ## Contributing
 

@@ -35,9 +35,9 @@ pub fn router() -> OpenApiRouter<AppState> {
 /// Managing users, nested under /admin.
 pub fn admin_router() -> OpenApiRouter<AppState> {
     OpenApiRouter::new()
-        .routes(routes!(list_users, create_user))
-        .routes(routes!(change_role, delete_user))
-        .routes(routes!(reset_password))
+        .routes(routes!(admin_list_users, admin_create_user))
+        .routes(routes!(admin_update_user, admin_delete_user))
+        .routes(routes!(admin_reset_password))
 }
 
 /// A theme is one small JSON object — {"base": "light" | "dark",
@@ -188,13 +188,13 @@ async fn admin_count<'e>(db: impl SqliteExecutor<'e>) -> Result<i64, ApiError> {
     Ok(count)
 }
 
+/// How signing in works.
+///
+/// Whether the first admin still has to be created, and which ways in there are. Needs no session.
 #[utoipa::path(
     get,
     path = "/status",
     tag = "Auth",
-    operation_id = "getAuthStatus",
-    summary = "How signing in works",
-    description = "Whether the first admin still has to be created, and which ways in there are. Needs no session.",
     responses(
         (status = 200, description = "The sign-in status", body = AuthStatus),
     ),
@@ -209,12 +209,11 @@ async fn auth_status(State(state): State<AppState>) -> Result<Json<AuthStatus>, 
     }))
 }
 
+/// The signed-in user.
 #[utoipa::path(
     get,
     path = "/me",
     tag = "Account",
-    operation_id = "getMe",
-    summary = "The signed-in user",
     responses(
         (status = 200, description = "The signed-in user", body = User),
         (status = 401, description = "Not signed in", body = ErrorBody),
@@ -234,13 +233,13 @@ pub struct Credentials {
 }
 
 // Creates the admin. Only possible while there are no users at all.
+/// Create the first admin.
+///
+/// Only possible while there are no users. Signs the new admin in: the session cookie is set.
 #[utoipa::path(
     post,
     path = "/bootstrap",
     tag = "Auth",
-    operation_id = "bootstrap",
-    summary = "Create the first admin",
-    description = "Only possible while there are no users. Signs the new admin in: the session cookie is set.",
     request_body(content = Credentials, content_type = "application/json"),
     responses(
         (status = 201, description = "The admin was created and signed in", body = User),
@@ -279,13 +278,17 @@ async fn bootstrap(
     Ok((StatusCode::CREATED, jar, Json(user)).into_response())
 }
 
+/// Sign in.
+///
+/// Sets the session cookie. For a user with two-factor authentication on it answers `totp_required`
+/// instead, with a cookie good for five minutes: `/login/totp` with a code finishes the sign-in. With
+/// `TOTP_REQUIRED`, a user without it gets `totp_setup_required`: `/login/totp/setup` and
+/// `/login/totp/enable` set the app up and finish the sign-in. Every attempt counts: 5 per email, then
+/// 1 a minute, and 30 per address, then 1 every 6 seconds; over that, 429 with a Retry-After header.
 #[utoipa::path(
     post,
     path = "/login",
     tag = "Auth",
-    operation_id = "login",
-    summary = "Sign in",
-    description = "Sets the session cookie. For a user with two-factor authentication on it answers `totp_required` instead, with a cookie good for five minutes: `/login/totp` with a code finishes the sign-in. With `TOTP_REQUIRED`, a user without it gets `totp_setup_required`: `/login/totp/setup` and `/login/totp/enable` set the app up and finish the sign-in. Every attempt counts: 5 per email, then 1 a minute, and 30 per address, then 1 every 6 seconds; over that, 429 with a Retry-After header.",
     request_body(content = Credentials, content_type = "application/json"),
     responses(
         (status = 200, description = "The password is right; two-factor authentication is next", body = LoginStep),
@@ -369,12 +372,11 @@ pub struct LoginStep {
     pub totp_setup_required: bool,
 }
 
+/// Sign out.
 #[utoipa::path(
     post,
     path = "/logout",
     tag = "Auth",
-    operation_id = "logout",
-    summary = "Sign out",
     responses(
         (status = 204, description = "Signed out; the session cookie is cleared"),
     ),
@@ -385,13 +387,14 @@ async fn logout(mut auth: AuthSession) -> Result<Response, ApiError> {
 }
 
 // Change the signed-in user's own email and preferences.
+/// Change your own account.
+///
+/// The email, the date format, the time format and the theme. Each one that is sent changes, or none
+/// does.
 #[utoipa::path(
     patch,
     path = "/me",
     tag = "Account",
-    operation_id = "updateMe",
-    summary = "Change your own account",
-    description = "The email, the date format, the time format and the theme. Each one that is sent changes, or none does.",
     request_body(content = UpdateMe, content_type = "application/json"),
     responses(
         (status = 200, description = "The updated user", body = User),
@@ -472,13 +475,15 @@ async fn update_me(
 }
 
 // Change the signed-in user's own password, or set a first one.
+/// Change your own password.
+///
+/// The current password is required, except for a user who has none (single sign-on): they set a first
+/// one. The user's other sessions are signed out. Refused while password sign-in is turned off
+/// (`OIDC_ONLY`).
 #[utoipa::path(
     post,
     path = "/password",
     tag = "Account",
-    operation_id = "changePassword",
-    summary = "Change your own password",
-    description = "The current password is required, except for a user who has none (single sign-on): they set a first one. The user's other sessions are signed out. Refused while password sign-in is turned off (`OIDC_ONLY`).",
     request_body(content = ChangePassword, content_type = "application/json"),
     responses(
         (status = 204, description = "Changed"),
@@ -539,12 +544,11 @@ async fn change_password(
 }
 
 // Users: admin only. Everyone created here can be an admin or not.
+/// List the users.
 #[utoipa::path(
     get,
     path = "/users",
     tag = "Users",
-    operation_id = "listUsers",
-    summary = "List the users",
     responses(
         (status = 200, description = "All users, by id", body = Vec<UserRow>),
         (status = 401, description = "Not signed in", body = ErrorBody),
@@ -552,7 +556,7 @@ async fn change_password(
     ),
     security(("session" = []), ("api_key" = [])),
 )]
-async fn list_users(
+async fn admin_list_users(
     State(state): State<AppState>,
     user: CurrentUser,
 ) -> Result<Json<Vec<UserRow>>, ApiError> {
@@ -569,13 +573,14 @@ async fn list_users(
     Ok(Json(rows))
 }
 
+/// Create a user.
+///
+/// The password may be left out while single sign-on is on. With `OIDC_ONLY` no password is taken: the
+/// user signs in through the provider.
 #[utoipa::path(
     post,
     path = "/users",
     tag = "Users",
-    operation_id = "createUser",
-    summary = "Create a user",
-    description = "The password may be left out while single sign-on is on. With `OIDC_ONLY` no password is taken: the user signs in through the provider.",
     request_body(content = CreateUser, content_type = "application/json"),
     responses(
         (status = 201, description = "Created"),
@@ -587,7 +592,7 @@ async fn list_users(
     ),
     security(("session" = []), ("api_key" = [])),
 )]
-async fn create_user(
+async fn admin_create_user(
     State(state): State<AppState>,
     user: CurrentUser,
     ApiJson(body): ApiJson<CreateUser>,
@@ -630,13 +635,13 @@ async fn create_user(
 
 // Change the role of a user. The last admin cannot be demoted, so the
 // app always has at least one admin left.
+/// Change the role of a user.
+///
+/// The last admin cannot be demoted.
 #[utoipa::path(
     patch,
     path = "/users/{id}",
     tag = "Users",
-    operation_id = "changeUserRole",
-    summary = "Change the role of a user",
-    description = "The last admin cannot be demoted.",
     params(("id" = Uuid, Path, description = "The user id")),
     request_body(content = ChangeRole, content_type = "application/json"),
     responses(
@@ -650,7 +655,7 @@ async fn create_user(
     ),
     security(("session" = []), ("api_key" = [])),
 )]
-async fn change_role(
+async fn admin_update_user(
     State(state): State<AppState>,
     user: CurrentUser,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
@@ -680,13 +685,13 @@ async fn change_role(
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
+/// Delete a user.
+///
+/// The last admin cannot be deleted. Deleting a user that does not exist is not an error.
 #[utoipa::path(
     delete,
     path = "/users/{id}",
     tag = "Users",
-    operation_id = "deleteUser",
-    summary = "Delete a user",
-    description = "The last admin cannot be deleted. Deleting a user that does not exist is not an error.",
     params(("id" = Uuid, Path, description = "The user id")),
     responses(
         (status = 204, description = "Deleted"),
@@ -696,7 +701,7 @@ async fn change_role(
     ),
     security(("session" = []), ("api_key" = [])),
 )]
-async fn delete_user(
+async fn admin_delete_user(
     State(state): State<AppState>,
     user: CurrentUser,
     axum::extract::Path(id): axum::extract::Path<Uuid>,
@@ -726,13 +731,13 @@ async fn delete_user(
 
 // Admin sets a new password for a regular user. The admin account is
 // excluded here, like deletion: admins change their own via /password.
+/// Set a new password for a user.
+///
+/// Refused while password sign-in is turned off (`OIDC_ONLY`).
 #[utoipa::path(
     post,
     path = "/users/{id}/password",
     tag = "Users",
-    operation_id = "resetUserPassword",
-    summary = "Set a new password for a user",
-    description = "Refused while password sign-in is turned off (`OIDC_ONLY`).",
     params(("id" = Uuid, Path, description = "The user id")),
     request_body(content = ResetPassword, content_type = "application/json"),
     responses(
@@ -745,7 +750,7 @@ async fn delete_user(
     ),
     security(("session" = []), ("api_key" = [])),
 )]
-async fn reset_password(
+async fn admin_reset_password(
     State(state): State<AppState>,
     user: CurrentUser,
     axum::extract::Path(id): axum::extract::Path<Uuid>,

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { getMeOptions } from "potoo-sdk/react-query";
+import { meOptions } from "potoo-sdk/react-query";
 
 import { bucketLabel, chartLabel, formatDate, formatTime } from "./dates";
 
@@ -9,7 +9,7 @@ const DEFAULT_DATE_FORMAT = "YYYY-MM-DD";
 export function useFormatters() {
   // Only reads what the root route loaded (it fetches the user on every
   // navigation, and again after a settings change); never asks itself.
-  const { data: me } = useQuery({ ...getMeOptions(), enabled: false });
+  const { data: me } = useQuery({ ...meOptions(), enabled: false });
   const dateFormat = me?.date_format ?? DEFAULT_DATE_FORMAT;
   const use24 = me?.use_24 ?? true;
   return {

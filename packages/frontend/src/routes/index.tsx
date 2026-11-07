@@ -1,6 +1,6 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { getStatsOptions, listSitesOptions } from "potoo-sdk/react-query";
+import { statsOptions, listSitesOptions } from "potoo-sdk/react-query";
 import { DateRangeBar } from "../components/stats/date-range-bar";
 import { ErrorText } from "../components/common/error-text";
 import { SiteSelect } from "../components/stats/site-select";
@@ -46,7 +46,7 @@ function Overview() {
   const { data: stats, error: statsError } = useQuery({
     // The query never runs while the range is invalid (`enabled`), so the
     // empty one it is built from is never sent.
-    ...getStatsOptions({ query: params ?? { from: "", to: "" } }),
+    ...statsOptions({ query: params ?? { from: "", to: "" } }),
     enabled: params !== null,
     placeholderData: keepPreviousData,
   });

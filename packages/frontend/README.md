@@ -14,8 +14,8 @@ From the repository root, `mise run dev:frontend`, `check:frontend` and
 | `pnpm dev`   | Dev server at http://localhost:5173       |
 | `pnpm build` | Production build into `dist/`             |
 | `pnpm test`  | The Vitest unit tests                     |
-| `pnpm check` | oxfmt --check, oxlint and tsc (read-only) |
-| `pnpm fix`   | oxfmt and oxlint --fix                    |
+| `pnpm check` | tsc, oxlint and oxfmt --check (read-only) |
+| `pnpm fix`   | oxlint --fix and oxfmt                    |
 
 ## Layout
 
