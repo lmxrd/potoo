@@ -80,6 +80,23 @@ mod tests {
     }
 
     #[test]
+    fn every_tag_is_declared_and_used() {
+        let spec: serde_json::Value =
+            serde_json::from_str(&crate::routes::api_doc().to_pretty_json().unwrap()).unwrap();
+        let declared: BTreeSet<_> = spec["tags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tag| tag["name"].as_str().unwrap().to_string())
+            .collect();
+        let used: BTreeSet<_> = operations()
+            .iter()
+            .map(|(_, _, op)| op["tags"][0].as_str().unwrap().to_string())
+            .collect();
+        assert_eq!(declared, used);
+    }
+
+    #[test]
     fn operations_have_unique_ids_tags_and_summaries() {
         let operations = operations();
         let ids: BTreeSet<_> = operations

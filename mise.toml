@@ -1,7 +1,16 @@
-# Tool versions. Node and pnpm are read from the root package.json
-# (`devEngines.runtime` and `packageManager`), Rust from rust-toolchain.toml
-# (which rustup reads too): each version lives in one place. The Docker
-# image builds nothing (see the Dockerfile).
+# Tools and tasks for the whole monorepo, managed by mise (mise.jdx.dev): the
+# tool versions first, then the tasks (`mise run <task>`, or `mise r <task>`).
+
+# ---------------------------------------------------------------------------
+# Tools
+# ---------------------------------------------------------------------------
+
+# Node, pnpm and Rust are not here: their versions live where their own tools read them, and mise reads them
+# from there too (`idiomatic_version_file_enable_tools` below):
+#   node  -> package.json `devEngines.runtime` (mise reads only that, not `engines`)
+#   pnpm  -> package.json `packageManager`
+#   rust  -> rust-toolchain.toml (channel, components, the musl targets)
+# The Docker image builds nothing (see the Dockerfile).
 [settings]
 idiomatic_version_file_enable_tools = ["node", "pnpm", "rust"]
 
@@ -238,7 +247,7 @@ description = "Known vulnerabilities in an image's Alpine packages (Trivy): fixa
 run = 'trivy image --skip-version-check --exit-code 1 --severity HIGH,CRITICAL --ignore-unfixed "${IMAGE:-ghcr.io/lmxrd/potoo:latest}"'
 
 # ---------------------------------------------------------------------------
-# Data and manual tooling
+# Data and manual tasks
 # ---------------------------------------------------------------------------
 
 # Write load against the production image in a 2 CPU, 2 GB container; see
