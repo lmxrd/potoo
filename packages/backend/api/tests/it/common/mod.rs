@@ -2,9 +2,9 @@
 //! socket (the app reads the client's address from the connection), against
 //! an in-memory database.
 
+pub use api::{db, geo, oidc, sessions, state::AppState};
 pub use axum::http::Method;
 pub use axum_test::{TestResponse as Response, TestServer};
-pub use potoo::{app, db, geo, oidc, sessions, state::AppState};
 pub use serde_json::{Value, json};
 pub use std::sync::Arc;
 
@@ -42,7 +42,7 @@ pub struct Options {
     /// `PUBLIC_URL`; https makes every cookie Secure and `__Host-`.
     pub public_url: Option<String>,
     /// The login limits: large ones, but for the tests of the limits.
-    pub limits: potoo::limits::Limits,
+    pub limits: api::limits::Limits,
 }
 
 impl Default for Options {
@@ -51,16 +51,16 @@ impl Default for Options {
             oidc: oidc::Env::default(),
             totp_required: false,
             public_url: None,
-            limits: potoo::limits::Limits::generous(),
+            limits: api::limits::Limits::generous(),
         }
     }
 }
 
 pub async fn spawn(options: Options) -> TestApp {
-    potoo::install_tls_provider();
+    api::install_tls_provider();
     let db = db::open(":memory:").await;
     let state = AppState {
-        ingest: potoo::ingest::Ingest::spawn(db.clone()).0,
+        ingest: api::ingest::Ingest::spawn(db.clone()).0,
         oidc: Arc::new(oidc::Oidc::load(&db, options.oidc).await),
         db,
         geo: Arc::new(geo::Geo::open("/nonexistent/country.mmdb", geo::Source::Disabled).await),
@@ -73,11 +73,14 @@ pub async fn spawn(options: Options) -> TestApp {
         public_url: options.public_url,
         challenge_key: axum_extra::extract::cookie::Key::generate(),
         totp_required: options.totp_required,
-        swagger_ui: false,
     };
-    let server = TestServer::builder()
-        .http_transport()
-        .build(app(state).into_make_service_with_connect_info::<std::net::SocketAddr>());
+    let server = TestServer::builder().http_transport().build(
+        api::routes::api(state.clone())
+            .with_state(state)
+            .split_for_parts()
+            .0
+            .into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    );
     let base = server
         .server_address()
         .expect("an http transport")
@@ -362,7 +365,7 @@ pub mod provider {
                 None,
             )
             .unwrap();
-            let code = potoo::random::hex::<8>();
+            let code = api::random::hex::<8>();
             self.codes
                 .lock()
                 .unwrap()
@@ -571,8 +574,8 @@ pub async fn spawn_discovery(document: impl Fn(&str) -> String + Send + 'static)
 
 /// The code an authenticator app shows now, `offset` steps away.
 pub fn totp_code(secret: &str, offset: i64) -> String {
-    let step = (potoo::totp::current_step() as i64 + offset) as u64;
-    potoo::totp::code_at(secret, step).unwrap()
+    let step = (api::totp::current_step() as i64 + offset) as u64;
+    api::totp::code_at(secret, step).unwrap()
 }
 
 /// Sign in with a password: the response, and the cookie it set (the session,

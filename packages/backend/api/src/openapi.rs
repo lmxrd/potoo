@@ -63,28 +63,13 @@ impl Modify for SessionCookie {
     }
 }
 
-/// The document without paths: what the router starts from.
-pub fn base() -> utoipa::openapi::OpenApi {
-    ApiDoc::openapi()
-}
-
-/// The complete document: the base plus every routed endpoint.
-pub fn spec() -> utoipa::openapi::OpenApi {
-    crate::api().split_for_parts().1
-}
-
-/// The spec as pretty printed JSON.
-pub fn spec_json() -> String {
-    spec().to_pretty_json().expect("the spec serializes")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::collections::BTreeSet;
 
     fn operations() -> Vec<(String, String, serde_json::Value)> {
-        let spec: serde_json::Value = serde_json::from_str(&spec_json()).unwrap();
+        let spec: serde_json::Value =
+            serde_json::from_str(&crate::routes::api_doc().to_pretty_json().unwrap()).unwrap();
         let mut found = Vec::new();
         for (path, item) in spec["paths"].as_object().unwrap() {
             for (method, operation) in item.as_object().unwrap() {

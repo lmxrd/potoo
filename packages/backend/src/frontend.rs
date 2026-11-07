@@ -1,10 +1,13 @@
-//! The embedded frontend: the built files of `frontend/dist`, served with
-//! the cache policy they need, and the SPA fallback to index.html.
+//! Module of the *main binary only*: deliberately not part of the library,
+//! so the `specs` binary (and everything else that links the library) builds
+//! without the frontend bundle. Spec generation must never require a
+//! frontend build (see the `gen:spec` / `gen:sdk` mise tasks).
+//!
+//! The built files of `frontend/dist`, served with the cache policy they
+//! need, and the SPA fallback to index.html.
 
-use crate::state::AppState;
-use axum::Router;
-use axum::http::{HeaderMap, StatusCode, Uri, header};
-use axum::middleware::{self, Next};
+use axum::http::{StatusCode, Uri, header};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use rust_embed::RustEmbed;
 
@@ -12,24 +15,12 @@ use rust_embed::RustEmbed;
 /// debug builds, so a dev server needs no rebuild).
 #[derive(RustEmbed)]
 #[folder = "../frontend/dist"]
-// The spec build (the `specs` binary) happens before the frontend is
-// built, because the frontend is generated from the spec: it must compile
-// without `frontend/dist`. No other build may, or it would embed nothing.
-#[cfg_attr(feature = "spec", allow_missing = true)]
 struct Dist;
-
-/// Serve the frontend for every path the router does not handle itself,
-/// and make everything without its own cache policy answer no-cache.
-pub fn mount(router: Router<AppState>) -> Router<AppState> {
-    router
-        .fallback(static_handler)
-        .layer(middleware::from_fn(no_cache))
-}
 
 /// Everything without its own cache policy answers with no-cache, like
 /// the API responses and the shell; the hashed files under /assets are
 /// immutable.
-async fn no_cache(request: axum::extract::Request, next: Next) -> Response {
+pub async fn no_cache(request: axum::extract::Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     if response.headers().get(header::CACHE_CONTROL).is_none() {
         response
@@ -40,8 +31,9 @@ async fn no_cache(request: axum::extract::Request, next: Next) -> Response {
 }
 
 /// The embedded CSR frontend: static files, falling back to index.html
-/// for client routes.
-async fn static_handler(uri: Uri, _headers: HeaderMap) -> Response {
+/// for client routes (TanStack Router). Registered as the axum fallback, so
+/// it only sees requests that no API route matched.
+pub async fn handler(uri: Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
     let (file, cache) = if path.is_empty() {
         ("index.html", "no-cache")

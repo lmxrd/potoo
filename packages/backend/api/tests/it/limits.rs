@@ -6,7 +6,7 @@ use crate::common::*;
 async fn attempts_are_limited_per_email_address_and_user() {
     // The real limits: 5 per email, 30 per address, 5 codes per user.
     let app = spawn(Options {
-        limits: potoo::limits::Limits::default(),
+        limits: api::limits::Limits::default(),
         ..Options::default()
     })
     .await;

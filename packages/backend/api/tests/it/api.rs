@@ -478,7 +478,8 @@ async fn bots_and_dnt_are_not_recorded() {
 #[tokio::test]
 async fn every_documented_operation_is_routed() {
     let app = spawn_app().await;
-    let spec: Value = serde_json::from_str(&potoo::openapi::spec_json()).unwrap();
+    let spec: Value =
+        serde_json::from_str(&api::routes::api_doc().to_pretty_json().unwrap()).unwrap();
     let mut checked = 0;
     for (path, item) in spec["paths"].as_object().unwrap() {
         for method in item.as_object().unwrap().keys() {

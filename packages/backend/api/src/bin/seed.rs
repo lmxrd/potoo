@@ -6,8 +6,8 @@
 //!
 //!     mise run seed
 
+use api::db;
 use jiff::{Timestamp, tz::TimeZone};
-use potoo::db;
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
 use uuid::Uuid;
@@ -86,7 +86,7 @@ async fn main() -> anyhow::Result<()> {
     // Deterministic: the same seed gives the same data.
     let mut rng = StdRng::seed_from_u64(42);
 
-    let path = potoo::config::database_path().map_err(anyhow::Error::msg)?;
+    let path = api::config::database_path().map_err(anyhow::Error::msg)?;
     let db = db::open(&path).await;
     let pool = db.writer();
 

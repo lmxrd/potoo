@@ -13,6 +13,7 @@ frontend embedded in the one binary. The user documentation is the
 | `mise run gen:spec` | Write the OpenAPI spec to `target/specs/` (JSON and YAML) |
 | `mise run seed` | A year of demo data in `data/potoo.db` |
 
-`src/` holds the server (`routes/` the API), `migrations/` the schema (a
-new numbered file per change), `tests/it/` the integration tests (one file per area), and
-`examples/loadtest.rs` the load generator (`mise run loadtest`).
+A Cargo workspace: `src/` is the server binary (with the embedded frontend), and `api/` the library with
+everything else. In `api/`, `src/` holds the API (`routes/`), `migrations/` the schema (a new numbered file
+per change), `tests/it/` the integration tests (one file per area), and `examples/loadtest.rs` the load
+generator (`mise run loadtest`).

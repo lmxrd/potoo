@@ -10,16 +10,18 @@ what the backend's code must keep.
 Run them through mise from the repository root (`mise run check`,
 `mise run test:backend`, `mise run gen:spec`, `mise run seed`), or with
 cargo here once `packages/frontend/dist` exists (`mise run build:frontend`):
-`cargo test`, `cargo clippy --all-targets -- -D warnings`.
+`cargo test --workspace`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`.
 
 ## Structure
 
-- One crate, `potoo`: the library in `src/lib.rs` (the app: routes,
-  database, everything else), the server binary in `src/main.rs`, and the
-  `seed` and `specs` tools in `src/bin/` (not part of the release build).
-  `examples/loadtest.rs` is the load generator, `migrations/` the schema,
-  and `tests/it/` the integration tests (one binary, `main.rs` lists the
-  modules). CONTRIBUTING.md maps every file.
+- A Cargo workspace of two crates (shared dependency versions live in the root `Cargo.toml`'s
+  `[workspace.dependencies]`; a crate uses `dep.workspace = true` and adds only its own features):
+  - `potoo` (the root, `src/main.rs`, `src/frontend.rs`): the server binary, with the embedded frontend bundle
+    and swagger-ui.
+  - `api` (`api/`): the library with everything else (routes, database, jobs, ...), plus the `specs` and `seed`
+    binaries (not part of the release build), `examples/loadtest.rs` (the load generator), `migrations/` (the
+    schema) and `tests/it/` (the integration tests: one binary, `main.rs` lists the modules). Other `src/...`
+    paths in this file are inside `api/` unless said otherwise. CONTRIBUTING.md maps every file.
 - **rust-embed** needs `packages/frontend/dist` to exist to compile, even in
   debug (the mise tasks that compile the backend build the frontend first). Do
   not run raw `cargo` commands on a fresh checkout without `mise run
@@ -51,9 +53,9 @@ cargo here once `packages/frontend/dist` exists (`mise run build:frontend`):
   timestamps), plus `sites` and `q`; reuse `parse_range` /
   `range_and_filter`, do not invent a new syntax.
 - **Duplicated lists.** The date and time format lists are in
-  `packages/backend/src/auth.rs` (validation) and `packages/frontend/src/lib/dates.ts`
+  `packages/backend/api/src/auth.rs` (validation) and `packages/frontend/src/lib/dates.ts`
   (labels): change both together. So are the single sign-on error codes:
-  `Failure` in `packages/backend/src/oidc.rs` and `SSO_ERRORS` in
+  `Failure` in `packages/backend/api/src/oidc.rs` and `SSO_ERRORS` in
   `packages/frontend/src/routes/login.tsx`.
 
 **The database** (`db.rs`, sqlx, SQLite only):
@@ -74,7 +76,7 @@ cargo here once `packages/frontend/dist` exists (`mise run build:frontend`):
   filters, export) is wrapped in `sqlx::AssertSqlSafe` and is built only
   from fixed fragments and `?` placeholders; every value is bound. Keep it
   that way.
-- Schema changes are **new numbered files** in `packages/backend/migrations/`.
+- Schema changes are **new numbered files** in `packages/backend/api/migrations/`.
   Never edit one that has shipped (its checksum is recorded).
 - The site lookup and the daily salt are cached in `Database`. After any
   change to a site, call `db.forget_sites()`.
@@ -152,9 +154,9 @@ it** (nothing generated is committed; the server serves the spec only with
   renames what was stored under the old name.
 - Flags are booleans in both requests and responses (`is_admin`,
   `honor_dnt`), never 0/1.
-- The spec is written by the `specs` binary, built with `--features spec`,
-  which is the only build allowed to compile without `packages/frontend/dist`
-  (`allow_missing`). Never ship a `spec` build.
+- The spec is written by the `specs` binary of the `api` crate
+  (`routes::api_doc`, built with no state), which compiles without
+  `packages/frontend/dist`: only the server binary embeds the frontend.
 - The SDK, `packages/sdk` (the `potoo-sdk` workspace package), is generated
   by hey-api (`packages/sdk/openapi-ts.config.ts`: fetch client, TanStack
   Query, zod, with request/response validation) into `packages/sdk/src`,

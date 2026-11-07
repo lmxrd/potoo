@@ -122,7 +122,7 @@ struct Step {
 
 #[tokio::main]
 async fn main() {
-    potoo::install_tls_provider();
+    api::install_tls_provider();
     let args = args();
     let client = reqwest::Client::builder()
         .pool_max_idle_per_host(args.max_in_flight)

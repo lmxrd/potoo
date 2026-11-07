@@ -117,7 +117,7 @@ The environment variables are in the README's Configuration table.
   (the hit path, the database, sessions, single sign-on, two-factor, limits,
   CSRF, API keys, the OpenAPI spec), are in `packages/backend/AGENTS.md`.
 - **Tests:** unit tests next to the code, integration tests of the API on
-  axum-test (`packages/backend/tests/it/`, one file per area), Vitest for the frontend's
+  axum-test (`packages/backend/api/tests/it/`, one file per area), Vitest for the frontend's
   logic, and a few end-to-end smoke tests (`packages/e2e`) that a real
   browser runs against the built image.
 
@@ -137,7 +137,7 @@ Releases are automated (see CONTRIBUTING.md); never tag by hand.
 ## Manual tooling (not run by CI)
 
 `mise run loadtest` (`scripts/loadtest.sh`, `scripts/loadtest.Containerfile`,
-`packages/backend/examples/loadtest.rs`), `mise run build:profiling` and the
+`packages/backend/api/examples/loadtest.rs`), `mise run build:profiling` and the
 `profiling` cargo feature (per-phase timers, opt-in flamegraph) are
 **manual only**. Do not run the load test on your own: it builds images,
 starts containers and takes minutes. Run it only when the user asks.

@@ -48,7 +48,7 @@ types (tsc) for both projects. The tests come in three layers:
 
 - **Unit tests** next to the code (Rust `#[cfg(test)]`, and Vitest for the
   frontend's `src/lib`).
-- **Integration tests** of the API (`packages/backend/tests/it/`, one file per area, on
+- **Integration tests** of the API (`packages/backend/api/tests/it/`, one file per area, on
   axum-test, against an in-memory database): setup, login and its limits,
   two-factor, sessions, single sign-on with a stand-in provider, API keys,
   CSRF, users and the last-admin rules, sites, collection (bots and
@@ -72,40 +72,41 @@ package.json         the Node (devEngines.runtime) and pnpm (packageManager) ver
 rust-toolchain.toml  the Rust toolchain
 ```
 
-Inside the backend:
+Inside the backend, a Cargo workspace of two crates: the server binary `potoo` (the root) and the
+library `api` (`api/`) with everything else, so the library and the `specs` tool build without the frontend:
 
 ```
-src/main.rs          the `potoo` binary: env config, the background jobs, graceful stop, `potoo healthcheck`
-src/lib.rs           the app: the API routes plus the frontend (and `/swagger-ui` with SWAGGER_UI), and the TLS provider
-src/config.rs        settings read from the environment
-src/frontend.rs      the embedded frontend: static files, cache headers, the SPA fallback
-src/state.rs         the shared AppState
-src/error.rs         ApiError, answered as {"error": "..."}
-src/extract.rs       ApiJson: the JSON request body extractor
-src/db.rs            the SQLite pools (one writer, read-only readers), caches, migrations on startup
-src/ingest.rs        the hit queue and the batched writer
-src/jobs.rs          the background jobs: limits, expired sessions, retention, the GeoIP refresh, the checkpoint on stop
-src/profile.rs       per-phase timers, compiled in only with the profiling feature
-src/openapi.rs       the OpenAPI document: title, tags, the cookie scheme (paths come from the routers)
-src/auth.rs          password hashing, API keys, the signed-in user (CurrentUser, SessionOnlyUser), sha256_hex
-src/sessions.rs      the session store and signing in and out (axum-login on tower-sessions)
-src/csrf.rs          the cross-site request check (Fetch Metadata)
-src/limits.rs        the sign-in limits (governor)
-src/totp.rs          two-factor authentication: codes, the stored state, the signed challenge cookie
-src/oidc.rs          single sign-on: the settings (env over stored), the OIDC flow, the signed login cookie
-src/visitor.rs       user agent parsing, client IP, visitor hashes
-src/geo.rs           country lookup + the weekly DB-IP download
-src/stats.rs         ranges, chart buckets, the aggregations
-src/filter.rs        the RSQL filter subset the dashboard uses
-src/csv.rs           the CSV writer + the export download (the import reads CSV in routes/import.rs)
-src/tracker.rs       the tracker script and the pixel GIF
-src/time.rs          dates and times (jiff), stored as UTC text
-src/random.rs        random bytes for secrets (`random::hex`)
-src/routes/          the HTTP handlers, one module per area: auth (sign-in, your account, the admin's users), totp, api_keys, oidc (login, callback, admin settings), sites, stats, export, import, collect, health
-src/bin/             tools that are not part of the release build: `seed` (a year of demo data), `specs` (the OpenAPI spec)
-examples/            the load generator behind `mise run loadtest`
-migrations/          the schema, one numbered SQL file per change (sqlx migrations)
-tests/it/            the integration tests, one file per area (axum-test; common/ holds the shared helpers and a stand-in OpenID provider, its test keys in fixtures/)
+src/main.rs              the `potoo` binary: env config, swagger-ui (SWAGGER_UI), the background jobs, graceful stop, `potoo healthcheck`
+src/frontend.rs          the embedded frontend bundle (only this binary needs `packages/frontend/dist`): static files, cache headers, the SPA fallback
+api/src/lib.rs           the `api` library crate the server and the tools share, and the TLS provider
+api/src/config.rs        settings read from the environment
+api/src/state.rs         the shared AppState
+api/src/error.rs         ApiError, answered as {"error": "..."}
+api/src/extract.rs       ApiJson: the JSON request body extractor
+api/src/db.rs            the SQLite pools (one writer, read-only readers), caches, migrations on startup
+api/src/ingest.rs        the hit queue and the batched writer
+api/src/jobs.rs          the background jobs: limits, expired sessions, retention, the GeoIP refresh, the checkpoint on stop
+api/src/profile.rs       per-phase timers, compiled in only with the profiling feature
+api/src/openapi.rs       the OpenAPI document: title, tags, the cookie scheme (paths come from the routers)
+api/src/auth.rs          password hashing, API keys, the signed-in user (CurrentUser, SessionOnlyUser), sha256_hex
+api/src/sessions.rs      the session store and signing in and out (axum-login on tower-sessions)
+api/src/csrf.rs          the cross-site request check (Fetch Metadata)
+api/src/limits.rs        the sign-in limits (governor)
+api/src/totp.rs          two-factor authentication: codes, the stored state, the signed challenge cookie
+api/src/oidc.rs          single sign-on: the settings (env over stored), the OIDC flow, the signed login cookie
+api/src/visitor.rs       user agent parsing, client IP, visitor hashes
+api/src/geo.rs           country lookup + the weekly DB-IP download
+api/src/stats.rs         ranges, chart buckets, the aggregations
+api/src/filter.rs        the RSQL filter subset the dashboard uses
+api/src/csv.rs           the CSV writer + the export download (the import reads CSV in routes/import.rs)
+api/src/tracker.rs       the tracker script and the pixel GIF
+api/src/time.rs          dates and times (jiff), stored as UTC text
+api/src/random.rs        random bytes for secrets (`random::hex`)
+api/src/routes/          the HTTP handlers, one module per area (`routes::api` puts them together with their layers, `routes::api_doc` is their OpenAPI document): auth (sign-in, your account, the admin's users), totp, api_keys, oidc (login, callback, admin settings), sites, stats, export, import, collect, health
+api/src/bin/             tools that are not part of the release build: `seed` (a year of demo data), `specs` (the OpenAPI spec)
+api/examples/            the load generator behind `mise run loadtest`
+api/migrations/          the schema, one numbered SQL file per change (sqlx migrations)
+api/tests/it/            the integration tests, one file per area (axum-test; common/ holds the shared helpers and a stand-in OpenID provider, its test keys in fixtures/)
 ```
 
 Inside the frontend's `src/`: `routes/` (the dashboard, the sites table, a
@@ -130,7 +131,7 @@ TanStack Query and zod; it is not committed.
 
 ## Changing the schema
 
-Add a new numbered file to `packages/backend/migrations/` (`0007_what_it_does.sql`).
+Add a new numbered file to `packages/backend/api/migrations/` (`0007_what_it_does.sql`).
 It is applied, in order, when the server or the seed starts, and recorded in
 the `_sqlx_migrations` table. Never edit a migration that has shipped: its
 checksum is recorded, and a changed file stops the server from starting.

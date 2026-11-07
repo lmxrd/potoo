@@ -131,7 +131,7 @@ frontend is embedded in it. To run from source instead: `mise run start`.
 | `GEOIP_URL`          | unset               | Override the download URL, e.g. your own mirror. Empty string disables downloading; a missing file then leaves country empty                |
 | `PUBLIC_URL`         | unset               | The address Potoo is reached at, e.g. `https://stats.example.com`. https makes every cookie `Secure` and `__Host-`; it is also the only origin changes are taken from, and single sign-on's callback is under it. Unset (local use): plain cookies, the request's own host |
 | `TRUST_PROXY`        | `false`             | `true` to read the client IP from `X-Forwarded-For` (behind a reverse proxy)                                                               |
-| `RUST_LOG`           | `info`              | What is logged, e.g. `debug` or `potoo=debug,tower_http=info`                                                                              |
+| `RUST_LOG`           | `info`              | What is logged, e.g. `debug` or `api=debug,tower_http=info`                                                                              |
 | `RETENTION_DAYS`     | unset               | Delete hits older than this                                                                                                                 |
 | `OIDC_ISSUER`        | unset               | Single sign-on: the provider's issuer URL (`https://`). With `OIDC_CLIENT_ID`, turns single sign-on on; see [Single sign-on](#single-sign-on) |
 | `OIDC_CLIENT_ID`     | unset               | Single sign-on: the client id registered with the provider                                                                                  |
