@@ -1,8 +1,18 @@
+//! The Potoo server: the API (the `api` crate) with the embedded frontend
+//! and, with `SWAGGER_UI` set, swagger-ui at `/swagger-ui`.
+//!
+//! Commands: `potoo` serves; `potoo healthcheck` asks the running server's
+//! health endpoint.
+
+// The embedded frontend bundle: a module of this binary, not the library,
+// so spec generation (`mise run gen:spec`) never requires a built frontend.
+mod frontend;
+
 use anyhow::Context;
-use potoo::{app, db, geo, state::AppState};
+use api::{db, geo, routes, state::AppState};
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Duration;
+use utoipa_swagger_ui::SwaggerUi;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -23,13 +33,15 @@ async fn main() -> anyhow::Result<()> {
     // The binary is built for musl (the Docker image is Alpine), so the
     // TLS stack is ring rather than aws-lc; reqwest is built without a
     // provider and uses this default one.
-    potoo::install_tls_provider();
+    api::install_tls_provider();
+    // The dummy password hash is made now, so the first sign-in it serves is not slower.
+    api::auth::warm_up();
 
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(8000);
-    let db_path = potoo::config::database_path().map_err(anyhow::Error::msg)?;
+    let db_path = api::config::database_path().map_err(anyhow::Error::msg)?;
     let geo_path = std::env::var("GEOIP_DB_PATH").unwrap_or_else(|_| "data/country.mmdb".into());
     // Set GEOIP_URL to another URL, or to an empty string to never
     // download anything.
@@ -43,16 +55,16 @@ async fn main() -> anyhow::Result<()> {
     let synchronous =
         std::env::var("SQLITE_SYNCHRONOUS").unwrap_or_else(|_| db::DEFAULT_SYNCHRONOUS.into());
     let db = db::open_with(&db_path, &synchronous).await;
-    let (ingest, writer) = potoo::ingest::Ingest::spawn(db.clone());
+    let (ingest, writer) = api::ingest::Ingest::spawn(db.clone());
     let geo = Arc::new(geo::Geo::open(&geo_path, geo_source).await);
-    let public_url = potoo::config::public_url();
-    let limits = Arc::new(potoo::limits::Limits::default());
+    let public_url = api::config::public_url();
+    let limits = Arc::new(api::limits::Limits::default());
     let state = AppState {
         db: db.clone(),
         ingest,
-        geo: geo.clone(),
+        geo,
         trust_proxy: env_flag("TRUST_PROXY")?,
-        limits: limits.clone(),
+        limits,
         secure_cookies: public_url
             .as_deref()
             .is_some_and(|u| u.starts_with("https://")),
@@ -61,37 +73,11 @@ async fn main() -> anyhow::Result<()> {
         // Single sign-on: the stored settings, with the OIDC_* environment
         // variables on top.
         oidc: Arc::new(
-            potoo::oidc::Oidc::load(
-                &db,
-                potoo::oidc::Env::from_env().map_err(anyhow::Error::msg)?,
-            )
-            .await,
+            api::oidc::Oidc::load(&db, api::oidc::Env::from_env().map_err(anyhow::Error::msg)?)
+                .await,
         ),
         totp_required: env_flag("TOTP_REQUIRED")?,
     };
-
-    // The login limits forget the keys that are back to their full quota.
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(600)).await;
-            limits.forget_idle();
-        }
-    });
-
-    // Expired sessions are deleted every hour (a session past its expiry
-    // is refused anyway: this only keeps the table small).
-    {
-        use tower_sessions::ExpiredDeletion;
-        let store = potoo::session::Store::new(db.clone());
-        tokio::spawn(async move {
-            loop {
-                if let Err(e) = store.delete_expired().await {
-                    tracing::warn!("cannot delete the expired sessions: {e}");
-                }
-                tokio::time::sleep(Duration::from_secs(3_600)).await;
-            }
-        });
-    }
 
     // With OIDC_ONLY and no provider, nobody can sign in (but the first
     // admin on /setup, who can then set the provider up): say so.
@@ -107,27 +93,10 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .and_then(|days| days.parse::<i64>().ok())
         .filter(|&days| days > 0);
-    if let Some(retention) = retention {
-        let db = db.clone();
-        purge(&db, retention).await;
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(Duration::from_secs(6 * 3_600)).await;
-                purge(&db, retention).await;
-            }
-        });
-    }
-
-    // While running, refresh the GeoIP database once a week.
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(geo::REFRESH_PERIOD).await;
-            geo.refresh().await;
-        }
-    });
+    api::jobs::spawn(&state, retention);
 
     #[cfg(feature = "profiling")]
-    potoo::profile::spawn_reporter();
+    api::profile::spawn_reporter();
     // The flamegraph is opt-in, so the phase timers can run without it.
     #[cfg(feature = "profiling")]
     let flamegraph = std::env::var("PROFILE_FLAMEGRAPH").ok().map(|out| {
@@ -141,21 +110,43 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(feature = "profiling")]
     let flamegraph = flamegraph.transpose()?;
 
+    let (router, openapi) = routes::api(state.clone())
+        .with_state(state.clone())
+        .split_for_parts();
+    // The API's description (swagger-ui) is served only when asked for (`SWAGGER_UI`).
+    let swagger_ui = env_flag("SWAGGER_UI")?;
+    let app = if swagger_ui {
+        router.merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", openapi))
+    } else {
+        router
+    };
+    let app = app
+        // Everything the API does not match is served from the embedded
+        // frontend bundle, falling back to index.html for SPA routes.
+        .fallback(frontend::handler)
+        .layer(axum::middleware::from_fn(frontend::no_cache))
+        .layer(tower_http::trace::TraceLayer::new_for_http());
+
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port))
         .await
         .with_context(|| format!("cannot listen on {port}"))?;
-    println!("potoo listening on http://0.0.0.0:{port}");
+    if swagger_ui {
+        tracing::info!("listening on http://0.0.0.0:{port} (swagger-ui at /swagger-ui)");
+    } else {
+        tracing::info!("listening on http://0.0.0.0:{port}");
+    }
     // On SIGINT or SIGTERM the server stops accepting, finishes the requests
     // in flight, and the writer then drains the queue: no accepted hit is
     // lost to a clean stop (`docker stop`, a deploy).
     axum::serve(
         listener,
-        app(state).into_make_service_with_connect_info::<SocketAddr>(),
+        app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(stop_signal())
     .await
     .context("the server failed")?;
     writer.await.context("the writer failed")?;
+    api::jobs::checkpoint(&db).await;
     db.close().await;
     #[cfg(feature = "profiling")]
     if let Some((profiler, out)) = &flamegraph {
@@ -167,7 +158,7 @@ async fn main() -> anyhow::Result<()> {
 /// A yes or no environment variable: unset or empty is no, and a value
 /// that is not understood stops the start rather than quietly meaning no.
 fn env_flag(name: &str) -> anyhow::Result<bool> {
-    Ok(potoo::config::flag(name)
+    Ok(api::config::flag(name)
         .map_err(anyhow::Error::msg)?
         .unwrap_or(false))
 }
@@ -187,25 +178,12 @@ fn write_profile(profiler: &pprof::ProfilerGuard<'_>, out: &str) {
     match profiler.report().build() {
         Ok(report) => match std::fs::File::create(out) {
             Ok(file) => match report.flamegraph(file) {
-                Ok(()) => println!("flamegraph written to {out}"),
-                Err(e) => eprintln!("cannot write the flamegraph: {e}"),
+                Ok(()) => tracing::info!("flamegraph written to {out}"),
+                Err(e) => tracing::error!("cannot write the flamegraph: {e}"),
             },
-            Err(e) => eprintln!("cannot create {out}: {e}"),
+            Err(e) => tracing::error!("cannot create {out}: {e}"),
         },
-        Err(e) => eprintln!("cannot build the profile: {e}"),
-    }
-}
-
-async fn purge(db: &db::Db, retention_days: i64) {
-    let cutoff = potoo::auth::iso(
-        std::time::SystemTime::now() - Duration::from_secs(retention_days as u64 * 86_400),
-    );
-    if let Err(e) = sqlx::query("DELETE FROM hits WHERE created_at < ?1")
-        .bind(cutoff)
-        .execute(db.writer())
-        .await
-    {
-        eprintln!("retention purge failed: {e}");
+        Err(e) => tracing::error!("cannot build the profile: {e}"),
     }
 }
 

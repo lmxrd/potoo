@@ -5,20 +5,20 @@ import {
   deleteSiteMutation,
   getSiteOptions,
   getSiteQueryKey,
-  getStatsOptions,
+  statsOptions,
   updateSiteMutation,
 } from "potoo-sdk/react-query";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { DateRangeBar } from "../components/date-range-bar";
-import { ErrorText } from "../components/error-text";
-import { StatsDashboard } from "../components/stats-dashboard";
+import { DateRangeBar } from "../components/stats/date-range-bar";
+import { ErrorText } from "../components/common/error-text";
+import { StatsDashboard } from "../components/stats/stats-dashboard";
 import { errorMessage } from "../lib/api";
 import { exportHref, statsQuery } from "../lib/stats-query";
 import { buildFilter, useDashboardFilters } from "../lib/filter";
 import { useDateRange, validateDashboardSearch } from "../lib/date-range";
 import { Checkbox } from "../components/ui/checkbox";
-import { useConfirm } from "../components/confirm";
+import { useConfirm } from "../components/common/confirm-dialog";
 import { trackingSnippet } from "../lib/snippet";
 
 export const Route = createFileRoute("/sites_/$siteId")({
@@ -43,12 +43,12 @@ function SitePage() {
   const { data: stats, error: statsError } = useQuery({
     // The query never runs while the range is invalid (`enabled`), so the
     // empty one it is built from is never sent.
-    ...getStatsOptions({ query: params ?? { from: "", to: "" } }),
+    ...statsOptions({ query: params ?? { from: "", to: "" } }),
     enabled: params !== null,
     placeholderData: keepPreviousData,
   });
-  const updateSite = useMutation(updateSiteMutation());
-  const deleteSite = useMutation(deleteSiteMutation());
+  const updateSite = useMutation({ ...updateSiteMutation(), meta: { inline: true } });
+  const deleteSite = useMutation({ ...deleteSiteMutation(), meta: { inline: true } });
   const reloadSite = () =>
     queryClient.invalidateQueries({ queryKey: getSiteQueryKey({ path: { id: siteId } }) });
 
@@ -63,8 +63,6 @@ function SitePage() {
         range={range}
         onRange={setRange}
         stats={stats}
-        dateFormat={session.user?.date_format}
-        use24={session.user?.use_24}
         filters={filters}
         onFilters={setFilters}
         exportUrl={params ? exportHref(params) : undefined}
@@ -72,13 +70,7 @@ function SitePage() {
 
       <ErrorText>{statsError && errorMessage(statsError)}</ErrorText>
       {stats ? (
-        <StatsDashboard
-          stats={stats}
-          dateFormat={session.user?.date_format}
-          use24={session.user?.use_24}
-          filters={filters}
-          onToggleFilter={toggle}
-        />
+        <StatsDashboard stats={stats} filters={filters} onToggleFilter={toggle} />
       ) : (
         !statsError && <p className="text-muted-foreground">Loading…</p>
       )}

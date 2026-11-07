@@ -23,7 +23,7 @@ backend).
 | -------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | `mise run dev`             | Runs the backend and the frontend (Vite) together                                                              |
 | `mise run start`           | Builds, then runs the server (never a stale binary)                                                            |
-| `mise run gen:spec`        | Writes the OpenAPI spec to `packages/backend/target/specs/openapi.json`                                                 |
+| `mise run gen:spec`        | Writes the OpenAPI spec to `packages/backend/target/specs/` (JSON and YAML)                                             |
 | `mise run gen:sdk`      | Generates the frontend API client from the spec (`packages/sdk/src`, not committed)                         |
 | `mise run build`           | Builds the frontend and the release binary for this machine, copied to `dist/potoo`                            |
 | `mise run build:linux`     | The static Linux binary the image copies, `dist/potoo-linux-<arch>` (zig cross-compiles; `ARCH=amd64`/`arm64`) |
@@ -48,7 +48,7 @@ types (tsc) for both projects. The tests come in three layers:
 
 - **Unit tests** next to the code (Rust `#[cfg(test)]`, and Vitest for the
   frontend's `src/lib`).
-- **Integration tests** of the API (`packages/backend/tests/api.rs`, on
+- **Integration tests** of the API (`packages/backend/api/tests/it/`, one file per area, on
   axum-test, against an in-memory database): setup, login and its limits,
   two-factor, sessions, single sign-on with a stand-in provider, API keys,
   CSRF, users and the last-admin rules, sites, collection (bots and
@@ -56,18 +56,82 @@ types (tsc) for both projects. The tests come in three layers:
 - **End-to-end smoke tests** (`packages/e2e`, Playwright): a few flows a
   real browser runs against the built image. CI runs all three.
 
+## The repository
+
+The JavaScript side is a pnpm workspace with one lockfile at the root.
+
+```
+packages/backend/    the Rust server: axum, utoipa (OpenAPI) and sqlx on SQLite
+packages/frontend/   the React app (Vite, TanStack Router and Query, Tailwind)
+packages/sdk/        the frontend's API client, generated from the OpenAPI spec (hey-api; gitignored, never edited)
+packages/e2e/        the end-to-end smoke tests (Playwright), run against the built image
+scripts/             the Linux build, the end-to-end run (e2e.sh), the load test and its generator image
+.github/             CI, the release workflow, Dependabot and the security scans
+mise.toml            the tools (other than Node, pnpm, Rust) and every task
+package.json         the Node (devEngines.runtime) and pnpm (packageManager) versions
+rust-toolchain.toml  the Rust toolchain
+```
+
+Inside the backend, a Cargo workspace of two crates: the server binary `potoo` (the root) and the
+library `api` (`api/`) with everything else, so the library and the `specs` tool build without the frontend:
+
+```
+src/main.rs              the `potoo` binary: env config, swagger-ui (SWAGGER_UI), the background jobs, graceful stop, `potoo healthcheck`
+src/frontend.rs          the embedded frontend bundle (only this binary needs `packages/frontend/dist`): static files, cache headers, the SPA fallback
+api/src/lib.rs           the `api` library crate the server and the tools share, and the TLS provider
+api/src/config.rs        settings read from the environment
+api/src/state.rs         the shared AppState
+api/src/error.rs         ApiError, answered as {"error": "..."}
+api/src/extract.rs       ApiJson: the JSON request body extractor
+api/src/db.rs            the SQLite pools (one writer, read-only readers), caches, migrations on startup
+api/src/ingest.rs        the hit queue and the batched writer
+api/src/jobs.rs          the background jobs: limits, expired sessions, retention, the GeoIP refresh, the checkpoint on stop
+api/src/profile.rs       per-phase timers, compiled in only with the profiling feature
+api/src/openapi.rs       the OpenAPI document: title, tags, the cookie scheme (paths come from the routers)
+api/src/auth.rs          password hashing, API keys, the signed-in user (CurrentUser, SessionOnlyUser), sha256_hex
+api/src/sessions.rs      the session store and signing in and out (axum-login on tower-sessions)
+api/src/csrf.rs          the cross-site request check (Fetch Metadata)
+api/src/limits.rs        the sign-in limits (governor)
+api/src/totp.rs          two-factor authentication: codes, the stored state, the signed challenge cookie
+api/src/oidc.rs          single sign-on: the settings (env over stored), the OIDC flow, the signed login cookie
+api/src/visitor.rs       user agent parsing, client IP, visitor hashes
+api/src/geo.rs           country lookup + the weekly DB-IP download
+api/src/stats.rs         ranges, chart buckets, the aggregations
+api/src/filter.rs        the RSQL filter subset the dashboard uses
+api/src/csv.rs           the CSV writer + the export download (the import reads CSV in routes/import.rs)
+api/src/tracker.rs       the tracker script and the pixel GIF
+api/src/time.rs          dates and times (jiff), stored as UTC text
+api/src/random.rs        random bytes for secrets (`random::hex`)
+api/src/routes/          the HTTP handlers, one module per area (`routes::api` puts them together with their layers, `routes::api_doc` is their OpenAPI document): auth (sign-in, your account, the admin's users), totp, api_keys, oidc (login, callback, admin settings), sites, stats, export, import, collect, health
+api/src/bin/             tools that are not part of the release build: `seed` (a year of demo data), `specs` (the OpenAPI spec)
+api/examples/            the load generator behind `mise run loadtest`
+api/migrations/          the schema, one numbered SQL file per change (sqlx migrations)
+api/tests/it/            the integration tests, one file per area (axum-test; common/ holds the shared helpers and a stand-in OpenID provider, its test keys in fixtures/)
+```
+
+Inside the frontend's `src/`: `routes/` (the dashboard, the sites table, a
+site's page, the import, sign-in and setup, and the settings with the admin
+pages under `settings.admin.*`), `components/` (the UI, grouped by feature),
+and `lib/` (error messages, ranges, filters, date formatting, themes).
+
+Each stack has its own `AGENTS.md` with the detailed conventions: read
+[the backend's](packages/backend/AGENTS.md) and
+[the frontend's](packages/frontend/AGENTS.md) before a larger change.
+
 ## The API and its spec
 
 Every endpoint is documented in code: a `#[utoipa::path]` on the handler, named
 request and response structs with `ToSchema`, and the handler registered with
 `routes!` on its module's `OpenApiRouter` (utoipa-axum), which is both the route
-and the spec entry, so the two cannot drift. The spec is written to `packages/backend/target/specs/openapi.json` by `mise run gen:spec` and is
-not served. The frontend's client is generated from it (`mise run gen:sdk`)
-with hey-api, and uses TanStack Query and zod; it is not committed.
+and the spec entry, so the two cannot drift. `mise run gen:spec` writes the spec
+to `packages/backend/target/specs/` (`openapi.json` and `openapi.yaml`); the
+server serves it only with `SWAGGER_UI=true`, at `/swagger-ui`. The frontend's
+client is generated from it (`mise run gen:sdk`) with hey-api, and uses
+TanStack Query and zod; it is not committed.
 
 ## Changing the schema
 
-Add a new numbered file to `packages/backend/migrations/` (`0003_what_it_does.sql`).
+Add a new numbered file to `packages/backend/api/migrations/` (`0007_what_it_does.sql`).
 It is applied, in order, when the server or the seed starts, and recorded in
 the `_sqlx_migrations` table. Never edit a migration that has shipped: its
 checksum is recorded, and a changed file stops the server from starting.
@@ -76,42 +140,6 @@ SQLite cannot change a column: a change like that rebuilds the table, with
 foreign keys off, or `ON DELETE CASCADE` empties the tables that point at it.
 `0002_oidc.sql` shows how (`-- no-transaction`, then its own transaction), and
 `db.rs` has a test that runs it on a real file with data in it.
-
-## The code
-
-```
-packages/backend/src/main.rs        entrypoint: env config, geo refresh, retention, graceful stop
-packages/backend/src/lib.rs         the app: the API routes plus the frontend, and the TLS provider
-packages/backend/src/frontend.rs    the embedded frontend: static files, cache headers, the SPA fallback
-packages/backend/src/state.rs       the shared AppState
-packages/backend/src/error.rs       HttpError, answered as {"error": "..."}
-packages/backend/src/extract.rs     ApiJson: the JSON request body extractor
-packages/backend/src/db.rs          the SQLite pools (one writer, read-only readers), caches, migrations on startup
-packages/backend/src/ingest.rs      the hit queue and the batched writer
-packages/backend/src/profile.rs     per-phase timers, compiled in only with the profiling feature
-packages/backend/src/openapi.rs     the OpenAPI document: title, tags, the cookie scheme (paths come from the routers)
-packages/backend/src/bin/openapi.rs writes the spec to a file (`mise run gen:spec`)
-packages/backend/migrations/        the schema, one numbered SQL file per change (sqlx migrations)
-packages/backend/src/auth.rs        password hashing, API keys
-packages/backend/src/oidc.rs        single sign-on: the settings (env over stored), the OIDC flow, the signed login cookie
-packages/backend/src/visitor.rs     user agent parsing, client IP, visitor hashes
-packages/backend/src/geo.rs         country lookup + the weekly DB-IP download
-packages/backend/src/stats.rs       ranges, chart buckets, the aggregations
-packages/backend/src/filter.rs      the RSQL filter subset the dashboard uses
-packages/backend/src/csv.rs         the CSV writer + the export download (the import reads CSV in routes/import.rs)
-packages/backend/src/tracker.rs     the tracker script and the pixel GIF
-packages/backend/src/util.rs        sha256 and random hex helpers
-packages/backend/src/routes/        auth, users, oidc (login, callback, admin settings), sites, stats, export, import, collect
-packages/backend/src/bin/seed.rs    a year of demo data, for development
-packages/backend/examples/          the load generator behind `mise run loadtest`
-packages/backend/tests/api.rs       the integration tests (axum-test; a stand-in OpenID provider, its test keys in tests/fixtures/)
-scripts/                            the Linux build, the end-to-end run (e2e.sh), the load test and its generator image
-packages/e2e/                       the end-to-end smoke tests (Playwright)
-packages/frontend/src/routes/       dashboard, sites table, site page, admin settings (users.tsx), settings
-packages/frontend/src/components/   the shared UI pieces
-packages/sdk/src/       the generated API client (hey-api; gitignored, never edited)
-packages/frontend/src/lib/          error messages, ranges, filters, date formatting
-```
 
 ## The rules a change must keep
 
@@ -134,43 +162,52 @@ not a change we can take. Concretely:
   their file ending (`/tracker.js`); everything that writes to the
   database or processes anything lives under `/api/`.
 - **One shared range spec.** Every endpoint that filters by time takes
-  the same params — `range` as an ISO 8601 duration, or `from`/`to` as
-  ISO timestamps, plus `sites` and the `q` filter — parsed by the same
-  code in `stats.rs` and `routes/sites.rs`. Add a new time-filtered
+  the same params — `from`/`to` as ISO 8601 timestamps, plus `sites` and
+  the `q` filter — parsed by the same code (`parse_range` in `stats.rs`,
+  `range_and_filter` in `routes/sites.rs`). Add a new time-filtered
   endpoint by reusing them, not by inventing a new syntax.
 - **Keep it simple.** SQLite through sqlx with run-time queries (one
   writer connection, read-only readers), no ORM, no abstraction layers.
-- **Prefer a well-known crate to our own code.** When a maintained,
-  widely used crate or npm package solves the problem, use it instead of
-  writing the same thing; propose it in the pull request (or an issue
-  first) with its name, version and why. Write it yourself only when
-  nothing maintained fits, and say why in a comment.
+- **Use what the community maintains.** Prefer a well-known, maintained
+  crate or npm package over writing the same thing ourselves. Propose it in
+  the issue or pull request (name, exact version, why) and get a
+  maintainer's approval before adding it. Write it ourselves only when no
+  maintained one fits, and say why in a comment where it lives.
 - **Comment the why, not the what** — the reasoning behind a decision
   is the part the code cannot show.
 
-## Releasing
+## Pull requests, commits and releases
+
+Small commits, one logical change each, with a conventional message. The
+backend and the frontend are separately checkable (`mise run check:backend`,
+`mise run check:frontend`) — a change that only touches one should not
+leave the other dirty.
 
 Releases are automated with [release-please](https://github.com/googleapis/release-please),
 driven by the commit messages on `main`. Write them as
 [Conventional Commits](https://www.conventionalcommits.org): `feat:` bumps
-the minor version, `fix:` the patch, `feat!:` (or a `BREAKING CHANGE:`
-footer) the major; `ci:`, `chore:`, `docs:` and the like release nothing.
+the minor version, `fix:` the patch, and `feat!:` (or a `BREAKING CHANGE:`
+footer) the major. `ci:`, `chore:`, `docs:` and the like release nothing.
 
-1. Every push to `main` updates one open "release PR": the version in
-   `packages/backend/Cargo.toml`, `packages/backend/Cargo.lock` and `packages/frontend/package.json`,
-   and the changelog.
-2. Merge that PR when you want to ship. The release (tag `v1.2.3`) is
-   created, and the release workflow builds the Linux binaries (static
-   musl, and glibc suffixed `-gnu`, for amd64 and arm64) and attaches them,
-   and pushes the multi-arch image as `1.2.3`, `1.2` and `latest`.
-
-The commit that lands on `main` is what counts, and pull requests are
-squash merged with the pull request's title as the message. So **the title of
-a pull request must be a Conventional Commit** (`feat: ...`, `fix(auth): ...`),
-not the branch name GitHub fills in; a `PR title` check fails the pull request
-otherwise. A merge commit that is not conventional is skipped by
-release-please: nothing is released for it, and the log says "commit could
+Pull requests are squash merged with the pull request's title as the commit
+message, so **the title must be a Conventional Commit** (`feat: add ...`,
+`fix(auth): ...`), not the branch name GitHub fills in. A `PR title` check fails
+the pull request otherwise, and release-please skips a commit that is not
+conventional: nothing is released for it, and the log says "commit could
 not be parsed".
+
+Every push to `main` updates one open release PR with the version bump in
+`packages/backend/Cargo.toml` and `Cargo.lock`, `packages/frontend/package.json`,
+`packages/sdk/package.json` and `packages/e2e/package.json`, plus the
+changelog. Merging it tags the release (`v1.2.3`), and the release workflow:
+
+- builds the static Linux binaries for `amd64` and `arm64` natively, on a
+  runner of each architecture, and attaches them to the release with the
+  OpenAPI spec (JSON and YAML);
+- writes one `SHA256SUMS` for everything attached (both binaries and the spec);
+- packages those same binaries into the Docker image and pushes it to
+  `ghcr.io/lmxrd/potoo` as one multi-arch image, tagged `1.2.3`, `1.2` and
+  `latest`.
 
 Dependencies update themselves: Dependabot opens weekly pull requests (and
 one at once for a security advisory), and the minor, patch and security
@@ -184,10 +221,21 @@ a person.
 release PR needs "Allow GitHub Actions to create and approve pull
 requests" turned on in the repository's Actions settings.
 
-## Submitting
+### Building a release binary yourself
 
-Small commits, one logical change each, with a conventional message (see
-Releasing). The backend and the
-frontend are separately checkable (`mise run check:backend`,
-`mise run check:frontend`) — a change that only touches one should not
-leave the other dirty.
+`mise run build:linux` produces a static `musl` binary for your machine's CPU
+architecture, with the frontend built in. zig is the C toolchain (through
+cargo zigbuild), so the same command works on Linux and on a Mac, where it
+produces a Linux binary. It builds with your own cargo cache and target
+directory and copies the result to `dist/potoo-linux-<arch>`. `ARCH=amd64`
+(or `arm64`) builds for the other architecture, and `PROFILE` and `FEATURES`
+pick a cargo profile and features (a profile other than release adds a
+`-<profile>` suffix):
+
+```bash
+PROFILE=dev scripts/build-linux.sh
+podman build --build-arg BINARY=dist/potoo-linux-arm64-dev -t potoo:dev .
+```
+
+`mise run build:docker` packages the binary into the image: the Dockerfile is
+Alpine plus a `COPY` of it, and nothing compiles inside.

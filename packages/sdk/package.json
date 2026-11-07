@@ -7,14 +7,16 @@
     ".": "./src/index.ts",
     "./client": "./src/client.gen.ts",
     "./react-query": "./src/@tanstack/react-query.gen.ts",
+    "./sdk": "./src/sdk.gen.ts",
     "./types": "./src/types.gen.ts",
-    "./zod": "./src/zod.gen.ts"
+    "./zod": "./src/zod.gen.ts",
+    "./spec": "./src/source.json"
   },
   "scripts": {
     "openapi-ts": "openapi-ts"
   },
   "devDependencies": {
-    "@hey-api/openapi-ts": "^0.99.0"
+    "@hey-api/openapi-ts": "0.99.0"
   },
   "peerDependencies": {
     "@tanstack/react-query": "^5.105.1",

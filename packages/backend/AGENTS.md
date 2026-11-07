@@ -1,4 +1,4 @@
-# Potoo backend — notes for coding agents
+# AGENTS.md
 
 The Rust backend (`packages/backend`): axum, SQLite through sqlx, the
 OpenAPI spec (utoipa), and the frontend embedded (rust-embed). Read the
@@ -10,17 +10,53 @@ what the backend's code must keep.
 Run them through mise from the repository root (`mise run check`,
 `mise run test:backend`, `mise run gen:spec`, `mise run seed`), or with
 cargo here once `packages/frontend/dist` exists (`mise run build:frontend`):
-`cargo test`, `cargo clippy --all-targets -- -D warnings`.
+`cargo test --workspace`, `cargo clippy --workspace --all-targets --all-features -- -D warnings`.
 
-## Architecture you must not break
+## Structure
 
-**The hit path** (`POST /api/collect`, `GET /api/pixel`, in
-`routes/collect.rs`): validate → site lookup (in-memory cache) → Do-Not-Track
-check → bot check (user agent) → country (local GeoIP) → visitor hash
-(cached daily salt) → queue the hit in `ingest.rs` → `204` (the pixel
-answers with the GIF). One writer task commits the queue in batches (group
-commit; it never waits for a batch to fill). The request is answered
-before the hit is on disk.
+- A Cargo workspace of two crates (shared dependency versions live in the root `Cargo.toml`'s
+  `[workspace.dependencies]`; a crate uses `dep.workspace = true` and adds only its own features):
+  - `potoo` (the root, `src/main.rs`, `src/frontend.rs`): the server binary, with the embedded frontend bundle
+    and swagger-ui.
+  - `api` (`api/`): the library with everything else (routes, database, jobs, ...), plus the `specs` and `seed`
+    binaries (not part of the release build), `examples/loadtest.rs` (the load generator), `migrations/` (the
+    schema) and `tests/it/` (the integration tests: one binary, `main.rs` lists the modules). Other `src/...`
+    paths in this file are inside `api/` unless said otherwise. CONTRIBUTING.md maps every file.
+- **rust-embed** needs `packages/frontend/dist` to exist to compile, even in
+  debug (the mise tasks that compile the backend build the frontend first). Do
+  not run raw `cargo` commands on a fresh checkout without `mise run
+  build:frontend`.
+
+## Conventions
+
+- **Simple.** No ORM, no abstraction layers. Comment the *why*, not the
+  what.
+- **Dependencies.** Prefer a well-known, maintained crate over writing the
+  same thing ourselves. Propose it first (name, exact version, why) and get
+  approval before adding it. Write it ourselves only when no maintained one
+  fits, and say why in a comment where it lives (for example the session
+  store: the community SQL store needs sqlx 0.8, and two bundled SQLites do
+  not link).
+- **Errors.** Handlers return `ApiError` (`src/error.rs`, thiserror):
+  `ApiError::new(status, message)` and its helpers (`bad_request`,
+  `unauthorized`, `forbidden`, `not_found`, `conflict`, ...) for what the
+  client may read, in sentence case; a database error (`?` on sqlx) or
+  `ApiError::internal(...)` is logged with its causes and answered with a
+  plain 500 "Internal server error", never its text. The binaries (main, the
+  seed, the spec writer, `potoo healthcheck`) use anyhow with
+  `.context(...)`.
+- **Endpoints.** Static files at the root (`/tracker.js`); everything that
+  writes or processes lives under `/api/`. What only an admin manages (the
+  users, and single sign-on, the one setting of the whole instance so far)
+  is under `/api/admin/`; the instance's settings are tagged `Admin`.
+- **One range spec.** Time-filtered endpoints take `from`/`to` (ISO 8601
+  timestamps), plus `sites` and `q`; reuse `parse_range` /
+  `range_and_filter`, do not invent a new syntax.
+- **Duplicated lists.** The date and time format lists are in
+  `packages/backend/api/src/auth.rs` (validation) and `packages/frontend/src/lib/dates.ts`
+  (labels): change both together. So are the single sign-on error codes:
+  `Failure` in `packages/backend/api/src/oidc.rs` and `SSO_ERRORS` in
+  `packages/frontend/src/routes/login.tsx`.
 
 **The database** (`db.rs`, sqlx, SQLite only):
 
@@ -40,7 +76,7 @@ before the hit is on disk.
   filters, export) is wrapped in `sqlx::AssertSqlSafe` and is built only
   from fixed fragments and `?` placeholders; every value is bound. Keep it
   that way.
-- Schema changes are **new numbered files** in `packages/backend/migrations/`.
+- Schema changes are **new numbered files** in `packages/backend/api/migrations/`.
   Never edit one that has shipped (its checksum is recorded).
 - The site lookup and the daily salt are cached in `Database`. After any
   change to a site, call `db.forget_sites()`.
@@ -57,11 +93,100 @@ before the hit is on disk.
   table, never addressed by id). Where ids go into dynamic SQL as text
   params (stats, export), they are bound as hex: `unhex(?)`.
 - Dates and times are jiff (`jiff::Timestamp`), stored as
-  `YYYY-MM-DDTHH:MM:SS.mmmZ` text (`format!("{t:.3}")`, `auth::iso`). chrono
+  `YYYY-MM-DDTHH:MM:SS.mmmZ` text (`format!("{t:.3}")`, `time::iso`). chrono
   is only in the tests, for openidconnect's ID token claims.
 - `users.password_hash` is NULL for a user who has no password (single
   sign-on only): anything that reads it must treat NULL as "no password",
   never as a hash.
+
+**Tests run on an in-memory database**, where the reader and the writer
+pools are one and the same single connection. Two consequences: a write
+made through `db.reader()` (read-only on a real file) passes the tests but
+fails in production; and a read on `db.reader()` while a writer
+transaction is open works in production but deadlocks in the tests. The
+test in `db.rs` `readers_see_the_writes_and_do_not_block_the_writer` uses a
+real file; add one when you change how the pools are used.
+
+**The API is described by OpenAPI, and the frontend client is generated from
+it** (nothing generated is committed; the server serves the spec only with
+`SWAGGER_UI=true`, at `/swagger-ui`):
+
+- Every handler has a `#[utoipa::path]` (path, method, tag, request body,
+  every response including the errors, `security`) and a doc comment: its
+  first line is the operation's summary, the rest its description. The
+  operation id is the handler's name (`admin_list_users`), so handler names
+  are unique across the API and the SDK calls them in camelCase
+  (`adminListUsersOptions`). It
+  is registered with `.routes(routes!(handler))` on the `OpenApiRouter` of
+  its module's `router()` (utoipa-axum): the router is the one and only
+  list, so a routed endpoint is documented and a documented one is routed
+  (`every_documented_operation_is_routed` in `tests/it/api.rs` checks it).
+  The path in the annotation is the
+  route, relative to where the router is nested (`/api`, so `/sites`, not
+  `/api/sites`; handlers with the same path go in one `routes!(a, b)`).
+  Request and response bodies are named structs with `ToSchema` (never
+  `json!` or a struct declared inside a handler); query parameters are
+  `IntoParams`. The non-JSON endpoints (`/tracker.js`, `/api/pixel`,
+  `/api/export`, `/api/import`) are documented too. `openapi.rs` only holds
+  the title, the tags and the cookie scheme.
+- Request bodies are JSON only: handlers take `ApiJson<T>` (`src/extract.rs`),
+  which requires `Content-Type: application/json` (a 415 otherwise), answers
+  an unreadable body with a 400 `Invalid request body`, and uses the API's
+  `{"error": "..."}` shape. Never `body: String` plus manual parsing. The one
+  exception is `/api/collect`, which also takes `text/plain` (that is what
+  `sendBeacon` sends) and answers 204 to anything; `/api/auth/login` takes
+  `Result<ApiJson<_>, ApiError>` so that an unreadable body fails like a
+  wrong password. The other exception is `/api/import` (`routes/import.rs`),
+  which takes a multipart `file` part or a `text/csv` / `text/plain` body (up
+  to 256 MB), reads it whole, checks every row, then inserts in one
+  transaction: all or nothing. The export has a `visitor` column and the import
+  takes it as an optional one; `hits.visitor` is NULL for a hit without one.
+  The JSON endpoints document a 415 in their annotations.
+- `GET /api/health` (`routes/health.rs`) answers `{"status", "db"}` after a
+  database round-trip, and 503 when the database is unreachable; `potoo
+  healthcheck` (the image's health check) asks it.
+- **Facet values are lowercase in the database**: `country` (ISO alpha-2),
+  `device`, `browser`, `os`, and the referrer's hostname. A path and a click
+  label are as the site wrote them. The frontend owns the display names
+  (`packages/frontend/src/lib/labels.ts`); filters on the lowercase facets are not
+  case sensitive. A value the parsers do not know is **stored as it is**
+  (the name it announces), never as a generic `other`, and is logged once
+  (`no known name for this value`) so that a migration can name it later; add
+  its label to `labels.ts` too (an unlabeled value shows as it is, with a
+  console warning). `other` is only for a client that announced nothing.
+  A new known family means: the parser, `labels.ts`, and a migration that
+  renames what was stored under the old name.
+- Flags are booleans in both requests and responses (`is_admin`,
+  `honor_dnt`), never 0/1.
+- The spec is written by the `specs` binary of the `api` crate
+  (`routes::api_doc`, built with no state), which compiles without
+  `packages/frontend/dist`: only the server binary embeds the frontend.
+- The SDK, `packages/sdk` (the `potoo-sdk` workspace package), is generated
+  by hey-api (`packages/sdk/openapi-ts.config.ts`: fetch client, TanStack
+  Query, zod, with request/response validation) into `packages/sdk/src`,
+  which is gitignored: never edit or commit it. The order is always spec →
+  SDK → frontend build → backend build with the frontend embedded (the mise
+  tasks keep it). The package scripts `build`, `check` and `dev` do not
+  regenerate it: use the mise tasks (`mise run gen:sdk`).
+- Frontend code calls the API through the generated query options and
+  mutations (`potoo-sdk/react-query`) with TanStack Query,
+  and shows errors inline with `errorMessage` from `lib/api.ts`, or as a
+  toast (see `packages/frontend/AGENTS.md`). The one
+  exception is the single sign-on button on the login page: a plain link to
+  `/api/auth/oidc/login`, because the browser must go to the provider.
+- `.pnpmfile.cjs` (at the root) gives hey-api its own TypeScript 6: the project
+  type-checks with TypeScript 7, which has no compiler API for the generator
+  to use.
+
+## Conventions by feature
+
+**The hit path** (`POST /api/collect`, `GET /api/pixel`, in
+`routes/collect.rs`): validate → site lookup (in-memory cache) → Do-Not-Track
+check → bot check (user agent) → country (local GeoIP) → visitor hash
+(cached daily salt) → queue the hit in `ingest.rs` → `204` (the pixel
+answers with the GIF). One writer task commits the queue in batches (group
+commit; it never waits for a batch to fill). The request is answered
+before the hit is on disk.
 
 **Single sign-on** (`oidc.rs`, `routes/oidc.rs`): OpenID Connect through
 the `openidconnect` crate, without its default features (it would bring a
@@ -81,20 +206,21 @@ this machine), and its answers at most 1 MB. A save of the settings runs as
 its own task holding `oidc.lock_saves()` from reading the row to putting it
 in effect, so a dropped request cannot store it without applying it; a new
 issuer drops the stored secret unless one is sent with it. Nobody is signed
-in through the provider before the first admin exists (`/setup`). A
+in through the provider before the first admin exists (`/setup`, which
+calls `POST /api/auth/bootstrap`). A
 provider account is linked to a user in `user_identities` (issuer +
 subject); an unlinked one is matched only by an email the provider says is
 verified, and not to a user linked to another account at that provider.
 `OIDC_ONLY` (`oidc.passwords_allowed()`) refuses every password path with
-403 (`HttpError::passwords_off`: login, its second step, setting or resetting
-a password, a user created with one) but `/setup`; the session's
-`password_login` tells the frontend. The callback URL is `OIDC_REDIRECT_URL`, else under `PUBLIC_URL`, else plain http on the request's host; forwarded headers never count. The
+403 (`ApiError::passwords_off`: login, its second step, setting or resetting
+a password, a user created with one) but the bootstrap; `password_login` in
+`GET /api/auth/status` tells the frontend. The callback URL is `OIDC_REDIRECT_URL`, else under `PUBLIC_URL`, else plain http on the request's host; forwarded headers never count. The
 callback never redirects anywhere but `/`, `/login?step=<step>` and
 `/login?error=<code>`, and
 always clears the login cookie (even one it did not sign), with the
 attributes it was set with: a browser ignores a `__Host-` removal without
-`Secure`. The tests in `tests/api.rs` run a stand-in provider
-that signs real ID tokens with the keys in `tests/fixtures/` (test only).
+`Secure`. The tests in `tests/it/oidc.rs` run a stand-in provider (`tests/it/common/`)
+that signs real ID tokens with the keys in `tests/it/fixtures/` (test only).
 
 **Two-factor authentication** (`totp.rs` on top of `totp-rs`,
 `routes/totp.rs`): `users.totp_secret` (base32, NULL = off),
@@ -111,25 +237,28 @@ to `/login?step=totp`; `/login/totp` finishes it. With `TOTP_REQUIRED`
 `/totp/disable` is refused. `next_step` decides, for both paths.
 
 **Limits** (`limits.rs`, governor): every attempt counts, right or wrong,
-and over the quota is a 429 with `Retry-After` (`HttpError::TooManyRequests`),
-never a lockout. `state.limits.sign_in(ip, email)` for a password sign-in
-(5 per email, 30 per address), `state.limits.user(id, ip)` for a code or a
-current password (5 per user). Any new endpoint that checks a secret goes
-through one of them. The tests get large quotas (`Options`), but for
-`attempts_are_limited_per_email_address_and_user`; the quotas are
-woodmouse's too: change both.
+and over the quota is a 429 with `Retry-After` (`ApiError::TooManyRequests`),
+never a lockout. `state.limits.email(email)` (5 per email) and
+`state.limits.address(ip)` (30 per address) for a password sign-in (the
+address also for the code step and setup at sign-in), and
+`state.limits.user(UserAction::Code | Password, id)` for a code or a
+password change (5 per user, each its own budget). Any new endpoint that
+checks a secret goes through them. The tests get large quotas
+(`Limits::generous()`), but for `tests/it/limits.rs`; the quotas are
+woodmouse's too: change both. `jobs.rs` calls `retain_recent()` so idle keys
+are forgotten.
 
-**Sessions** (`session.rs`): tower-sessions keeps them and axum-login
+**Sessions** (`sessions.rs`): tower-sessions keeps them and axum-login
 signs users in and out (`AuthSession`). The store is ours (the community's
 sqlx store needs sqlx 0.8): the `sessions` table, keyed by the SHA-256 of
 the session id, never the id; it writes only when a session changes
-(sign-in, sign-out), and expired rows are deleted hourly by `main`. Every
-sign-in ends in `session::sign_in` (a new session id, 30 days); never
+(sign-in, sign-out), and expired rows are deleted hourly by `jobs.rs`. Every
+sign-in ends in `sessions::sign_in` (a new session id, 30 days); never
 create a session another way. axum-login loads the user on each request
 (`Backend::get_user`, so a deleted user is signed out at once) and checks
 the session against the user's `auth_hash` (the password hash and the TOTP
 secret): changing either signs the other sessions out, so after the user
-changes their own, call `session::refresh` to keep the current one. The
+changes their own, call `sessions::refresh` to keep the current one. The
 cookie is `potoo_session`, `SameSite=Strict` (`__Host-potoo_session`,
 `Secure` when `PUBLIC_URL` is https: `state.secure_cookies`, which decides
 for every cookie). The 2FA challenge and the single sign-on login cookies
@@ -146,106 +275,11 @@ cross-origin writes (none should) goes in `allowed`, with the reason.
 
 **API keys** (`routes/api_keys.rs`, `key_user` in `auth.rs`): `api_keys`
 holds the SHA-256 of `potoo_<64 hex>` and its scope (`read`/`write`/
-`admin`). `AuthUser(user, Access)` takes the session cookie or
-`Authorization: Bearer`; a read key gets 403 on anything but GET/HEAD there,
-and `require_admin` wants a session or an admin key (and an admin user).
-Account endpoints (email, settings, password, TOTP, API keys) take
-`SessionUser`, which refuses keys: use it for any new endpoint about the
-account itself. A handler that takes `AuthUser` lists `("api_key" = [])` in
-its `security`. `last_used_at` is written at most once a minute.
-
-**Tests run on an in-memory database**, where the reader and the writer
-pools are one and the same single connection. Two consequences: a write
-made through `db.reader()` (read-only on a real file) passes the tests but
-fails in production; and a read on `db.reader()` while a writer
-transaction is open works in production but deadlocks in the tests. The
-test in `db.rs` `readers_see_the_writes_and_do_not_block_the_writer` uses a
-real file; add one when you change how the pools are used.
-
-**The API is described by OpenAPI, and the frontend client is generated from
-it** (nothing is committed or served):
-
-- Every handler has a `#[utoipa::path]` (path, method, `operation_id`,
-  tag, request body, every response including the errors, `security`) and
-  is registered with `.routes(routes!(handler))` on the `OpenApiRouter` of
-  its module's `router()` (utoipa-axum): the router is the one and only
-  list, so a routed endpoint is documented and a documented one is routed
-  (a test in `tests/api.rs` checks it). The path in the annotation is the
-  route, relative to where the router is nested (`/api`, so `/sites`, not
-  `/api/sites`; handlers with the same path go in one `routes!(a, b)`).
-  Request and response bodies are named structs with `ToSchema` (never
-  `json!` or a struct declared inside a handler); query parameters are
-  `IntoParams`. The non-JSON endpoints (`/tracker.js`, `/api/pixel`,
-  `/api/export`, `/api/import`, `/api/health`) are documented too. `openapi.rs` only holds
-  the title, the tags and the cookie scheme.
-- Request bodies are JSON only: handlers take `ApiJson<T>` (`src/extract.rs`),
-  which requires `Content-Type: application/json` (a 415 otherwise), answers
-  an unreadable body with a 400 `Invalid request body`, and uses the API's
-  `{"error": "..."}` shape. Never `body: String` plus manual parsing. The one
-  exception is `/api/collect`, which also takes `text/plain` (that is what
-  `sendBeacon` sends) and answers 204 to anything; `/api/auth/login` takes
-  `Result<ApiJson<_>, HttpError>` so that an unreadable body fails like a
-  wrong password. The other exception is `/api/import` (`routes/import.rs`),
-  which takes a multipart `file` part or a `text/csv` / `text/plain` body (up
-  to 256 MB), reads it whole, checks every row, then inserts in one
-  transaction: all or nothing. The export has a `visitor` column and the import
-  takes it as an optional one; `hits.visitor` is NULL for a hit without one.
-  The JSON endpoints document a 415 in their annotations.
-- **Facet values are lowercase in the database**: `country` (ISO alpha-2),
-  `device`, `browser`, `os`, and the referrer's hostname. A path and a click
-  label are as the site wrote them. The frontend owns the display names
-  (`packages/frontend/src/lib/labels.ts`); filters on the lowercase facets are not
-  case sensitive. A value the parsers do not know is **stored as it is**
-  (the name it announces), never as a generic `other`, and is logged once
-  (`no known name for this value`) so that a migration can name it later; add
-  its label to `labels.ts` too (an unlabeled value shows as it is, with a
-  console warning). `other` is only for a client that announced nothing.
-  A new known family means: the parser, `labels.ts`, and a migration that
-  renames what was stored under the old name.
-- Flags are booleans in both requests and responses (`is_admin`,
-  `honor_dnt`), never 0/1.
-- The spec is written by the `openapi` binary, built with `--features spec`,
-  which is the only build allowed to compile without `packages/frontend/dist`
-  (`allow_missing`). Never ship a `spec` build.
-- The SDK, `packages/sdk` (the `potoo-sdk` workspace package), is generated
-  by hey-api (`packages/sdk/openapi-ts.config.ts`: fetch client, TanStack
-  Query, zod, with request/response validation) into `packages/sdk/src`,
-  which is gitignored: never edit or commit it. The order is always spec →
-  SDK → frontend build → backend build with the frontend embedded (the mise
-  tasks keep it). The package scripts `build`, `check` and `dev` do not
-  regenerate it: use the mise tasks (`mise run gen:sdk`).
-- Frontend code calls the API through the generated query options and
-  mutations (`potoo-sdk/react-query`) with TanStack Query,
-  and shows errors with `errorMessage` from `lib/api.ts`. The one
-  exception is the single sign-on button on the login page: a plain link to
-  `/api/auth/oidc/login`, because the browser must go to the provider.
-- `.pnpmfile.cjs` (at the root) gives hey-api its own TypeScript 6: the project
-  type-checks with TypeScript 7, which has no compiler API for the generator
-  to use.
-
-**rust-embed** needs `packages/frontend/dist` to exist to compile, even in debug
-(the mise tasks that compile the backend build the frontend first). Do not
-run raw `cargo` commands on a fresh checkout without `mise run
-build:frontend`.
-
-## Conventions
-
-- **Simple.** No ORM, no abstraction layers. Comment the *why*, not the
-  what.
-- **Errors.** Handlers return `HttpError` (`src/error.rs`, thiserror):
-  `HttpError::new(status, message)` and its helpers for what the client
-  may read; a database error (`?` on sqlx) or `HttpError::internal(...)` is
-  logged with its causes and answered with a plain 500, never its text. The
-  binaries (main, the seed, the spec writer, `potoo healthcheck`) use
-  anyhow with `.context(...)`.
-- **Endpoints.** Static files at the root (`/tracker.js`); everything that
-  writes or processes lives under `/api/`. Settings of the whole instance
-  (single sign-on so far) are under `/api/admin/`, tagged `Admin`.
-- **One range spec.** Time-filtered endpoints take `range` (ISO 8601
-  duration) or `from`/`to`, plus `sites` and `q`; reuse `parse_range` /
-  `range_and_filter`, do not invent a new syntax.
-- **Duplicated lists.** The date and time format lists are in
-  `packages/backend/src/auth.rs` (validation) and `packages/frontend/src/lib/dates.ts`
-  (labels): change both together. So are the single sign-on error codes:
-  `Failure` in `packages/backend/src/oidc.rs` and `SSO_ERRORS` in
-  `packages/frontend/src/routes/login.tsx`.
+`admin`). `CurrentUser` (the user, and the key when there is one) takes the
+session cookie or `Authorization: Bearer`; a read key gets 403 on anything
+but GET/HEAD there, and `require_admin` wants a session or an admin key (and
+an admin user). Account endpoints (email, settings, password, TOTP, API
+keys) take `SessionOnlyUser`, which refuses keys: use it for any new
+endpoint about the account itself. A handler that takes `CurrentUser` lists
+`("api_key" = [])` in its `security`. `last_used_at` is written at most once
+a minute.

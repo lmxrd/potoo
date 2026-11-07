@@ -6,22 +6,18 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "vitest run",
-    "typecheck": "tsc --noEmit",
     "preview": "vite preview",
-    "lint": "oxlint",
-    "fmt": "oxfmt",
-    "fmt:check": "oxfmt --check",
-    "fix": "oxfmt && oxlint --fix",
-    "check": "oxfmt --check && oxlint && tsc --noEmit"
+    "test": "vitest run",
+    "typecheck": "tsc -b",
+    "check": "tsc -b && oxlint . && oxfmt --check .",
+    "fix": "oxlint --fix . && oxfmt ."
   },
   "dependencies": {
-    "@base-ui/react": "^1.9.0",
+    "@base-ui/react": "1.9.0",
     "@rsql/ast": "^1.6.0",
     "@rsql/builder": "^1.6.0",
     "@rsql/emitter": "^1.6.0",
     "@rsql/parser": "^1.6.0",
-    "@tailwindcss/vite": "^4.3.3",
     "@tanstack/react-query": "^5.105.1",
     "@tanstack/react-router": "^1.170.46",
     "@visx/axis": "^4.0.0",
@@ -37,19 +33,23 @@
     "qrcode.react": "^4.2.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "sonner": "^2.0.8",
     "tailwind-merge": "^3.7.0",
-    "tailwindcss": "^4.3.3",
     "tw-animate-css": "^1.4.0",
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@hey-api/vite-plugin": "0.3.2",
+    "@tailwindcss/vite": "^4.3.3",
     "@tanstack/router-plugin": "^1.168.48",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "oxfmt": "^0.75.0",
     "oxlint": "^1.90.0",
-    "typescript": "^7.0.2",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~7.0.2",
     "vite": "^8.3.5",
     "vitest": "^5.1.0"
   }

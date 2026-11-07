@@ -4,10 +4,10 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { createSiteMutation, listSitesOptions, listSitesQueryKey } from "potoo-sdk/react-query";
 import { Button } from "../components/ui/button";
 import { Card, CardContent } from "../components/ui/card";
-import { ErrorText } from "../components/error-text";
+import { ErrorText } from "../components/common/error-text";
 import { Input } from "../components/ui/input";
 import { errorMessage } from "../lib/api";
-import { formatDate } from "../lib/dates";
+import { useFormatters } from "../lib/use-formatters";
 import {
   Table,
   TableBody,
@@ -22,9 +22,10 @@ export const Route = createFileRoute("/sites")({ component: SitesPage });
 function SitesPage() {
   const { session } = Route.useRouteContext();
   const isAdmin = session.user?.is_admin;
+  const { date } = useFormatters();
   const { data: sites, error } = useQuery(listSitesOptions());
   const queryClient = useQueryClient();
-  const createSite = useMutation(createSiteMutation());
+  const createSite = useMutation({ ...createSiteMutation(), meta: { inline: true } });
   const navigate = useNavigate();
   const [hostname, setHostname] = useState("");
   const [formError, setFormError] = useState<string>();
@@ -88,9 +89,7 @@ function SitesPage() {
                   }
                 >
                   <TableCell className="font-medium">{s.hostname}</TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {formatDate(s.created_at, session.user?.date_format ?? "YYYY-MM-DD")}
-                  </TableCell>
+                  <TableCell className="text-muted-foreground">{date(s.created_at)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

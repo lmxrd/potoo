@@ -1,6 +1,8 @@
-# The JavaScript packages: the frontend, the SDK it imports (generated from
-# the backend's OpenAPI spec, `mise run gen:sdk`), and the end-to-end tests. One install and one
-# lockfile at this root.
+# The JavaScript packages: the frontend, the SDK generated from the
+# backend's OpenAPI spec (`mise run gen:sdk`) that the frontend imports, and
+# the Playwright smoke tests (`mise run test:e2e`).
+# One install and one lockfile at this root, so both resolve a single copy of
+# react-query and zod.
 packages:
   - packages/frontend
   - packages/sdk
@@ -13,8 +15,8 @@ packages:
 # security fix back by a day at most.
 minimumReleaseAge: 1440
 
-# @hey-api/json-schema-ref-parser (of the API client generator, a dev tool)
-# pins js-yaml to exactly 4.2.0, which has known vulnerabilities
+# @hey-api/json-schema-ref-parser (of the SDK generator, a dev tool) pins
+# js-yaml to exactly 4.2.0, which has known vulnerabilities
 # (GHSA-2883-xcg3-v3hh, GHSA-52cp-r559-cp3m, GHSA-5p4m-2wfm-xmqj). The fix
 # is a minor version later. Remove this once the parser allows it.
 overrides:

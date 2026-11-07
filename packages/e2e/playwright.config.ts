@@ -1,16 +1,17 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// The end-to-end smoke tests: a real browser against the built image (see
-// scripts/e2e.sh, which starts it). One flow, in order, on one database:
-// no parallel workers.
+// The smoke tests run against a server that is already up: `mise run test:e2e` builds the image, starts it
+// with a fresh database file in a volume and sets E2E_BASE_URL. The flows build on each other (the first
+// creates the admin), so they run in order, in one worker.
 export default defineConfig({
-  testDir: "tests",
+  testDir: "./tests",
   fullyParallel: false,
   workers: 1,
-  retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [["list"], ["github"]] : "list",
+  forbidOnly: !!process.env.CI,
+  retries: 0,
+  reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : "list",
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? "http://127.0.0.1:8090",
+    baseURL: process.env.E2E_BASE_URL ?? "http://localhost:8180",
     trace: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],

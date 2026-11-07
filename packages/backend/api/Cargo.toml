@@ -1,0 +1,61 @@
+[package]
+name = "api"
+version.workspace = true
+rust-version.workspace = true
+edition.workspace = true
+publish = false
+
+[dependencies]
+anyhow.workspace = true
+argon2 = "0.6.0"
+async-trait = "0.1.92"
+axum = { workspace = true, features = ["multipart"] }
+axum-extra.workspace = true
+axum-login = "0.18.0"
+csv = "1.4.0"
+flate2 = "1.1.10"
+governor = "0.10.4"
+hex = "0.4.3"
+jiff = "0.2.39"
+maxminddb = "0.32.0"
+# Single sign-on (src/oidc.rs). Without its default features: it would bring
+# reqwest 0.12; our own reqwest is handed to it instead.
+openidconnect = { version = "4.1.0", default-features = false }
+rand = "0.10.3"
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+# SQLite only (bundled, so the static musl build needs no system library); no
+# TLS or other drivers. Queries are checked at run time: `sqlx::query`, never
+# the `query!` macros, which need a database at compile time.
+sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros", "uuid"] }
+# The API's typed error (src/error.rs).
+thiserror = "2.0.21"
+time = { version = "0.3.55", default-features = false }
+tokio.workspace = true
+# Two-factor authentication (src/totp.rs). `otpauth` for the URI the apps scan.
+totp-rs = { version = "6.0.0", features = ["otpauth"] }
+tower-http = { workspace = true, features = ["cors"] }
+tower-sessions = { version = "0.14.0", default-features = false, features = ["axum-core"] }
+tracing.workspace = true
+# The OpenAPI spec (see src/openapi.rs): derives on the request and response
+# types and a path annotation on every handler; the spec is written to files
+# by the `specs` binary, and served at /swagger-ui only with SWAGGER_UI.
+utoipa = { version = "6.0.0", features = ["uuid", "yaml"] }
+utoipa-axum = "0.3.0"
+uuid = { version = "1.29.0", features = ["v7", "serde"] }
+
+[dev-dependencies]
+axum-test = "21.1.0"
+# The tests' stand-in single sign-on provider: openidconnect's ID token
+# claims take chrono times. The app itself uses jiff.
+chrono = "0.4.45"
+
+[lints]
+workspace = true
+
+[features]
+# The per-phase timers of the hit path (src/profile.rs); see the server's profiling feature.
+profiling = []

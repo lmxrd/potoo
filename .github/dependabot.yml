@@ -4,19 +4,19 @@
 # requests are squash merged with their title and release-please reads it:
 #
 # - What ships in the binary or the image (the backend's crates, the
-#   frontend's dependencies, the base image) is `fix(deps)`: merging it
-#   makes release-please open a patch release, so a security fix reaches
-#   users. The frontend's devDependencies (Vite, oxlint, ...) only build it:
-#   `chore(deps-dev)`, no release. Cargo has no such prefix, so a crate's
-#   dev-dependency counts as shipped.
+#   frontend's and SDK's dependencies, the base image) is `fix(deps)`:
+#   merging it makes release-please open a patch release, so a security fix
+#   reaches users. devDependencies (Vite, oxlint, Vitest, ...) only build
+#   it: `chore(deps-dev)`, no release. Cargo has no such prefix, so a
+#   crate's dev-dependency counts as shipped.
 # - Minor and patch updates (and security ones) merge on their own once CI
 #   passes (dependabot-auto-merge.yml); majors wait for a person, in a pull
 #   request of their own so that the safe updates never wait for them.
 # - A routine update waits 5 days after its release (cooldown): most
 #   hijacked releases are found and pulled within that time. Security
 #   updates do not wait. pnpm's own minimum release age (1 day, in
-#   pnpm-workspace.yaml) is shorter, so it never blocks an update
-#   Dependabot proposes; it holds an npm security fix back by a day at most.
+#   pnpm-workspace.yaml) is shorter, so it never blocks an update Dependabot
+#   proposes; it holds an npm security fix back by a day at most.
 version: 2
 
 updates:
@@ -37,8 +37,7 @@ updates:
       cargo-major:
         update-types: [major]
 
-  # The frontend (pnpm: Dependabot reads pnpm-lock.yaml through this
-  # ecosystem). It is embedded in the binary, so it ships.
+  # The JavaScript workspace (frontend and SDK): one pnpm-lock.yaml at the root.
   - package-ecosystem: npm
     directory: /
     schedule:
@@ -71,8 +70,9 @@ updates:
         patterns: ["*"]
 
   # The base image of the Dockerfile, pinned to an exact Alpine release
-  # (alpine:3.x.y). The binary is built outside it (with the toolchains of
-  # mise.toml, which Dependabot does not read).
+  # (alpine:3.x.y). The image builds nothing; the toolchains (package.json's
+  # devEngines and packageManager, rust-toolchain.toml) are bumped by a
+  # person (Node's must be an LTS).
   - package-ecosystem: docker
     directory: /
     schedule:

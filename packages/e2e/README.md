@@ -9,7 +9,8 @@ reaches the dashboard. Everything else is tested closer to the code.
 mise run test:e2e
 ```
 
-builds the image, starts it with an empty volume on `127.0.0.1:8090`
-(`E2E_PORT`), runs the tests and removes the container (`scripts/e2e.sh`;
-`CONTAINER=docker` to use Docker instead of podman). CI runs them against
-the image it builds.
+builds the image, starts it with an empty volume on `localhost:8180`
+(`E2E_PORT`), runs the tests and removes the container, printing its log if
+a test failed (`scripts/e2e.sh`; podman when installed, else Docker, or
+`ENGINE=docker`). CI runs them against the image it builds and keeps
+Playwright's HTML report of a failed run.

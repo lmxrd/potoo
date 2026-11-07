@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import {
   type ComparisonNode,
@@ -111,7 +111,10 @@ function comparisons(node: Node): ComparisonNode[] {
 export function useDashboardFilters() {
   const search = useSearch({ strict: false }) as DashboardSearch;
   const navigate = useNavigate();
-  const filters = parseFilter(search.q ?? "") ?? new Map<string, Set<string>>();
+  const filters = useMemo(
+    () => parseFilter(search.q ?? "") ?? new Map<string, Set<string>>(),
+    [search.q],
+  );
   const setFilters = useCallback(
     (next: FacetFilters) => {
       const rsql = buildFilter(next);

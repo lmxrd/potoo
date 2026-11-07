@@ -1,10 +1,10 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { getStatsOptions, listSitesOptions } from "potoo-sdk/react-query";
-import { DateRangeBar } from "../components/date-range-bar";
-import { ErrorText } from "../components/error-text";
-import { SiteSelect } from "../components/site-select";
-import { StatsDashboard } from "../components/stats-dashboard";
+import { statsOptions, listSitesOptions } from "potoo-sdk/react-query";
+import { DateRangeBar } from "../components/stats/date-range-bar";
+import { ErrorText } from "../components/common/error-text";
+import { SiteSelect } from "../components/stats/site-select";
+import { StatsDashboard } from "../components/stats/stats-dashboard";
 import { errorMessage } from "../lib/api";
 import { exportHref, statsQuery } from "../lib/stats-query";
 import { buildFilter, useDashboardFilters } from "../lib/filter";
@@ -16,7 +16,6 @@ export const Route = createFileRoute("/")({
 });
 
 function Overview() {
-  const { session } = Route.useRouteContext();
   const search = Route.useSearch();
   const navigate = useNavigate();
   const { data: sites, error: sitesError } = useQuery(listSitesOptions());
@@ -47,7 +46,7 @@ function Overview() {
   const { data: stats, error: statsError } = useQuery({
     // The query never runs while the range is invalid (`enabled`), so the
     // empty one it is built from is never sent.
-    ...getStatsOptions({ query: params ?? { from: "", to: "" } }),
+    ...statsOptions({ query: params ?? { from: "", to: "" } }),
     enabled: params !== null,
     placeholderData: keepPreviousData,
   });
@@ -62,21 +61,13 @@ function Overview() {
         range={range}
         onRange={setRange}
         stats={stats}
-        dateFormat={session.user?.date_format}
-        use24={session.user?.use_24}
         filters={filters}
         onFilters={setFilters}
         exportUrl={params ? exportHref(params) : undefined}
       />
       <ErrorText>{statsError && errorMessage(statsError)}</ErrorText>
       {stats ? (
-        <StatsDashboard
-          stats={stats}
-          dateFormat={session.user?.date_format}
-          use24={session.user?.use_24}
-          filters={filters}
-          onToggleFilter={toggle}
-        />
+        <StatsDashboard stats={stats} filters={filters} onToggleFilter={toggle} />
       ) : (
         !statsError && <p className="text-muted-foreground">Loading…</p>
       )}
