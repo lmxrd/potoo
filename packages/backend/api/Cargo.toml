@@ -38,7 +38,7 @@ tokio.workspace = true
 # Two-factor authentication (src/totp.rs). `otpauth` for the URI the apps scan.
 totp-rs = { version = "6.0.0", features = ["otpauth"] }
 tower-http = { workspace = true, features = ["cors"] }
-tower-sessions = { version = "0.14.0", default-features = false, features = ["axum-core"] }
+tower-sessions = { version = "0.15.0", default-features = false, features = ["axum-core"] }
 tracing.workspace = true
 # The OpenAPI spec (see src/openapi.rs): derives on the request and response
 # types and a path annotation on every handler; the spec is written to files
