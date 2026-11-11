@@ -69,13 +69,13 @@ The environment variables are in the README's Configuration table.
   that is older. It must stay shorter than Dependabot's cooldown, or it
   would block Dependabot's updates.
 - **Dependency updates and security fixes** (`.github/dependabot.yml`):
-  Dependabot's pull requests are `fix(deps)` for what ships (crates, the
-  frontend's dependencies, the base image), so merging one releases a
-  patch, and `chore(deps-dev)` for the frontend's devDependencies; `ci` for
-  actions. Routine updates wait 5 days after their release (`cooldown`),
-  security updates do not. Minor, patch and security updates merge on
-  their own once CI passes (`dependabot-auto-merge.yml`); majors wait for a
-  person. That merge is made with a workflow token and so starts no
+  every routine update, of every ecosystem, comes in one weekly pull
+  request (a multi-ecosystem group), titled `fix(deps)` (a group has one
+  title), so merging it releases a patch; security updates come in pull
+  requests of their own. Routine updates wait 5 days after their release
+  (`cooldown`), security updates do not. A pull request without a major
+  update merges on its own once CI passes (`dependabot-auto-merge.yml`);
+  one with a major waits for a person. That merge is made with a workflow token and so starts no
   workflow: `release.yml` also runs daily to pick it up. `security.yml`
   runs `mise run audit` and scans the published image every day, CI scans
   the image it builds; a finding to accept goes in `osv-scanner.toml`, with

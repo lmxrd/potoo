@@ -95,7 +95,7 @@ async fn setup_users_sites_collection_stats_and_exports() {
     let site_id = site["id"].as_str().unwrap().to_string();
     // The window of the stats and the exports: twelve hours either side
     // of now, so it covers the hits this test collects.
-    let window = (iso_from_now(-12), iso_from_now(12));
+    let window = window_around_now(12);
 
     // Collection: a pageview and a click; unknown hosts are ignored, and
     // so are query strings on paths.
@@ -454,7 +454,7 @@ async fn bots_and_dnt_are_not_recorded() {
         .await;
     assert_eq!(dnt.status_code(), 204);
 
-    let window = (iso_from_now(-12), iso_from_now(12));
+    let window = window_around_now(12);
     let stats = json(
         request(
             &app,

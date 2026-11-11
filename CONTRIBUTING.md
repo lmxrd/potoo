@@ -209,11 +209,11 @@ changelog. Merging it tags the release (`v1.2.3`), and the release workflow:
   `ghcr.io/lmxrd/potoo` as one multi-arch image, tagged `1.2.3`, `1.2` and
   `latest`.
 
-Dependencies update themselves: Dependabot opens weekly pull requests (and
-one at once for a security advisory), and the minor, patch and security
-ones merge on their own when CI passes; majors wait for review. Those that
-ship are titled `fix(deps)`, so the release PR picks them up as a patch
-release. Bot merges start no workflow, so the release workflow also runs
+Dependencies update themselves: Dependabot opens one pull request a week
+with every update (and one at once for a security advisory), and they merge
+on their own when CI passes, unless one has a major update, which waits for
+review. They are titled `fix(deps)`, so the release PR picks them up as a
+patch release. Bot merges start no workflow, so the release workflow also runs
 once a day to update the release PR. Merging the release PR is still up to
 a person.
 

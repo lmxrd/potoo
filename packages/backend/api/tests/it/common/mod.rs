@@ -90,10 +90,17 @@ pub async fn spawn(options: Options) -> TestApp {
     TestApp { server, base }
 }
 
-/// Now, give or take some hours, as the API takes times.
-pub fn iso_from_now(hours: i64) -> String {
+/// A window of some hours either side of now, as the API takes times.
+/// Both ends come from one reading of the clock: two readings a
+/// millisecond apart would make it a millisecond longer, and the stats'
+/// `days` (the length rounded up) one day more.
+pub fn window_around_now(hours: i64) -> (String, String) {
     use jiff::ToSpan;
-    format!("{:.3}", jiff::Timestamp::now() + hours.hours())
+    let now = jiff::Timestamp::now();
+    (
+        format!("{:.3}", now - hours.hours()),
+        format!("{:.3}", now + hours.hours()),
+    )
 }
 
 /// The session cookie of a response.
