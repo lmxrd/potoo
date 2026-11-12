@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.7.0](https://github.com/lmxrd/potoo/compare/v0.6.0...v0.7.0) (2026-11-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* the API's paths for signing in and managing users are woodmouse's.
+    - GET /api/auth/session is GET /api/auth/status (bootstrap_required, sso,
+      password_login, totp_required) and GET /api/auth/me (the signed-in user, 401
+      when nobody is).
+    - POST /api/auth/setup is POST /api/auth/bootstrap, and answers the new admin.
+    - POST /api/auth/email and POST /api/auth/settings are PATCH /api/auth/me, which
+      answers the updated user.
+    - /api/auth/users... is /api/admin/users... (with /{id}/totp).
+    - GET /api/health answers {"status", "db"}, and 503 when the database is
+      unreachable.
+* **frontend:** the sessions table is replaced, so everyone signs in again once after the upgrade. Behind https, set SECURE_COOKIES=true.
+* the sessions table is replaced, so everyone signs in again once after the upgrade. Behind https, set SECURE_COOKIES=true.
+
+### Features
+
+* automated security updates, vulnerability scans and a healthcheck command ([#21](https://github.com/lmxrd/potoo/issues/21)) ([1e6660d](https://github.com/lmxrd/potoo/commit/1e6660d179bc946026eb784876f3108fdfac73f3))
+* community crates, and potoo aligned with woodmouse ([#25](https://github.com/lmxrd/potoo/issues/25)) ([c114e4b](https://github.com/lmxrd/potoo/commit/c114e4b06cb879c29d08080397b173204dacef53))
+* two-factor authentication, single sign-on only, and API keys ([#20](https://github.com/lmxrd/potoo/issues/20)) ([6bd4c89](https://github.com/lmxrd/potoo/commit/6bd4c89254f275d4f227ee99678d93c8fea9e31f))
+
+
+### Bug Fixes
+
+* **deps:** bump @tanstack/react-query ([#24](https://github.com/lmxrd/potoo/issues/24)) ([9009579](https://github.com/lmxrd/potoo/commit/90095794960cff3d71cd8992a34add79f0a278bd))
+* **deps:** bump flate2 in /packages/backend in the dependencies group ([#33](https://github.com/lmxrd/potoo/issues/33)) ([2c52a66](https://github.com/lmxrd/potoo/commit/2c52a66e7b868455111fed9bf22835c561dba4c1))
+* **deps:** bump the npm-minor-and-patch group with 5 updates ([#31](https://github.com/lmxrd/potoo/issues/31)) ([897c694](https://github.com/lmxrd/potoo/commit/897c694f3dfa8de6cb5f669e7353654a8da9156e))
+* **deps:** every Dependabot version update in one weekly pull request, and two advisories ([#32](https://github.com/lmxrd/potoo/issues/32)) ([8c3614f](https://github.com/lmxrd/potoo/commit/8c3614f9a0fe0bc7139e7c00677d980b86bd8a99))
+
+
+### Code Refactoring
+
+* align the architecture and conventions with woodmouse ([#29](https://github.com/lmxrd/potoo/issues/29)) ([bd28b1b](https://github.com/lmxrd/potoo/commit/bd28b1b24b5b6011c9a4b1a1b93bd150eafbf36f))
+* **frontend:** shadcn on Base UI instead of Radix ([#26](https://github.com/lmxrd/potoo/issues/26)) ([cd69750](https://github.com/lmxrd/potoo/commit/cd69750cecd8c579d2a8f3c83d493ba0d3df6cd2))
+
 ## [0.6.0](https://github.com/lmxrd/potoo/compare/v0.5.0...v0.6.0) (2026-11-03)
 
 
