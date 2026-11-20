@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/lmxrd/potoo/compare/v0.7.0...v0.7.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* **deps:** bump the dependencies group with 7 updates ([#34](https://github.com/lmxrd/potoo/issues/34)) ([7d7af07](https://github.com/lmxrd/potoo/commit/7d7af075a0341b80359b8b90da0a494882595643))
+
 ## [0.7.0](https://github.com/lmxrd/potoo/compare/v0.6.0...v0.7.0) (2026-11-12)
 
 
