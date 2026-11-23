@@ -16,8 +16,8 @@ csv = "1.4.0"
 flate2 = "1.1.10"
 governor = "0.10.4"
 hex = "0.4.3"
-jiff = "0.2.39"
-maxminddb = "0.32.0"
+jiff = "1.0.1"
+maxminddb = "0.33.0"
 # Single sign-on (src/oidc.rs). Without its default features: it would bring
 # reqwest 0.12; our own reqwest is handed to it instead.
 openidconnect = { version = "4.1.0", default-features = false }
